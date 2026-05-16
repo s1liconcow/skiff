@@ -46,12 +46,13 @@ type SagaSummary struct {
 }
 
 type OperationSummary struct {
-	OperationID string                 `json:"operation_id"`
-	Service     string                 `json:"service"`
-	Env         string                 `json:"env,omitempty"`
-	Status      schema.OperationStatus `json:"status"`
-	UpdatedAt   string                 `json:"updated_at,omitempty"`
-	TraceID     string                 `json:"trace_id,omitempty"`
+	OperationID        string                        `json:"operation_id"`
+	Service            string                        `json:"service"`
+	Env                string                        `json:"env,omitempty"`
+	Status             schema.OperationStatus        `json:"status"`
+	UpdatedAt          string                        `json:"updated_at,omitempty"`
+	TraceID            string                        `json:"trace_id,omitempty"`
+	ProviderOperations []schema.ProviderOperationRef `json:"provider_operations,omitempty"`
 }
 
 type ResourceSummary struct {
@@ -151,7 +152,11 @@ func CloneSnapshot(snapshot Snapshot) Snapshot {
 	out := snapshot
 	out.Services = append([]ServiceSummary(nil), snapshot.Services...)
 	out.Sagas = append([]SagaSummary(nil), snapshot.Sagas...)
-	out.Operations = append([]OperationSummary(nil), snapshot.Operations...)
+	out.Operations = make([]OperationSummary, 0, len(snapshot.Operations))
+	for _, operation := range snapshot.Operations {
+		operation.ProviderOperations = append([]schema.ProviderOperationRef(nil), operation.ProviderOperations...)
+		out.Operations = append(out.Operations, operation)
+	}
 	out.Resources = append([]ResourceSummary(nil), snapshot.Resources...)
 	out.Findings = append([]Finding(nil), snapshot.Findings...)
 	out.RecentEvents = make([]schema.Event, 0, len(snapshot.RecentEvents))

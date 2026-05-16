@@ -13,6 +13,7 @@ import (
 
 	"github.com/s1liconcow/skiff/internal/buildinfo"
 	"github.com/s1liconcow/skiff/internal/config"
+	stateindex "github.com/s1liconcow/skiff/internal/index"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/objstore/file"
 	"github.com/s1liconcow/skiff/internal/objstore/memory"
@@ -20,6 +21,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/state/canonical"
 	"github.com/s1liconcow/skiff/internal/state/paths"
 	"github.com/s1liconcow/skiff/internal/state/schema"
+	servicestatus "github.com/s1liconcow/skiff/internal/status"
 )
 
 const (
@@ -53,43 +55,10 @@ type StatusOptions struct {
 	TraceID string
 }
 
-type Status struct {
-	Mode        config.Mode     `json:"mode"`
-	Env         string          `json:"env,omitempty"`
-	Provider    string          `json:"provider,omitempty"`
-	Region      string          `json:"region,omitempty"`
-	StateBucket string          `json:"state_bucket,omitempty"`
-	APIURL      string          `json:"api_url,omitempty"`
-	Services    []ServiceStatus `json:"services"`
-	Freshness   Freshness       `json:"freshness"`
-	Findings    []Finding       `json:"findings,omitempty"`
-	Source      string          `json:"source"`
-}
-
-type ServiceStatus struct {
-	Service        string `json:"service"`
-	Env            string `json:"env,omitempty"`
-	DesiredRelease string `json:"desired_release,omitempty"`
-	StableRelease  string `json:"stable_release,omitempty"`
-	OperationID    string `json:"operation_id,omitempty"`
-	OperationKind  string `json:"operation_kind,omitempty"`
-	OperationState string `json:"operation_state,omitempty"`
-	UpdatedAt      string `json:"updated_at,omitempty"`
-}
-
-type Freshness struct {
-	Source      string    `json:"source"`
-	Ready       bool      `json:"ready"`
-	Generation  int64     `json:"generation"`
-	RefreshedAt time.Time `json:"refreshed_at,omitempty"`
-	Findings    []Finding `json:"findings,omitempty"`
-}
-
-type Finding struct {
-	Code    string `json:"code"`
-	Summary string `json:"summary"`
-	Key     string `json:"key,omitempty"`
-}
+type Status = servicestatus.Result
+type ServiceStatus = servicestatus.Service
+type Freshness = servicestatus.Freshness
+type Finding = servicestatus.Finding
 
 type EventOptions struct {
 	Scope     string `json:"scope,omitempty"`
@@ -242,29 +211,26 @@ func (c *Direct) Version(ctx context.Context, opts VersionOptions) (*Version, er
 }
 
 func (c *Direct) Status(ctx context.Context, opts StatusOptions) (*Status, error) {
-	services, events, findings, err := scanObjectState(ctx, c.store, opts.Service, 0)
+	snapshot, err := stateindex.BuildSnapshot(ctx, c.store, stateindex.BuildOptions{
+		Now:               c.clock().UTC(),
+		Generation:        1,
+		RecentEventsLimit: stateindex.DefaultRecentEventsLimit,
+	})
 	if err != nil {
 		return nil, err
 	}
-	now := c.clock().UTC()
-	freshness := Freshness{
-		Source:      "direct_object_store",
-		Ready:       true,
-		RefreshedAt: now,
-		Findings:    findings,
-	}
-	_ = events
-	return &Status{
+	freshness := servicestatus.FreshnessFromIndex(stateindex.FreshnessFromSnapshot(snapshot, c.clock().UTC(), "direct_object_store"))
+	status := servicestatus.FromSnapshot(snapshot, servicestatus.Options{
 		Mode:        config.ModeDirect,
 		Env:         c.cfg.Env,
 		Provider:    c.cfg.Provider,
 		Region:      c.cfg.Region,
 		StateBucket: redactStateBucket(c.cfg.StateBucket),
-		Services:    services,
 		Freshness:   freshness,
-		Findings:    findings,
 		Source:      "direct",
-	}, nil
+		Service:     opts.Service,
+	})
+	return &status, nil
 }
 
 func (c *Direct) Events(ctx context.Context, opts EventOptions) (*EventList, error) {

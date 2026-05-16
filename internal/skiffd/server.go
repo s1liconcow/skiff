@@ -20,6 +20,7 @@ import (
 	stateindex "github.com/s1liconcow/skiff/internal/index"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/state/schema"
+	servicestatus "github.com/s1liconcow/skiff/internal/status"
 )
 
 const (
@@ -123,6 +124,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/readyz", s.handleReady)
 	mux.HandleFunc("/version", s.handleVersion)
 	mux.HandleFunc("/v1/env", s.handleEnv)
+	mux.HandleFunc("/v1/status", s.handleStatus)
 	mux.HandleFunc("/v1/services", s.handleServices)
 	mux.HandleFunc("/v1/sagas", s.handleSagas)
 	mux.HandleFunc("/v1/events/recent", s.handleRecentEvents)
@@ -322,6 +324,40 @@ func (s *Server) handleEnv(w http.ResponseWriter, r *http.Request) {
 		},
 		"freshness": freshness,
 		"index":     freshness,
+	})
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if _, ok := negotiateFormat(w, r, true); !ok {
+		return
+	}
+	read, err := s.snapshotForRequest(r)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "INDEX_SNAPSHOT_FAILED", err.Error(), nil)
+		return
+	}
+	if !read.snapshot.Ready {
+		writeError(w, r, http.StatusServiceUnavailable, "INDEX_NOT_READY", "index has not completed initial load", nil)
+		return
+	}
+	status := servicestatus.FromSnapshot(read.snapshot, servicestatus.Options{
+		Mode:        config.ModeAPI,
+		Env:         s.cfg.Env,
+		Provider:    s.cfg.Provider,
+		Region:      s.cfg.Region,
+		StateBucket: redactURI(s.cfg.StateBucket),
+		Service:     strings.TrimSpace(r.URL.Query().Get("service")),
+		Source:      "api",
+		Freshness:   servicestatus.FreshnessFromIndex(read.freshness),
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"trace_id":   traceIDFromContext(r.Context()),
+		"request_id": requestIDFromContext(r.Context()),
+		"status":     status,
 	})
 }
 

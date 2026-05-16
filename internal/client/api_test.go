@@ -20,10 +20,8 @@ func TestAPIStatusUsesSkiffdJSONEndpoints(t *testing.T) {
 		}
 		var body string
 		switch req.URL.Path {
-		case "/v1/env":
-			body = `{"ok":true,"env":{"name":"prod","provider":"aws","region":"us-west-2","state_bucket":"s3://skiff-state-prod"},"freshness":{"source":"memory_index","ready":true,"generation":7}}`
-		case "/v1/services":
-			body = `{"ok":true,"freshness":{"source":"memory_index","ready":true,"generation":7},"services":[{"service":"payments-api","env":"prod","desired_release":"rel_03"}]}`
+		case "/v1/status":
+			body = `{"ok":true,"status":{"mode":"api","env":"prod","provider":"aws","region":"us-west-2","state_bucket":"s3://skiff-state-prod","source":"api","freshness":{"source":"memory_index","ready":true,"generation":7},"services":[{"service":"payments-api","env":"prod","desired_release":"rel_03","health":"nominal"}]}}`
 		default:
 			t.Fatalf("unexpected path %s", req.URL.Path)
 		}

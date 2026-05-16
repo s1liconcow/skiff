@@ -56,58 +56,38 @@ func (c *API) Version(ctx context.Context, opts VersionOptions) (*Version, error
 }
 
 func (c *API) Status(ctx context.Context, opts StatusOptions) (*Status, error) {
-	var envBody struct {
-		OK  bool `json:"ok"`
-		Env struct {
-			Name        string `json:"name"`
-			Provider    string `json:"provider"`
-			Region      string `json:"region"`
-			StateBucket string `json:"state_bucket"`
-		} `json:"env"`
-		Freshness Freshness `json:"freshness"`
-	}
 	query := url.Values{}
 	if opts.Fresh {
 		query.Set("fresh", "true")
 	}
-	if err := c.getJSON(ctx, "/v1/env", opts.TraceID, query, &envBody); err != nil {
-		return nil, err
-	}
-
-	var servicesBody struct {
-		OK        bool            `json:"ok"`
-		Freshness Freshness       `json:"freshness"`
-		Services  []ServiceStatus `json:"services"`
-	}
-	if err := c.getJSON(ctx, "/v1/services", opts.TraceID, query, &servicesBody); err != nil {
-		return nil, err
-	}
-	services := servicesBody.Services
 	if opts.Service != "" {
-		filtered := services[:0]
-		for _, service := range services {
-			if service.Service == opts.Service {
-				filtered = append(filtered, service)
-			}
-		}
-		services = filtered
+		query.Set("service", opts.Service)
 	}
-	freshness := servicesBody.Freshness
-	if !freshness.Ready {
-		freshness = envBody.Freshness
+	var body struct {
+		OK     bool   `json:"ok"`
+		Status Status `json:"status"`
 	}
-	return &Status{
-		Mode:        config.ModeAPI,
-		Env:         firstNonEmpty(envBody.Env.Name, c.cfg.Env),
-		Provider:    firstNonEmpty(envBody.Env.Provider, c.cfg.Provider),
-		Region:      firstNonEmpty(envBody.Env.Region, c.cfg.Region),
-		StateBucket: firstNonEmpty(envBody.Env.StateBucket, redactStateBucket(c.cfg.StateBucket)),
-		APIURL:      c.baseURL.String(),
-		Services:    services,
-		Freshness:   freshness,
-		Findings:    freshness.Findings,
-		Source:      "api",
-	}, nil
+	if err := c.getJSON(ctx, "/v1/status", opts.TraceID, query, &body); err != nil {
+		return nil, err
+	}
+	body.Status.Mode = config.ModeAPI
+	body.Status.APIURL = c.baseURL.String()
+	if body.Status.Env == "" {
+		body.Status.Env = c.cfg.Env
+	}
+	if body.Status.Provider == "" {
+		body.Status.Provider = c.cfg.Provider
+	}
+	if body.Status.Region == "" {
+		body.Status.Region = c.cfg.Region
+	}
+	if body.Status.StateBucket == "" {
+		body.Status.StateBucket = redactStateBucket(c.cfg.StateBucket)
+	}
+	if body.Status.Source == "" {
+		body.Status.Source = "api"
+	}
+	return &body.Status, nil
 }
 
 func (c *API) Events(ctx context.Context, opts EventOptions) (*EventList, error) {

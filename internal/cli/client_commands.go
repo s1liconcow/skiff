@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/s1liconcow/skiff/internal/client"
 	"github.com/s1liconcow/skiff/internal/config"
@@ -24,6 +26,12 @@ type clientEventsOutput struct {
 	TraceID string           `json:"trace_id,omitempty"`
 	Result  client.EventList `json:"result"`
 }
+
+var (
+	newStatusClient     = client.New
+	statusContext       = nilContext
+	statusWatchInterval = 2 * time.Second
+)
 
 type clientFlagSet struct {
 	format      *string
@@ -106,15 +114,20 @@ func runStatus(binary string, args []string, root rootOptions, stdout, stderr io
 	flags := addClientFlags(fs, root)
 	service := fs.String("service", "", "service name to filter")
 	fresh := fs.Bool("fresh", false, "bypass cached API views where supported")
+	watch := fs.Bool("watch", false, "watch status until interrupted")
 
-	if err := fs.Parse(args); err != nil {
+	flagArgs, positionals, err := splitStatusArgs(args)
+	if err != nil {
 		return writeClientCommandError(binary, "status", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if fs.NArg() > 1 {
-		return writeClientCommandError(binary, "status", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", fs.Arg(1)), stdout, stderr)
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeClientCommandError(binary, "status", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if fs.NArg() == 1 && *service == "" {
-		*service = fs.Arg(0)
+	if len(positionals) > 1 {
+		return writeClientCommandError(binary, "status", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	if len(positionals) == 1 && *service == "" {
+		*service = positionals[0]
 	}
 	_ = flags.noColor
 	_ = flags.yes
@@ -123,9 +136,12 @@ func runStatus(binary string, args []string, root rootOptions, stdout, stderr io
 	if err != nil {
 		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
 	}
-	skiffClient, err := client.New(loaded.Config, client.Options{})
+	skiffClient, err := newStatusClient(loaded.Config, client.Options{})
 	if err != nil {
 		return writeClientError(binary, "status", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if *watch {
+		return runStatusWatch(statusContext(), binary, skiffClient, client.StatusOptions{Service: *service, Fresh: *fresh, TraceID: *flags.traceID}, *flags.format, *flags.traceID, stdout, stderr)
 	}
 	status, err := skiffClient.Status(nilContext(), client.StatusOptions{Service: *service, Fresh: *fresh, TraceID: *flags.traceID})
 	if err != nil {
@@ -143,6 +159,64 @@ func runStatus(binary string, args []string, root rootOptions, stdout, stderr io
 		return ExitSuccess
 	default:
 		return writeClientCommandError(binary, "status", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+	}
+}
+
+func splitStatusArgs(args []string) ([]string, []string, error) {
+	valueFlags := map[string]bool{
+		"api-url":      true,
+		"config":       true,
+		"env":          true,
+		"format":       true,
+		"mode":         true,
+		"provider":     true,
+		"region":       true,
+		"service":      true,
+		"state":        true,
+		"state-bucket": true,
+		"trace-id":     true,
+	}
+	return splitArgs(args, valueFlags)
+}
+
+func runStatusWatch(ctx context.Context, binary string, skiffClient client.Interface, opts client.StatusOptions, format, traceID string, stdout, stderr io.Writer) int {
+	for {
+		status, err := skiffClient.Status(ctx, opts)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ExitSuccess
+			}
+			return writeClientError(binary, "status", format, traceID, err, stdout, stderr)
+		}
+		switch format {
+		case "human", "text":
+			printStatusHuman(stdout, *status)
+		case "json":
+			if err := json.NewEncoder(stdout).Encode(statusOutput{OK: true, TraceID: traceID, Status: *status}); err != nil {
+				fmt.Fprintf(stderr, "%s status: %v\n", binary, err)
+				return ExitInternalError
+			}
+		default:
+			return writeClientCommandError(binary, "status", format, traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		}
+		if !waitForStatusWatch(ctx) {
+			return ExitSuccess
+		}
+	}
+}
+
+func waitForStatusWatch(ctx context.Context) bool {
+	interval := statusWatchInterval
+	if interval <= 0 {
+		interval = time.Second
+	}
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 
@@ -166,9 +240,15 @@ func printStatusHuman(w io.Writer, status client.Status) {
 		fmt.Fprintln(w, "services:")
 		for _, service := range status.Services {
 			release := firstNonEmptyCLI(service.DesiredRelease, "<none>")
-			fmt.Fprintf(w, "- %s env=%s desired=%s stable=%s", service.Service, service.Env, release, firstNonEmptyCLI(service.StableRelease, "<none>"))
+			fmt.Fprintf(w, "- %s health=%s env=%s desired=%s stable=%s", service.Service, firstNonEmptyCLI(service.Health, "unknown"), service.Env, release, firstNonEmptyCLI(service.StableRelease, "<none>"))
 			if service.OperationID != "" {
 				fmt.Fprintf(w, " operation=%s:%s", service.OperationID, service.OperationState)
+			}
+			if service.Logs.Status != "" {
+				fmt.Fprintf(w, " logs=%s", service.Logs.Status)
+			}
+			if service.Metrics.Status != "" {
+				fmt.Fprintf(w, " metrics=%s", service.Metrics.Status)
 			}
 			fmt.Fprintln(w)
 		}

@@ -204,6 +204,40 @@ func TestSnapshotBackedEnvServicesAndRecentEvents(t *testing.T) {
 		t.Fatalf("unexpected index freshness: %+v", servicesBody.Index)
 	}
 
+	status := get(t, handler, "/v1/status?service=payments-api", "application/json")
+	if status.Code != http.StatusOK {
+		t.Fatalf("status endpoint = %d, body = %s", status.Code, status.Body.String())
+	}
+	var statusBody struct {
+		OK     bool `json:"ok"`
+		Status struct {
+			Source   string `json:"source"`
+			Services []struct {
+				Service      string `json:"service"`
+				Health       string `json:"health"`
+				RecentEvents []struct {
+					ID string `json:"id"`
+				} `json:"recent_events"`
+				Logs struct {
+					Status string `json:"status"`
+				} `json:"logs"`
+				Metrics struct {
+					Status string `json:"status"`
+				} `json:"metrics"`
+			} `json:"services"`
+		} `json:"status"`
+	}
+	decodeJSON(t, status, &statusBody)
+	if !statusBody.OK || statusBody.Status.Source != "api" || len(statusBody.Status.Services) != 1 {
+		t.Fatalf("unexpected status body: %+v", statusBody)
+	}
+	if statusBody.Status.Services[0].Service != "payments-api" || statusBody.Status.Services[0].Health == "" || len(statusBody.Status.Services[0].RecentEvents) != 1 {
+		t.Fatalf("unexpected service status: %+v", statusBody.Status.Services[0])
+	}
+	if statusBody.Status.Services[0].Logs.Status == "" || statusBody.Status.Services[0].Metrics.Status == "" {
+		t.Fatalf("missing dependency status: %+v", statusBody.Status.Services[0])
+	}
+
 	sagas := get(t, handler, "/v1/sagas", "application/json")
 	if sagas.Code != http.StatusOK {
 		t.Fatalf("sagas status = %d, body = %s", sagas.Code, sagas.Body.String())

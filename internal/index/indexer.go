@@ -200,12 +200,13 @@ func addOperationControl(ctx context.Context, store objstore.ObjectStore, key st
 		return
 	}
 	snapshot.Operations = append(snapshot.Operations, OperationSummary{
-		OperationID: control.OperationID,
-		Service:     control.Service,
-		Env:         control.Env,
-		Status:      control.Status,
-		UpdatedAt:   control.UpdatedAt,
-		TraceID:     control.TraceID,
+		OperationID:        control.OperationID,
+		Service:            control.Service,
+		Env:                control.Env,
+		Status:             control.Status,
+		UpdatedAt:          control.UpdatedAt,
+		TraceID:            control.TraceID,
+		ProviderOperations: append([]schema.ProviderOperationRef(nil), control.ProviderOperations...),
 	})
 }
 
