@@ -516,6 +516,13 @@ Example:
 
 Prefer layered tests.
 
+When validating Go code locally, prefer repository-local caches so sandboxed
+agents do not fail on system cache permissions:
+
+```bash
+GOCACHE=$PWD/.cache/go-build GOMODCACHE=$PWD/.cache/gomod go test ./...
+```
+
 ### Unit tests
 
 Use for:
