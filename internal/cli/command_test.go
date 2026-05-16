@@ -97,6 +97,81 @@ func TestConfigShowJSONValidationError(t *testing.T) {
 	}
 }
 
+func TestStatePathJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"state", "path", "operation",
+		"--format", "json",
+		"--trace-id", "tr_path",
+		"--service", "payments-api",
+		"--operation", "op_01JABC",
+		"--doc", "event",
+		"--event", "01JABCDEF",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	var got struct {
+		OK      bool              `json:"ok"`
+		TraceID string            `json:"trace_id"`
+		Kind    string            `json:"kind"`
+		Path    string            `json:"path"`
+		Inputs  map[string]string `json:"inputs"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("state path output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_path" || got.Kind != "operation" {
+		t.Fatalf("unexpected envelope: %+v", got)
+	}
+	wantPath := "services/payments-api/operations/op_01JABC/events/01JABCDEF.json"
+	if got.Path != wantPath {
+		t.Fatalf("path = %q, want %q", got.Path, wantPath)
+	}
+	if got.Inputs["doc"] != "event" {
+		t.Fatalf("doc input = %q, want event", got.Inputs["doc"])
+	}
+}
+
+func TestStatePathJSONValidationError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"state", "path", "service",
+		"--format", "json",
+		"--trace-id", "tr_bad_path",
+		"--service", "payments_api",
+	}, &stdout, &stderr)
+	if code != ExitUserError {
+		t.Fatalf("exit code = %d, want %d", code, ExitUserError)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty JSON-mode stderr", stderr.String())
+	}
+
+	var got struct {
+		OK      bool   `json:"ok"`
+		Code    string `json:"code"`
+		TraceID string `json:"trace_id"`
+		Fields  []struct {
+			Field string `json:"field"`
+			Code  string `json:"code"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("error output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if got.OK || got.Code != "STATE_PATH_INVALID" || got.TraceID != "tr_bad_path" {
+		t.Fatalf("unexpected error envelope: %+v", got)
+	}
+	if len(got.Fields) != 1 || got.Fields[0].Field != "service" || got.Fields[0].Code != "INVALID_NAME" {
+		t.Fatalf("unexpected fields: %+v", got.Fields)
+	}
+}
+
 func clearSkiffEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
