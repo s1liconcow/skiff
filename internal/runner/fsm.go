@@ -23,6 +23,7 @@ type ArtifactRequest struct {
 	Service         string
 	Env             string
 	ReleaseID       string
+	Artifact        schema.ArtifactRef
 	RuntimeManifest schema.RuntimeManifest
 }
 
@@ -50,6 +51,7 @@ func (NoopArtifactPreparer) PrepareArtifact(ctx context.Context, req ArtifactReq
 
 type LifecycleRequest struct {
 	RuntimeManifest  schema.RuntimeManifest
+	Artifact         schema.ArtifactRef
 	StateStore       StateStore
 	EventSink        EventSink
 	Systemd          SystemdManager
@@ -188,6 +190,7 @@ func RunLifecycle(ctx context.Context, req LifecycleRequest) (*LifecycleResult, 
 		Service:         manifest.Service,
 		Env:             manifest.Env,
 		ReleaseID:       manifest.ReleaseID,
+		Artifact:        req.Artifact,
 		RuntimeManifest: manifest,
 	})
 	if err != nil {
