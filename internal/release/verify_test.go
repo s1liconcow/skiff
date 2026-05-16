@@ -53,6 +53,17 @@ func TestVerifyManifestRejectsWrongTargetExpiredTamperedAndMissingSignature(t *t
 		t.Fatalf("wrong service findings = %+v", wrongService.Findings)
 	}
 
+	wrongRelease := release.VerifyManifest(context.Background(), manifest, release.VerifyOptions{
+		Service:   "payments-api",
+		Env:       "prod",
+		ReleaseID: "rel_other",
+		Verifier:  verifier,
+		Now:       time.Date(2026, 5, 16, 18, 0, 0, 0, time.UTC),
+	})
+	if !hasFinding(wrongRelease.Findings, "RELEASE_ID_MISMATCH") {
+		t.Fatalf("wrong release findings = %+v", wrongRelease.Findings)
+	}
+
 	expired := release.VerifyManifest(context.Background(), manifest, release.VerifyOptions{
 		Service:  "payments-api",
 		Env:      "prod",

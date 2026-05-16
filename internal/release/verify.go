@@ -26,6 +26,7 @@ type Check struct {
 type VerifyOptions struct {
 	Service               string
 	Env                   string
+	ReleaseID             string
 	RuntimeManifest       *schema.RuntimeManifest
 	Verifier              signing.Verifier
 	Now                   time.Time
@@ -123,6 +124,13 @@ func VerifyManifest(ctx context.Context, manifest schema.ReleaseManifest, opts V
 		"environment matches expected target",
 		"ENV_MISMATCH",
 		fmt.Sprintf("release env %q does not match expected env %q", manifest.Env, opts.Env),
+	)
+	addCheck(
+		"release_id",
+		opts.ReleaseID == "" || manifest.ReleaseID == opts.ReleaseID,
+		"release ID matches expected target",
+		"RELEASE_ID_MISMATCH",
+		fmt.Sprintf("release ID %q does not match expected release %q", manifest.ReleaseID, opts.ReleaseID),
 	)
 
 	expectedDigest, err := ManifestDigest(manifest)
