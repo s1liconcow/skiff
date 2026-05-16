@@ -1136,56 +1136,36 @@
     </section>
 
     <section id="architecture">
-      <div class="wrap split">
-        <div>
-          <div class="kicker">Architecture</div>
-          <h2>One bucket, cloud IAM, and a tiny runner.</h2>
-          <p style="margin-top:18px;font-size:1.05rem;">Skiff state is intentionally boring: immutable objects for history, compare-and-swap control documents for coordination, append-only events for audit, and derived indexes for UX. The API server is stateless. The CLI can operate directly against the state bucket in emergencies.</p>
-          <div class="pill-row">
-            <span class="mini-pill good">Signed releases</span>
-            <span class="mini-pill good">CAS leases</span>
-            <span class="mini-pill good">Append-only events</span>
-            <span class="mini-pill">Skiffd hot index</span>
-            <span class="mini-pill">AWS first</span>
-            <span class="mini-pill">Multi-cloud interface</span>
-          </div>
-        </div>
-        <div class="diagram">
-          <h3>Deployment path</h3>
-          <div class="flow">
-            <div class="flow-step"><div class="num">1</div><div><b>Compile</b><span>Skiff spec becomes typed IR, policy checks, provider plan, and runtime manifest.</span></div></div>
-            <div class="flow-step"><div class="num">2</div><div><b>Publish</b><span>Release, plan, provenance, and manifest are signed and written as immutable objects.</span></div></div>
-            <div class="flow-step"><div class="num">3</div><div><b>Coordinate</b><span>Service control document is updated through object-store compare-and-swap.</span></div></div>
-            <div class="flow-step"><div class="num">4</div><div><b>Roll</b><span>Cloud-native rollout begins: ASG instance refresh, target group health, scaling policy.</span></div></div>
-            <div class="flow-step"><div class="num">5</div><div><b>Run</b><span>Each VM boots skiff-runner, verifies the manifest, pulls the artifact, and starts the app.</span></div></div>
-            <div class="flow-step"><div class="num">6</div><div><b>Operate</b><span>Logs, metrics, doctor, debug, rollback, sagas, and agent action graphs use the same state.</span></div></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section>
       <div class="wrap">
         <div class="section-head">
           <div>
-            <div class="kicker">State model</div>
-            <h2>Object storage is not a blob dump. It is Skiff's durable operating ledger.</h2>
+            <div class="kicker">Architecture</div>
+            <h2>One bucket, cloud IAM, and a tiny runner.</h2>
           </div>
-          <p>The state bucket is the source of truth. Every mutation is either create-only or a conditional write on a narrow control document, while skiffd serves fast in-memory views for humans and agents.</p>
+          <p>Skiff deploys through the same path it recovers from: write durable object state first, then move visible cloud primitives, while skiffd remains a rebuildable facade over the ledger.</p>
         </div>
         <div class="grid-3">
-          <div class="card">
-            <h3>Immutable objects</h3>
-            <p>Release manifests, operation intents, saga graphs, plans, SBOMs, provenance, audit entries, and events are written once.</p>
+          <div class="card strong">
+            <h3>Durable operating ledger</h3>
+            <p>Release manifests, operation intents, plans, SBOMs, provenance, audit entries, and events are immutable objects in the state bucket.</p>
           </div>
           <div class="card">
-            <h3>CAS control docs</h3>
-            <p>Service state, operation state, leases, and stateful member state are updated with compare-and-swap semantics.</p>
+            <h3>CAS coordination</h3>
+            <p>Service state, operation state, leases, and member state live in narrow control documents updated with compare-and-swap semantics.</p>
           </div>
           <div class="card">
-            <h3>Derived indexes</h3>
-            <p>Service lists, recent events, active sagas, and TUI summaries are rebuildable from the state bucket and kept hot in skiffd memory.</p>
+            <h3>Visible cloud primitives</h3>
+            <p>ASGs, target groups, IAM roles, launch templates, logs, and provider IDs stay visible instead of being hidden behind cluster abstractions.</p>
           </div>
+        </div>
+        <div class="pill-row" style="margin-top:18px;">
+          <span class="mini-pill good">Signed releases</span>
+          <span class="mini-pill good">CAS leases</span>
+          <span class="mini-pill good">Append-only events</span>
+          <span class="mini-pill">Skiffd hot index</span>
+          <span class="mini-pill">Direct CLI recovery</span>
+          <span class="mini-pill">AWS first</span>
+          <span class="mini-pill">Multi-cloud interface</span>
         </div>
         <div id="deployment-motion-root" class="deploy-motion-shell" aria-label="Animated service deployment through Skiff state">
           <div class="deploy-motion-app deploy-motion-fallback">
