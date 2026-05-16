@@ -1,0 +1,1 @@
+{"schema_version":"skiff.state/v1","service":"payments-api","env":"prod","desired_release":"rel_01JFLOW","operation":{"id":"op_01JFLOW","kind":"deploy","state":"running","step":"desired-release-written"},"version":4,"updated_at":"2026-05-18T00:00:00Z","updated_by":{"id":"integration-agent","type":"agent"},"trace_id":"tr_harness_01"}
