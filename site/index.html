@@ -1,0 +1,1116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Skiff - Clusterless cloud operations</title>
+  <meta name="description" content="Skiff is a clusterless deployment and operations platform where the VM is the pod, cloud primitives are the control plane, and operational sagas replace mystery-meat operators." />
+  <style>
+    :root {
+      --bg: #06131f;
+      --bg-2: #081a2a;
+      --bg-3: #0d2437;
+      --panel: rgba(255, 255, 255, 0.065);
+      --panel-strong: rgba(255, 255, 255, 0.105);
+      --panel-border: rgba(255, 255, 255, 0.14);
+      --text: #eef7ff;
+      --muted: #a9c2d8;
+      --muted-2: #7f9ab3;
+      --brand: #7de3ff;
+      --brand-2: #9af0c2;
+      --brand-3: #c3a6ff;
+      --warn: #ffd27d;
+      --danger: #ff8b9a;
+      --ok: #9af0c2;
+      --ink: #06131f;
+      --shadow: 0 26px 90px rgba(0, 0, 0, 0.36);
+      --radius-xl: 28px;
+      --radius-lg: 20px;
+      --radius-md: 14px;
+      --max: 1180px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      color: var(--text);
+      background:
+        radial-gradient(circle at 12% 0%, rgba(125, 227, 255, 0.24), transparent 34rem),
+        radial-gradient(circle at 82% 10%, rgba(154, 240, 194, 0.18), transparent 30rem),
+        radial-gradient(circle at 52% 38%, rgba(195, 166, 255, 0.10), transparent 34rem),
+        linear-gradient(180deg, var(--bg) 0%, #06101a 58%, #07131f 100%);
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+      background-size: 56px 56px;
+      mask-image: radial-gradient(circle at 50% 10%, black, transparent 70%);
+      opacity: 0.55;
+    }
+
+    a { color: inherit; text-decoration: none; }
+    p { margin: 0; color: var(--muted); }
+    h1, h2, h3, h4 { margin: 0; letter-spacing: -0.035em; }
+    h1 {
+      font-size: clamp(3.35rem, 7vw, 7rem);
+      line-height: 0.92;
+      max-width: 1030px;
+    }
+    h2 {
+      font-size: clamp(2.25rem, 4.5vw, 4.4rem);
+      line-height: 1.02;
+      max-width: 910px;
+    }
+    h3 { font-size: 1.28rem; line-height: 1.15; }
+    h4 { font-size: 1rem; }
+
+    .wrap { max-width: var(--max); margin: 0 auto; padding: 0 22px; }
+    .nav-shell {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      backdrop-filter: blur(16px);
+      background: rgba(6, 19, 31, 0.74);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .nav {
+      height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 800;
+      letter-spacing: -0.045em;
+      font-size: 1.25rem;
+    }
+    .brand-mark {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border-radius: 11px;
+      background: linear-gradient(135deg, var(--brand), var(--brand-2));
+      color: var(--ink);
+      box-shadow: 0 10px 30px rgba(125, 227, 255, 0.22);
+    }
+    .brand-mark svg { width: 24px; height: 24px; }
+    .links { display: flex; align-items: center; gap: 18px; color: var(--muted); font-size: 0.92rem; }
+    .links a { transition: color .2s ease; }
+    .links a:hover { color: var(--text); }
+    .nav-cta { display: flex; gap: 10px; align-items: center; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      min-height: 42px;
+      padding: 0 16px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.16);
+      color: var(--text);
+      background: rgba(255,255,255,0.07);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+      font-weight: 700;
+      font-size: 0.92rem;
+      cursor: pointer;
+      transition: transform .18s ease, background .18s ease, border-color .18s ease;
+      white-space: nowrap;
+    }
+    .btn:hover { transform: translateY(-1px); background: rgba(255,255,255,0.11); border-color: rgba(255,255,255,0.28); }
+    .btn.primary {
+      background: linear-gradient(135deg, var(--brand), var(--brand-2));
+      color: var(--ink);
+      border-color: transparent;
+      box-shadow: 0 15px 48px rgba(125, 227, 255, 0.18), inset 0 1px 0 rgba(255,255,255,0.45);
+    }
+    .btn.small { min-height: 34px; padding: 0 12px; font-size: .82rem; }
+
+    .hero {
+      position: relative;
+      padding: 86px 0 62px;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      margin-bottom: 22px;
+      border: 1px solid rgba(125,227,255,0.24);
+      background: rgba(125,227,255,0.08);
+      color: #cff7ff;
+      border-radius: 999px;
+      font-size: 0.9rem;
+      font-weight: 750;
+      letter-spacing: -0.01em;
+    }
+    .pulse {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--ok);
+      box-shadow: 0 0 0 7px rgba(154,240,194,0.13);
+    }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(330px, .7fr);
+      gap: 32px;
+      align-items: center;
+    }
+    .gradient-text {
+      background: linear-gradient(100deg, #fff 0%, #b6f3ff 36%, #a6f2c5 68%, #e0d2ff 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .hero-subtitle {
+      margin-top: 24px;
+      font-size: clamp(1.15rem, 2vw, 1.45rem);
+      color: #c4d8ea;
+      max-width: 760px;
+      line-height: 1.55;
+    }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+    .hero-proof {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 28px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.065);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: #d8e8f5;
+      padding: 8px 11px;
+      font-size: 0.86rem;
+      font-weight: 650;
+    }
+    .chip b { color: var(--text); }
+
+    .hero-card {
+      position: relative;
+      padding: 20px;
+      border-radius: var(--radius-xl);
+      background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.055));
+      border: 1px solid rgba(255,255,255,0.15);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .hero-card::before {
+      content: "";
+      position: absolute;
+      inset: -70px -90px auto auto;
+      width: 190px;
+      height: 190px;
+      border-radius: 999px;
+      background: rgba(125,227,255,0.18);
+      filter: blur(30px);
+    }
+    .map {
+      display: grid;
+      gap: 10px;
+      position: relative;
+      z-index: 1;
+    }
+    .map-row {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 10px;
+      align-items: center;
+      padding: 12px;
+      border-radius: 17px;
+      background: rgba(4, 17, 28, 0.64);
+      border: 1px solid rgba(255,255,255,0.09);
+    }
+    .map-label {
+      color: #dfefff;
+      font-weight: 780;
+      font-size: 0.95rem;
+    }
+    .map-sub { color: var(--muted-2); font-size: .78rem; margin-top: 2px; }
+    .arrow {
+      color: var(--brand);
+      font-family: var(--mono);
+      font-size: 1.15rem;
+      opacity: .9;
+    }
+    .terminal {
+      margin-top: 16px;
+      border-radius: 19px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.13);
+      background: rgba(4, 14, 24, 0.88);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+    }
+    .term-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.05);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .dots { display: flex; gap: 6px; }
+    .dot { width: 10px; height: 10px; border-radius: 999px; background: rgba(255,255,255,0.23); }
+    .term-name { color: var(--muted-2); font-size: .8rem; font-family: var(--mono); }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      font-family: var(--mono);
+      font-size: .88rem;
+      line-height: 1.65;
+      color: #dff7ff;
+      padding: 16px;
+    }
+    .cmd { color: var(--brand-2); }
+    .muted { color: var(--muted-2); }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .danger { color: var(--danger); }
+
+    section { padding: 78px 0; position: relative; }
+    .section-head { display: flex; align-items: end; justify-content: space-between; gap: 28px; margin-bottom: 30px; }
+    .section-head p { max-width: 610px; font-size: 1.04rem; }
+    .kicker {
+      color: var(--brand-2);
+      text-transform: uppercase;
+      font-weight: 850;
+      letter-spacing: .12em;
+      font-size: .78rem;
+      margin-bottom: 12px;
+    }
+
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+    .card {
+      border-radius: var(--radius-lg);
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      padding: 22px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+    }
+    .card.strong { background: var(--panel-strong); }
+    .card h3 { margin-bottom: 10px; }
+    .card p { font-size: .98rem; }
+    .icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 16px;
+      background: linear-gradient(135deg, rgba(125,227,255,0.18), rgba(154,240,194,0.12));
+      border: 1px solid rgba(125,227,255,0.2);
+      color: var(--brand);
+    }
+    .icon svg { width: 22px; height: 22px; }
+
+    .split {
+      display: grid;
+      grid-template-columns: .84fr 1.16fr;
+      gap: 20px;
+      align-items: stretch;
+    }
+    .diagram {
+      padding: 24px;
+      border-radius: var(--radius-xl);
+      border: 1px solid rgba(255,255,255,0.13);
+      background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.045));
+      box-shadow: var(--shadow);
+    }
+    .flow {
+      display: grid;
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .flow-step {
+      display: grid;
+      grid-template-columns: 32px 1fr;
+      gap: 12px;
+      align-items: start;
+      padding: 13px;
+      border-radius: 16px;
+      background: rgba(5, 17, 28, 0.62);
+      border: 1px solid rgba(255,255,255,0.09);
+    }
+    .num {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border-radius: 10px;
+      background: rgba(125,227,255,0.13);
+      color: var(--brand);
+      font-weight: 900;
+      font-family: var(--mono);
+    }
+    .flow-step b { display: block; margin-bottom: 3px; }
+    .flow-step span { color: var(--muted); font-size: .92rem; }
+
+    .pill-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+    .mini-pill {
+      border: 1px solid rgba(255,255,255,0.11);
+      background: rgba(255,255,255,0.06);
+      border-radius: 999px;
+      padding: 8px 10px;
+      color: var(--muted);
+      font-size: .86rem;
+      font-weight: 700;
+    }
+    .mini-pill.good { color: #dffff0; border-color: rgba(154,240,194,0.22); background: rgba(154,240,194,0.075); }
+
+    .compare {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+    .compare .card { min-height: 250px; }
+    .list { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 10px; }
+    .list li {
+      display: grid;
+      grid-template-columns: 22px 1fr;
+      gap: 9px;
+      color: var(--muted);
+      font-size: .96rem;
+    }
+    .checkmark, .xmark { font-weight: 900; font-family: var(--mono); }
+    .checkmark { color: var(--ok); }
+    .xmark { color: var(--danger); }
+
+    .saga-board {
+      position: relative;
+      padding: 22px;
+      border-radius: var(--radius-xl);
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.07);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+    .saga-board::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 70% 12%, rgba(195,166,255,0.18), transparent 33rem);
+      pointer-events: none;
+    }
+    .saga-graph {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      align-items: center;
+    }
+    .saga-node {
+      min-height: 92px;
+      border-radius: 18px;
+      padding: 14px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(5, 16, 27, 0.72);
+      position: relative;
+    }
+    .saga-node::after {
+      content: "→";
+      position: absolute;
+      right: -13px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: rgba(125,227,255,0.8);
+      font-family: var(--mono);
+      font-size: 1.2rem;
+      z-index: 2;
+    }
+    .saga-node:last-child::after { display: none; }
+    .saga-node small { display: block; color: var(--muted-2); font-family: var(--mono); margin-bottom: 6px; }
+    .saga-node b { display: block; font-size: .98rem; }
+    .saga-node span { display: block; color: var(--muted); font-size: .82rem; margin-top: 5px; }
+    .saga-node.waiting { border-color: rgba(255,210,125,.35); background: rgba(255,210,125,0.07); }
+    .saga-node.okay { border-color: rgba(154,240,194,.32); background: rgba(154,240,194,0.07); }
+
+    .tui {
+      border: 1px solid rgba(125,227,255,0.16);
+      background: #071522;
+      border-radius: 22px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+    .tui-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: center;
+      padding: 12px 14px;
+      background: rgba(255,255,255,0.055);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      font-family: var(--mono);
+      color: var(--muted);
+      font-size: .82rem;
+    }
+    .tui-body { display: grid; grid-template-columns: 260px 1fr; min-height: 390px; }
+    .tui-sidebar { border-right: 1px solid rgba(255,255,255,0.08); padding: 14px; display: grid; gap: 10px; align-content: start; }
+    .tui-item {
+      padding: 10px;
+      border-radius: 13px;
+      background: rgba(255,255,255,0.04);
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-family: var(--mono);
+      color: #d8e9f7;
+      font-size: .82rem;
+    }
+    .tui-item.active { background: rgba(125,227,255,0.10); border: 1px solid rgba(125,227,255,0.20); }
+    .tui-main { padding: 16px; display: grid; gap: 13px; align-content: start; }
+    .tui-panel { padding: 14px; border-radius: 15px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); }
+    .progress { display: grid; gap: 8px; margin-top: 10px; }
+    .progress-row { display: grid; grid-template-columns: 24px 1fr auto; gap: 10px; color: var(--muted); font-family: var(--mono); font-size: .82rem; }
+
+    .code-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .code-card { position: relative; }
+    .copy {
+      position: absolute;
+      top: 9px;
+      right: 9px;
+      min-height: 30px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.08);
+      color: var(--muted);
+      font-size: .75rem;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .recipe-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+    }
+    .recipe-card {
+      min-height: 260px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .recipe-top { display: flex; gap: 14px; align-items: start; }
+    .recipe-num {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      color: var(--ink);
+      background: linear-gradient(135deg, var(--brand), var(--brand-2));
+      font-weight: 950;
+      font-family: var(--mono);
+    }
+
+    .security-band {
+      border-radius: var(--radius-xl);
+      padding: 28px;
+      background:
+        radial-gradient(circle at 16% 10%, rgba(154,240,194,0.16), transparent 22rem),
+        linear-gradient(135deg, rgba(154,240,194,0.11), rgba(125,227,255,0.08));
+      border: 1px solid rgba(154,240,194,0.24);
+      box-shadow: var(--shadow);
+    }
+    .security-grid { margin-top: 20px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .security-item { padding: 14px; border-radius: 15px; background: rgba(5,17,28,0.50); border: 1px solid rgba(255,255,255,0.09); }
+    .security-item b { display: block; margin-bottom: 5px; }
+    .security-item span { color: var(--muted); font-size: .88rem; }
+
+    .timeline { display: grid; gap: 14px; }
+    .timeline-row { display: grid; grid-template-columns: 160px 1fr; gap: 16px; align-items: start; }
+    .phase {
+      font-family: var(--mono);
+      color: var(--brand-2);
+      font-size: .84rem;
+      font-weight: 850;
+      padding-top: 14px;
+    }
+    .timeline-card { padding: 17px; border-radius: 18px; background: rgba(255,255,255,0.055); border: 1px solid rgba(255,255,255,0.10); }
+    .timeline-card h3 { margin-bottom: 7px; }
+
+    .footer-cta {
+      padding: 80px 0 96px;
+      text-align: center;
+    }
+    .footer-box {
+      border-radius: 34px;
+      padding: clamp(30px, 6vw, 60px);
+      background:
+        radial-gradient(circle at 72% 0%, rgba(195,166,255,0.22), transparent 30rem),
+        radial-gradient(circle at 12% 70%, rgba(125,227,255,0.20), transparent 28rem),
+        linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.055));
+      border: 1px solid rgba(255,255,255,0.16);
+      box-shadow: var(--shadow);
+    }
+    .footer-box p { margin: 20px auto 0; max-width: 760px; font-size: 1.12rem; color: #c6dceb; }
+    .footer-actions { margin-top: 30px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    footer { padding: 28px 0 42px; border-top: 1px solid rgba(255,255,255,0.08); color: var(--muted-2); }
+    .footer-line { display: flex; justify-content: space-between; gap: 18px; flex-wrap: wrap; font-size: .9rem; }
+
+    @media (max-width: 980px) {
+      .links { display: none; }
+      .hero-grid, .split, .grid-2, .code-grid, .recipe-grid { grid-template-columns: 1fr; }
+      .grid-3, .compare { grid-template-columns: 1fr; }
+      .security-grid { grid-template-columns: repeat(2, 1fr); }
+      .saga-graph { grid-template-columns: 1fr 1fr; }
+      .saga-node:nth-child(2)::after { display: none; }
+      .tui-body { grid-template-columns: 1fr; }
+      .tui-sidebar { border-right: none; border-bottom: 1px solid rgba(255,255,255,0.08); }
+      .timeline-row { grid-template-columns: 1fr; gap: 6px; }
+      .phase { padding-top: 0; }
+    }
+    @media (max-width: 640px) {
+      .nav-cta .btn:not(.primary) { display: none; }
+      .hero { padding-top: 56px; }
+      section { padding: 56px 0; }
+      .section-head { display: block; }
+      .section-head p { margin-top: 14px; }
+      .security-grid, .saga-graph { grid-template-columns: 1fr; }
+      .saga-node::after { content: "↓"; top: auto; right: 50%; bottom: -19px; transform: translateX(50%); }
+      .saga-node:nth-child(2)::after { display: block; }
+      .hero-actions .btn { width: 100%; }
+      pre { font-size: .78rem; }
+    }
+  </style>
+</head>
+<body>
+  <header class="nav-shell">
+    <div class="wrap nav">
+      <a href="#top" class="brand" aria-label="Skiff home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 64 64" fill="none" role="img">
+            <path d="M10 35c6 10 14 15 24 15s18-5 24-15H10Z" fill="currentColor"/>
+            <path d="M29 8h7v24h-7V8Z" fill="currentColor" opacity=".9"/>
+            <path d="M36 13c8 3 12 8 13 17H36V13Z" fill="currentColor" opacity=".78"/>
+            <path d="M28 17c-6 3-10 8-11 13h11V17Z" fill="currentColor" opacity=".55"/>
+          </svg>
+        </span>
+        <span>Skiff</span>
+      </a>
+      <nav class="links" aria-label="Primary navigation">
+        <a href="#why">Why</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#sagas">Sagas</a>
+        <a href="#agents">Agents</a>
+        <a href="#adoption">Adoption</a>
+        <a href="#recipes">Recipes</a>
+      </nav>
+      <div class="nav-cta">
+        <a class="btn small" href="#design">Implementation</a>
+        <a class="btn primary small" href="#cta">Get the shape</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="wrap hero-grid">
+        <div>
+          <div class="eyebrow"><span class="pulse"></span> Clusterless operations for native cloud teams</div>
+          <h1><span class="gradient-text">The VM is the pod.</span><br/>The cloud is the control plane.</h1>
+          <p class="hero-subtitle">
+            Skiff is a deployment and operations platform that replaces Kubernetes-style clusters with native cloud primitives, signed object-storage state, and explicit operational sagas. The cloud supplies the primitives; Skiff makes the operating model legible.
+          </p>
+          <div class="hero-actions">
+            <a class="btn primary" href="#architecture">See how it works</a>
+            <a class="btn" href="#sagas">Explore operational sagas</a>
+          </div>
+          <div class="hero-proof" aria-label="Core claims">
+            <span class="chip"><b>Object storage</b> is durable state</span>
+            <span class="chip"><b>ASG/MIG/VMSS</b> is deployment</span>
+            <span class="chip"><b>IAM</b> is workload identity</span>
+            <span class="chip"><b>CLI/TUI</b> is agent-native</span>
+          </div>
+        </div>
+
+        <aside class="hero-card" aria-label="Skiff primitive mapping">
+          <div class="map">
+            <div class="map-row">
+              <div><div class="map-label">Pod</div><div class="map-sub">workload replica</div></div>
+              <div class="arrow">→</div>
+              <div><div class="map-label">Cloud VM</div><div class="map-sub">one app identity</div></div>
+            </div>
+            <div class="map-row">
+              <div><div class="map-label">Deployment</div><div class="map-sub">rollout shape</div></div>
+              <div class="arrow">→</div>
+              <div><div class="map-label">Auto Scaling Group</div><div class="map-sub">cloud-native capacity</div></div>
+            </div>
+            <div class="map-row">
+              <div><div class="map-label">Service</div><div class="map-sub">routing</div></div>
+              <div class="arrow">→</div>
+              <div><div class="map-label">Target Group</div><div class="map-sub">load balancer health</div></div>
+            </div>
+            <div class="map-row">
+              <div><div class="map-label">Operator</div><div class="map-sub">runbook automation</div></div>
+              <div class="arrow">→</div>
+              <div><div class="map-label">Saga</div><div class="map-sub">explicit operation graph</div></div>
+            </div>
+          </div>
+          <div class="terminal">
+            <div class="term-top"><span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span><span class="term-name">skiff</span></div>
+            <pre><span class="cmd">$ skiff deploy</span>
+<span class="ok">✓</span> validated spec and policy
+<span class="ok">✓</span> published signed release
+<span class="ok">✓</span> acquired service lease via CAS
+<span class="ok">✓</span> started canary saga
+<span class="warn">•</span> waiting at 10% for metrics gate</pre>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="why">
+      <div class="wrap">
+        <div class="section-head">
+          <div>
+            <div class="kicker">The gap</div>
+            <h2>Terraform describes shape. Kubernetes reconciles clusters. Production needs journeys.</h2>
+          </div>
+          <p>Real operations are not just resources. They are restores, key rotations, canaries, failovers, migrations, approvals, compensations, and evidence. Skiff gives those journeys a first-class operational substrate.</p>
+        </div>
+
+        <div class="compare">
+          <div class="card">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div>
+            <h3>Terraform is stable state</h3>
+            <p>Excellent for declaring what should exist. Weak for live, multi-step operations with rollback gates and partial failure.</p>
+            <ul class="list">
+              <li><span class="checkmark">✓</span><span>Great for infrastructure shape</span></li>
+              <li><span class="xmark">×</span><span>Not a runtime operations engine</span></li>
+              <li><span class="xmark">×</span><span>Deploys become plan/apply choreography</span></li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3l8 4v10l-8 4-8-4V7l8-4Z" stroke="currentColor" stroke-width="2"/><path d="M12 3v18M4 7l8 4 8-4" stroke="currentColor" stroke-width="2"/></svg></div>
+            <h3>Kubernetes is a parallel cloud</h3>
+            <p>Powerful, but it recreates scheduling, networking, identity, secrets, and health as cluster primitives.</p>
+            <ul class="list">
+              <li><span class="checkmark">✓</span><span>Great ecosystem and abstractions</span></li>
+              <li><span class="xmark">×</span><span>Cluster operations become the job</span></li>
+              <li><span class="xmark">×</span><span>Operators hide procedural complexity</span></li>
+            </ul>
+          </div>
+          <div class="card strong">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 15c2 4 5 6 9 6s7-2 9-6H4Z" stroke="currentColor" stroke-width="2"/><path d="M11 4h3v10h-3z" stroke="currentColor" stroke-width="2"/><path d="M14 6c4 1 6 4 6 8h-6V6Z" stroke="currentColor" stroke-width="2"/></svg></div>
+            <h3>Skiff is explicit operations</h3>
+            <p>Compile simple specs to cloud primitives, store signed desired state in object storage, and run operational sagas on demand.</p>
+            <ul class="list">
+              <li><span class="checkmark">✓</span><span>Object-storage-backed operating ledger</span></li>
+              <li><span class="checkmark">✓</span><span>Object storage state with CAS docs</span></li>
+              <li><span class="checkmark">✓</span><span>Runbooks as typed, resumable graphs</span></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <div class="wrap split">
+        <div>
+          <div class="kicker">Architecture</div>
+          <h2>One bucket, cloud IAM, and a tiny runner.</h2>
+          <p style="margin-top:18px;font-size:1.05rem;">Skiff state is intentionally boring: immutable objects for history, compare-and-swap control documents for coordination, append-only events for audit, and derived indexes for UX. The API server is stateless. The CLI can operate directly against the state bucket in emergencies.</p>
+          <div class="pill-row">
+            <span class="mini-pill good">Signed releases</span>
+            <span class="mini-pill good">CAS leases</span>
+            <span class="mini-pill good">Append-only events</span>
+            <span class="mini-pill">Skiffd hot index</span>
+            <span class="mini-pill">AWS first</span>
+            <span class="mini-pill">Multi-cloud interface</span>
+          </div>
+        </div>
+        <div class="diagram">
+          <h3>Deployment path</h3>
+          <div class="flow">
+            <div class="flow-step"><div class="num">1</div><div><b>Compile</b><span>Skiff spec becomes typed IR, policy checks, provider plan, and runtime manifest.</span></div></div>
+            <div class="flow-step"><div class="num">2</div><div><b>Publish</b><span>Release, plan, provenance, and manifest are signed and written as immutable objects.</span></div></div>
+            <div class="flow-step"><div class="num">3</div><div><b>Coordinate</b><span>Service control document is updated through object-store compare-and-swap.</span></div></div>
+            <div class="flow-step"><div class="num">4</div><div><b>Roll</b><span>Cloud-native rollout begins: ASG instance refresh, target group health, scaling policy.</span></div></div>
+            <div class="flow-step"><div class="num">5</div><div><b>Run</b><span>Each VM boots skiff-runner, verifies the manifest, pulls the artifact, and starts the app.</span></div></div>
+            <div class="flow-step"><div class="num">6</div><div><b>Operate</b><span>Logs, metrics, doctor, debug, rollback, sagas, and agent action graphs use the same state.</span></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="section-head">
+          <div>
+            <div class="kicker">State model</div>
+            <h2>Object storage is not a blob dump. It is Skiff's durable operating ledger.</h2>
+          </div>
+          <p>The state bucket is the source of truth. Every mutation is either create-only or a conditional write on a narrow control document, while skiffd serves fast in-memory views for humans and agents.</p>
+        </div>
+        <div class="grid-3">
+          <div class="card">
+            <h3>Immutable objects</h3>
+            <p>Release manifests, operation intents, saga graphs, plans, SBOMs, provenance, audit entries, and events are written once.</p>
+          </div>
+          <div class="card">
+            <h3>CAS control docs</h3>
+            <p>Service state, operation state, leases, and stateful member state are updated with compare-and-swap semantics.</p>
+          </div>
+          <div class="card">
+            <h3>Derived indexes</h3>
+            <p>Service lists, recent events, active sagas, and TUI summaries are rebuildable from the state bucket and kept hot in skiffd memory.</p>
+          </div>
+        </div>
+        <div class="code-grid" style="margin-top:18px;">
+          <div class="terminal code-card">
+            <button class="copy" data-copy="state-layout">Copy</button>
+            <div class="term-top"><span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span><span class="term-name">state bucket</span></div>
+            <pre id="state-layout">s3://skiff-state-prod/
+  services/payments-api/control.json
+  services/payments-api/releases/2026.05.16.1/
+    release.json
+    runtime-manifest.json
+    ir.json
+    plan.json
+  services/payments-api/operations/op_01J.../
+    intent.json
+    events/*.json
+    result.json
+  sagas/saga_01J.../
+    intent.json
+    graph.json
+    control.json
+    events/*.json
+  indexes/services.json</pre>
+          </div>
+          <div class="terminal code-card">
+            <button class="copy" data-copy="control-doc">Copy</button>
+            <div class="term-top"><span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span><span class="term-name">control.json</span></div>
+            <pre id="control-doc">{
+  "service": "payments-api",
+  "desired_release": "2026.05.16.1",
+  "stable_release": "2026.05.15.3",
+  "operation": {
+    "kind": "deploy",
+    "state": "canary",
+    "step": "metrics_gate_10"
+  },
+  "lease": {
+    "owner": "skiffd/i-abc123",
+    "generation": 42,
+    "expires_at": "2026-05-16T20:05:00Z"
+  },
+  "version": 18
+}</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="sagas">
+      <div class="wrap">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Operational sagas</div>
+            <h2>Runbooks as typed, resumable operation graphs.</h2>
+          </div>
+          <p>Database restores, key rotations, canary deploys, regional failovers, migrations, and repairs are not hidden controllers. They are explicit sagas: planned, approved, executed, paused, resumed, compensated, and audited.</p>
+        </div>
+
+        <div class="saga-board">
+          <div class="saga-graph" aria-label="Example database restore saga graph">
+            <div class="saga-node okay"><small>check.preflight</small><b>Verify restore point</b><span>Backups, permissions, health, blast radius</span></div>
+            <div class="saga-node okay"><small>database.restore</small><b>Restore new DB</b><span>Point-in-time restore, no in-place overwrite</span></div>
+            <div class="saga-node okay"><small>check.shadow</small><b>Smoke test API</b><span>Run service against restored database</span></div>
+            <div class="saga-node waiting"><small>approval.manual</small><b>Approve cutover</b><span>Human or agent gate before traffic moves</span></div>
+          </div>
+        </div>
+
+        <div class="grid-3" style="margin-top:18px;">
+          <div class="card"><h3>Canary deploy</h3><p>Start at 5%, bake, evaluate health and metrics, advance, pause, or compensate by rolling back.</p></div>
+          <div class="card"><h3>Database restore</h3><p>Restore to a new database, smoke test, approval gate, secret cutover, service rollout, old DB retention.</p></div>
+          <div class="card"><h3>Key rotation</h3><p>Create new versions, canary consumers, promote aliases, roll services, delay destructive cleanup.</p></div>
+          <div class="card"><h3>Regional failover</h3><p>Verify replica lag, freeze writes, promote, shift traffic, verify, and clearly mark irreversible steps.</p></div>
+          <div class="card"><h3>Kubernetes cutover</h3><p>Deploy Skiff shadow service, shift traffic by weight, compare metrics, retire the old service safely.</p></div>
+          <div class="card"><h3>Incident repair</h3><p>Collect evidence, recommend safe actions, run reversible remediation, append every event.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="agents">
+      <div class="wrap split">
+        <div>
+          <div class="kicker">Agent-native operations</div>
+          <h2>Humans get clarity. Agents get structure.</h2>
+          <p style="margin-top:18px;font-size:1.05rem;">Every Skiff command has deterministic JSON output, explicit risk, recommended next actions, idempotency keys, failure taxonomy, and safety classification. An agent armed with the CLI can diagnose, deploy, repair, roll back, and resume without scraping logs or guessing state.</p>
+          <div class="pill-row">
+            <span class="mini-pill good">--format json</span>
+            <span class="mini-pill good">action graphs</span>
+            <span class="mini-pill good">safe commands</span>
+            <span class="mini-pill">idempotent ops</span>
+            <span class="mini-pill">risk metadata</span>
+          </div>
+        </div>
+        <div class="terminal code-card">
+          <button class="copy" data-copy="agent-json">Copy</button>
+          <div class="term-top"><span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span><span class="term-name">skiff doctor --format json</span></div>
+          <pre id="agent-json">{
+  "ok": false,
+  "code": "CANARY_FAILED",
+  "summary": "new release failed readiness",
+  "facts": [
+    "rollout paused at 10%",
+    "new targets return 500 on /healthz",
+    "previous stable release is healthy"
+  ],
+  "recommended_actions": [
+    {
+      "id": "rollback",
+      "command": "skiff saga start rollback --service payments-api --to previous-stable --yes --format json",
+      "mutating": true,
+      "safety": "reversible",
+      "confidence": 0.91
+    }
+  ]
+}</pre>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="section-head">
+          <div>
+            <div class="kicker">CLI and TUI</div>
+            <h2>A beautiful cockpit for deployments, sagas, logs, metrics, and recovery.</h2>
+          </div>
+          <p>The TUI is a frontend over the same deterministic API and object-state model. There is no separate magic path for humans.</p>
+        </div>
+        <div class="tui">
+          <div class="tui-header"><span>skiff tui</span><span>prod · us-west-2 · state bucket healthy</span></div>
+          <div class="tui-body">
+            <div class="tui-sidebar">
+              <div class="tui-item active"><span>payments-api</span><span class="ok">green</span></div>
+              <div class="tui-item"><span>orders-api</span><span class="ok">green</span></div>
+              <div class="tui-item"><span>invoice-worker</span><span class="warn">yellow</span></div>
+              <div class="tui-item"><span>payments-db</span><span class="ok">green</span></div>
+              <div class="tui-item"><span>restore saga</span><span class="warn">wait</span></div>
+            </div>
+            <div class="tui-main">
+              <div class="tui-panel"><h3>payments-api</h3><p>release 2026.05.16.1 · 6/6 healthy · p95 91ms · error 0.2% · cpu 48%</p></div>
+              <div class="tui-panel">
+                <h3>Saga: restore payments-db</h3>
+                <div class="progress">
+                  <div class="progress-row"><span class="ok">✓</span><span>verify restore point</span><span>done</span></div>
+                  <div class="progress-row"><span class="ok">✓</span><span>restore new database</span><span>done</span></div>
+                  <div class="progress-row"><span class="ok">✓</span><span>shadow API smoke test</span><span>done</span></div>
+                  <div class="progress-row"><span class="warn">▶</span><span>approval before cutover</span><span>waiting</span></div>
+                  <div class="progress-row"><span class="muted">·</span><span>update secret pointer</span><span>pending</span></div>
+                  <div class="progress-row"><span class="muted">·</span><span>roll payments-api</span><span>pending</span></div>
+                </div>
+              </div>
+              <div class="tui-panel"><p><span class="ok">Facts:</span> restored DB is available, shadow API passed, current DB snapshot exists. <span class="warn">Action:</span> approve cutover or reject saga.</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="security-band">
+          <div class="kicker">Secure by default</div>
+          <h2>Do not make users become security experts to get secure operations.</h2>
+          <p style="margin-top:14px;max-width:830px;">Skiff's defaults are intentionally conservative: signed releases, digest-pinned artifacts, least-privilege IAM, encrypted state, conditional writes, no SSH ingress, managed sessions, KMS, secret references, and explicit approval for risky sagas.</p>
+          <div class="security-grid">
+            <div class="security-item"><b>Signed state</b><span>Release manifests, saga intents, plans, and important artifacts are signed and verified.</span></div>
+            <div class="security-item"><b>Least privilege</b><span>IAM policies are compiled from specs and denied if they get too broad.</span></div>
+            <div class="security-item"><b>No SSH default</b><span>Debug through cloud-managed sessions and audited diagnostic bundles.</span></div>
+            <div class="security-item"><b>Explicit risk</b><span>Irreversible saga steps are labeled, gated, and never hidden behind controllers.</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="adoption">
+      <div class="wrap">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Incremental adoption</div>
+            <h2>Start small. Do not rewrite your world.</h2>
+          </div>
+          <p>Skiff should be easy to try from AWS, Terraform, or Kubernetes. The happy path is direct apply, but Terraform generation and Kubernetes migration are first-class bridges.</p>
+        </div>
+        <div class="grid-3">
+          <div class="card strong"><h3>Direct AWS mode</h3><p>Skiff CLI or stateless skiffd writes object state and calls AWS APIs. Fastest path, no Terraform state, object-state native.</p><ul class="list"><li><span class="checkmark">✓</span><span>Best default</span></li><li><span class="checkmark">✓</span><span>Disaster-recovery friendly</span></li></ul></div>
+          <div class="card"><h3>Terraform bridge</h3><p>Generate or adopt Terraform for stable infrastructure shape, then let Skiff own release pointers, rollouts, sagas, and diagnostics.</p><ul class="list"><li><span class="checkmark">✓</span><span>Enterprise review friendly</span></li><li><span class="checkmark">✓</span><span>No deploy-by-plan/apply requirement</span></li></ul></div>
+          <div class="card"><h3>Kubernetes migration</h3><p>Import Deployment/Service/Ingress, deploy shadow Skiff services, then cut traffic over through a weighted migration saga.</p><ul class="list"><li><span class="checkmark">✓</span><span>No cliff jump</span></li><li><span class="checkmark">✓</span><span>Unsupported features are explicit</span></li></ul></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="recipes">
+      <div class="wrap">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Customer journeys</div>
+            <h2>Recipes for the operations teams actually run.</h2>
+          </div>
+          <p>Skiff should ship with opinionated, understandable recipes. Users can inspect the plan, run it, pause it, approve it, or let agents execute low-risk paths.</p>
+        </div>
+        <div class="recipe-grid">
+          <div class="card recipe-card">
+            <div class="recipe-top"><div class="recipe-num">01</div><div><h3>API server + managed database</h3><p>Deploy an API, create a managed database, wire secrets, emit logs/metrics, and get default restore, rotate, and canary sagas.</p></div></div>
+            <div class="terminal"><pre><span class="cmd">$ skiff init stack api-db payments</span>
+<span class="cmd">$ skiff deploy</span>
+<span class="cmd">$ skiff restore database payments-db --to latest</span></pre></div>
+          </div>
+          <div class="card recipe-card">
+            <div class="recipe-top"><div class="recipe-num">02</div><div><h3>Multi-region API + regional database</h3><p>Run services in two regions, maintain database replication, test failover, and promote through explicit high-risk sagas.</p></div></div>
+            <div class="terminal"><pre><span class="cmd">$ skiff failover stack payments --to us-east-1</span>
+<span class="warn">!</span> replica promotion is irreversible after new writes</pre></div>
+          </div>
+          <div class="card recipe-card">
+            <div class="recipe-top"><div class="recipe-num">03</div><div><h3>Queue worker with autoscaling</h3><p>Scale worker VMs from queue depth or age, keep logs and metrics normalized, and debug failures without clusters.</p></div></div>
+            <div class="terminal"><pre><span class="cmd">$ skiff init worker invoice-worker</span>
+<span class="cmd">$ skiff metrics invoice-worker queue-lag</span></pre></div>
+          </div>
+          <div class="card recipe-card">
+            <div class="recipe-top"><div class="recipe-num">04</div><div><h3>Kubernetes service migration</h3><p>Import, deploy shadow, compare health, shift traffic, and decommission the old service only after evidence says it is safe.</p></div></div>
+            <div class="terminal"><pre><span class="cmd">$ skiff import kube ./k8s --out skiff.yaml</span>
+<span class="cmd">$ skiff deploy --shadow</span>
+<span class="cmd">$ skiff saga start traffic-cutover --steps 5,25,50,100</span></pre></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="design">
+      <div class="wrap">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Implementation shape</div>
+            <h2>Golang core, provider plugins, saga steps, and object-state discipline.</h2>
+          </div>
+          <p>Skiff is composable without becoming an operator framework. Plugins register provider capabilities, runtime addons, saga step kinds, diagnostics, and recipes.</p>
+        </div>
+        <div class="code-grid">
+          <div class="terminal code-card">
+            <button class="copy" data-copy="layout">Copy</button>
+            <div class="term-top"><span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span><span class="term-name">file layout</span></div>
+            <pre id="layout">skiff/
+  cmd/
+    skiff/          # CLI/TUI
+    skiffd/         # stateless API server
+    skiff-runner/   # VM runner
+    skiff-worker/   # optional saga/index worker
+  internal/
+    compiler/ ir/ provider/aws/
+    state/ objstore/ release/
+    saga/ saga/steps/
+    doctor/ policy/ plugins/
+    tui/ observability/
+  pkg/
+    spec/ pluginapi/ sagaapi/ sdk/
+  examples/
+    api-db/ worker/ mtls/
+    multiregion-db/</pre>
+          </div>
+          <div class="terminal code-card">
+            <button class="copy" data-copy="go-saga">Copy</button>
+            <div class="term-top"><span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span><span class="term-name">saga step API</span></div>
+            <pre id="go-saga">type Step interface {
+  Kind() string
+  Plan(ctx context.Context, req StepRequest) (*StepPlan, error)
+  Run(ctx context.Context, req StepRequest) (*StepResult, error)
+  Resume(ctx context.Context, req StepRequest) (*StepResult, error)
+  Compensate(ctx context.Context, req StepRequest, result StepResult) (*StepResult, error)
+  Doctor(ctx context.Context, req StepRequest) ([]Finding, error)
+}</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Roadmap</div>
+            <h2>Build the core until the five commands feel magical.</h2>
+          </div>
+          <p>The first version should be narrow and excellent: AWS, stateless services, object state, signed releases, runner, logs, doctor, rollback, and sagas.</p>
+        </div>
+        <div class="timeline">
+          <div class="timeline-row"><div class="phase">Phase 1</div><div class="timeline-card"><h3>Stateless AWS service</h3><p>Service spec, compiler IR, S3 state, signed release ledger, ASG/ALB/IAM, runner, CloudWatch logs, status and rollback.</p></div></div>
+          <div class="timeline-row"><div class="phase">Phase 2</div><div class="timeline-card"><h3>Doctor and sagas</h3><p>Structured diagnostics, canary saga, rollback saga, operation leases, append-only events, agent-safe JSON.</p></div></div>
+          <div class="timeline-row"><div class="phase">Phase 3</div><div class="timeline-card"><h3>Managed dependencies</h3><p>API + managed database recipe, restore saga, secret rotation saga, database smoke tests, cost and shape advisor.</p></div></div>
+          <div class="timeline-row"><div class="phase">Phase 4</div><div class="timeline-card"><h3>Adoption bridges</h3><p>Terraform generate/adopt, Kubernetes import, shadow deploy, weighted traffic cutover, TUI, hot skiffd indexes.</p></div></div>
+          <div class="timeline-row"><div class="phase">Phase 5</div><div class="timeline-card"><h3>Plugins and multi-region</h3><p>mTLS plugin, provider conformance, stateful recipes, regional failover sagas, GCP/Azure provider work.</p></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="cta" class="footer-cta">
+      <div class="wrap">
+        <div class="footer-box">
+          <div class="kicker">Skiff</div>
+          <h2>Clusterless infrastructure. Explicit operations. Agent-ready recovery.</h2>
+          <p>Skiff is for teams who want the cloud primitives they already trust, without the impedance mismatch of Kubernetes, and without turning every production operation into hand-written glue.</p>
+          <div class="footer-actions">
+            <a class="btn primary" href="#architecture">Start with the architecture</a>
+            <a class="btn" href="#sagas">Understand sagas</a>
+            <a class="btn" href="#recipes">Browse recipes</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap footer-line">
+      <span>Skiff - the VM is the pod.</span>
+      <span>Terraform for shape. Skiff for journeys.</span>
+    </div>
+  </footer>
+
+  <script>
+    document.querySelectorAll('.copy').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = button.getAttribute('data-copy');
+        const target = document.getElementById(id);
+        if (!target) return;
+        try {
+          await navigator.clipboard.writeText(target.innerText);
+          const old = button.innerText;
+          button.innerText = 'Copied';
+          setTimeout(() => button.innerText = old, 1200);
+        } catch (e) {
+          button.innerText = 'Select';
+        }
+      });
+    });
+  </script>
+</body>
+</html>
