@@ -93,6 +93,8 @@ type LogsRequest struct {
 	Service    string    `json:"service"`
 	Env        string    `json:"env"`
 	ResourceID string    `json:"resource_id,omitempty"`
+	ReleaseID  string    `json:"release_id,omitempty"`
+	InstanceID string    `json:"instance_id,omitempty"`
 	Since      time.Time `json:"since,omitempty"`
 	Limit      int       `json:"limit,omitempty"`
 }
@@ -104,6 +106,7 @@ type LogsResult struct {
 type LogEntry struct {
 	Timestamp time.Time         `json:"timestamp"`
 	Message   string            `json:"message"`
+	Source    string            `json:"source,omitempty"`
 	Fields    map[string]string `json:"fields,omitempty"`
 }
 

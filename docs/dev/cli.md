@@ -105,3 +105,13 @@ skiff deploy examples/service/skiff.yaml --direct --state s3://skiff-state-prod 
 ```bash
 skiff rollout watch payments-api --operation op_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
 ```
+
+## Logs
+
+`skiff logs` queries the hot cloud log backend. JSON entries include timestamp, message, provider source, and labels for service, env, release, instance, region, and zone when available.
+AWS service logs use the CloudWatch log group `/skiff/<env>/<service>`. Runner user-data includes the expected CloudWatch forwarding config for stdout/stderr, a stream template of `{service}/{release}/{instance}`, and a future cold archive prefix under `services/<service>/log-archives/<env>/`.
+
+```bash
+skiff logs payments-api --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --since 20m --release rel_01J... --format json
+skiff logs payments-api --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --follow --instance i-abc123 --format json
+```

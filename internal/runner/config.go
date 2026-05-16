@@ -17,6 +17,8 @@ func ValidateConfig(cfg config.Config) error {
 			config.FieldStateBucket: "runner",
 			config.FieldService:     "runner",
 			config.FieldControlKey:  "runner",
+			config.FieldReleaseID:   "runner",
+			config.FieldLogs:        "runner",
 		},
 	})
 }

@@ -27,6 +27,7 @@ func ClassifyError(op string, err error) error {
 		code = provider.CodeAccessDenied
 	case strings.Contains(lower, "notfound") ||
 		strings.Contains(lower, "not found") ||
+		strings.Contains(lower, "no log streams") ||
 		strings.Contains(lower, "no such") ||
 		strings.Contains(lower, "does not exist"):
 		code = provider.CodeNotFound

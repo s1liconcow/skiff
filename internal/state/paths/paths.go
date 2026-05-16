@@ -195,6 +195,16 @@ func ServiceObservation(service, observation string) (string, error) {
 	return "observations/services/" + service + "/" + observation + ".json", nil
 }
 
+func ServiceLogArchivePrefix(service, env string) (string, error) {
+	if err := validateName("service", service); err != nil {
+		return "", err
+	}
+	if err := validateName("env", env); err != nil {
+		return "", err
+	}
+	return "services/" + service + "/log-archives/" + env + "/", nil
+}
+
 func ServicesIndex() string {
 	return "indexes/services.json"
 }

@@ -77,6 +77,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runEvents(binary, root.Args, root, stdout, stderr)
 	case "explain":
 		return runExplain(binary, root.Args, root, stdout, stderr)
+	case "logs":
+		return runLogs(binary, root.Args, root, stdout, stderr)
 	case "object":
 		return runObject(binary, root.Args, stdout, stderr)
 	case "plan":
@@ -170,6 +172,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  deploy     Publish and deploy a service release")
 	fmt.Fprintln(w, "  events     List local service, operation, or saga events")
 	fmt.Fprintln(w, "  explain    Explain provider cloud primitives for a spec")
+	fmt.Fprintln(w, "  logs       Query service logs through the cloud provider")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
 	fmt.Fprintln(w, "  plan       Dry-run provider resource changes for a spec")
 	fmt.Fprintln(w, "  policy     Explain generated state security policies")

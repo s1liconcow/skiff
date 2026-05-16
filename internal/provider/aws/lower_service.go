@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/s1liconcow/skiff/internal/ir"
+	"github.com/s1liconcow/skiff/internal/runner"
 	"github.com/s1liconcow/skiff/internal/state/paths"
 )
 
@@ -227,7 +228,7 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 		}
 		out.LogGroups = append(out.LogGroups, LogGroup{
 			LogicalID:     logs.Meta.LogicalID,
-			Name:          "/skiff/" + graph.Env + "/" + graph.Service,
+			Name:          LogGroupName(graph.Env, graph.Service),
 			RetentionDays: 30,
 			Tags:          TagsMap(logs.Meta, nil),
 			Source:        append([]ir.SourceRef(nil), logs.Meta.Source...),
@@ -513,7 +514,8 @@ func serviceNameFromControlKey(controlKey string) string {
 }
 
 func runnerUserData(graph *ir.Graph, opts LowerOptions, releaseID, controlKey string) string {
-	cfg := map[string]string{
+	archivePrefix, _ := paths.ServiceLogArchivePrefix(graph.Service, graph.Env)
+	cfg := map[string]any{
 		"env":          graph.Env,
 		"provider":     Name,
 		"region":       opts.Region,
@@ -521,8 +523,16 @@ func runnerUserData(graph *ir.Graph, opts LowerOptions, releaseID, controlKey st
 		"service":      graph.Service,
 		"control_key":  controlKey,
 		"release_id":   releaseID,
+		"logs": runner.CloudWatchLogForwarding(
+			graph.Service,
+			graph.Env,
+			releaseID,
+			opts.Region,
+			LogGroupName(graph.Env, graph.Service),
+			archivePrefix,
+		),
 	}
-	body, _ := json.Marshal(cfg)
+	body, _ := json.Marshal(map[string]any{"skiff": cfg})
 	return "#cloud-config\nwrite_files:\n  - path: /etc/skiff-runner/config.json\n    permissions: '0640'\n    content: |\n      " + string(body) + "\nruncmd:\n  - [ systemctl, enable, --now, skiff-runner ]\n"
 }
 

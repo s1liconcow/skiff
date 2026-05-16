@@ -28,6 +28,8 @@ const (
 	FieldAPIURL      = "api_url"
 	FieldService     = "service"
 	FieldControlKey  = "control_key"
+	FieldReleaseID   = "release_id"
+	FieldLogs        = "logs"
 )
 
 type Config struct {
@@ -42,6 +44,16 @@ type Config struct {
 	APIURL      string `json:"api_url,omitempty"`
 	Service     string `json:"service,omitempty"`
 	ControlKey  string `json:"control_key,omitempty"`
+	ReleaseID   string `json:"release_id,omitempty"`
+	Logs        *Logs  `json:"logs,omitempty"`
+}
+
+type Logs struct {
+	Provider       string            `json:"provider,omitempty"`
+	Group          string            `json:"group,omitempty"`
+	StreamTemplate string            `json:"stream_template,omitempty"`
+	ArchivePrefix  string            `json:"archive_prefix,omitempty"`
+	Labels         map[string]string `json:"labels,omitempty"`
 }
 
 type Loaded struct {
@@ -72,8 +84,24 @@ func (l Loaded) Redacted() Loaded {
 		Config:  l.Config,
 		Sources: make(map[string]string, len(l.Sources)),
 	}
+	if l.Config.Logs != nil {
+		logs := *l.Config.Logs
+		logs.Labels = cloneStringMap(logs.Labels)
+		out.Config.Logs = &logs
+	}
 	for field, source := range l.Sources {
 		out.Sources[field] = source
+	}
+	return out
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		out[key] = value
 	}
 	return out
 }

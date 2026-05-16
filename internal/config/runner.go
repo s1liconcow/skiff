@@ -17,8 +17,10 @@ type runnerConfig struct {
 	Region      string `json:"region"`
 	StateBucket string `json:"state_bucket"`
 	ControlKey  string `json:"control_key"`
+	ReleaseID   string `json:"release_id,omitempty"`
 	KMSKey      string `json:"kms_key,omitempty"`
 	LogLevel    string `json:"log_level,omitempty"`
+	Logs        *Logs  `json:"logs,omitempty"`
 }
 
 func ParseRunnerUserData(body []byte) (Config, error) {
@@ -36,8 +38,14 @@ func ParseRunnerUserData(body []byte) (Config, error) {
 		Region:      raw.Skiff.Region,
 		StateBucket: raw.Skiff.StateBucket,
 		ControlKey:  raw.Skiff.ControlKey,
+		ReleaseID:   raw.Skiff.ReleaseID,
 		KMSKey:      raw.Skiff.KMSKey,
 		LogLevel:    raw.Skiff.LogLevel,
+	}
+	if raw.Skiff.Logs != nil {
+		logs := *raw.Skiff.Logs
+		logs.Labels = cloneStringMap(logs.Labels)
+		cfg.Logs = &logs
 	}
 	return cfg, nil
 }

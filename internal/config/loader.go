@@ -68,8 +68,15 @@ func applyConfig(loaded *Loaded, cfg Config, source string) {
 		FieldAPIURL:      cfg.APIURL,
 		FieldService:     cfg.Service,
 		FieldControlKey:  cfg.ControlKey,
+		FieldReleaseID:   cfg.ReleaseID,
 	}
 	applyValues(loaded, values, source)
+	if cfg.Logs != nil {
+		logs := *cfg.Logs
+		logs.Labels = cloneStringMap(logs.Labels)
+		loaded.Config.Logs = &logs
+		loaded.Sources[FieldLogs] = source
+	}
 }
 
 func applyValues(loaded *Loaded, values map[string]string, source string) {
@@ -103,6 +110,8 @@ func applyValues(loaded *Loaded, values map[string]string, source string) {
 			loaded.Config.Service = value
 		case FieldControlKey:
 			loaded.Config.ControlKey = value
+		case FieldReleaseID:
+			loaded.Config.ReleaseID = value
 		default:
 			continue
 		}
@@ -213,6 +222,8 @@ func normalizeFileField(key string) (string, error) {
 		return FieldService, nil
 	case "control_key", "controlKey":
 		return FieldControlKey, nil
+	case "release_id", "releaseID", "releaseId":
+		return FieldReleaseID, nil
 	default:
 		return "", fmt.Errorf("unknown field %q", key)
 	}
@@ -231,6 +242,7 @@ func valuesFromEnv(env map[string]string) map[string]string {
 		FieldAPIURL:      env["SKIFF_API_URL"],
 		FieldService:     env["SKIFF_SERVICE"],
 		FieldControlKey:  env["SKIFF_CONTROL_KEY"],
+		FieldReleaseID:   env["SKIFF_RELEASE_ID"],
 	}
 }
 

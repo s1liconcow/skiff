@@ -64,6 +64,13 @@ func TestCoreObjectPaths(t *testing.T) {
 			want: "resources/by-provider/aws/target-group/arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup%2Fpayments%2Fabc.json",
 		},
 		{
+			name: "service log archive prefix",
+			path: func() (string, error) {
+				return paths.ServiceLogArchivePrefix("payments-api", "prod")
+			},
+			want: "services/payments-api/log-archives/prod/",
+		},
+		{
 			name: "audit event for UTC time",
 			path: func() (string, error) {
 				return paths.AuditEventForTime(time.Date(2026, 5, 16, 23, 0, 0, 0, time.FixedZone("west", -7*60*60)), "01JABCDEF")

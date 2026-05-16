@@ -50,11 +50,16 @@ func TestLowerServicePublicHTTPGoldenPrimitives(t *testing.T) {
 	}
 	userData := lowered.LaunchTemplates[0].UserData
 	for _, want := range []string{
+		`"skiff":`,
 		`"state_bucket":"s3://skiff-state-prod"`,
 		`"service":"payments-api"`,
 		`"control_key":"services/payments-api/control.json"`,
 		`"region":"us-west-2"`,
 		`"release_id":"rel_01JABC"`,
+		`"logs":`,
+		`"group":"/skiff/prod/payments-api"`,
+		`"stream_template":"{service}/{release}/{instance}"`,
+		`"archive_prefix":"services/payments-api/log-archives/prod/"`,
 		"skiff-runner",
 	} {
 		if !strings.Contains(userData, want) {
