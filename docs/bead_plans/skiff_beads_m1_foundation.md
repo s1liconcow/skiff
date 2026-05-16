@@ -46,31 +46,31 @@ All core paths converge on skiff-m1-021, the runner fixture release gate.
 
 ## Initialize repository, module boundaries, and developer tooling
 
-ID
+### ID
 
 skiff-m1-001
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 repo, go, foundation
 
-Dependencies
+### Dependencies
 
-(none)
+- (none)
 
-Description
+### Description
 
 Create the initial Skiff repository structure, Go module setup, lint/test tooling, and binary entrypoints. This bead creates the skeleton that every later bead depends on.
 
-Subtasks
+### Subtasks
 
 - Create top-level Go module and initial package directories.
 - Add `cmd/skiff`, `cmd/skiffd`, and `cmd/skiff-runner` entrypoints with placeholder commands.
@@ -80,7 +80,7 @@ Subtasks
 - Add CI skeleton that runs `go test ./...` and formatting checks.
 - Document package ownership and layering rules in `docs/dev/package-boundaries.md`.
 
-Likely Files
+### Likely Files
 
 - `go.mod`
 - `go.sum`
@@ -94,7 +94,7 @@ Likely Files
 - `.github/workflows/ci.yml`
 - `docs/dev/package-boundaries.md`
 
-Design
+### Design
 
 Keep package boundaries strict from day one. The `spec` package parses user-facing YAML. The `compiler` package lowers specs into typed IR. The `provider` package realizes IR through cloud APIs. The `state` package reads and writes Skiff object-state documents. The CLI and `skiffd` orchestrate these packages but should not contain business logic.
 
@@ -108,15 +108,15 @@ skiff-runner version
 
 Each command should print version, commit, build date, and JSON output when requested. This seems small, but it establishes the command shape that all future work follows.
 
-Testing / Validation
+### Testing / Validation
 
 Run `go test ./...`, `go vet ./...`, and formatting in CI. Add a smoke test that executes all three binaries with `version --format json` and validates parseable JSON. Confirm the repository builds on a clean checkout without cloud credentials.
 
-Gotchas
+### Gotchas
 
 Avoid creating public APIs too early. Most packages should stay under `internal/` until a plugin or SDK requirement is concrete. Avoid circular dependencies by keeping `internal/types` small and by not letting provider code import CLI packages.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - Fresh checkout builds all three binaries.
 - `go test ./...` passes.
@@ -127,31 +127,31 @@ Acceptance Criteria
 
 ## Define configuration loading for CLI, skiffd, and runner
 
-ID
+### ID
 
 skiff-m1-002
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 config, cli, skiffd, runner
 
-Dependencies
+### Dependencies
 
-skiff-m1-001
+- skiff-m1-001
 
-Description
+### Description
 
 Implement a shared but mode-aware configuration system for direct CLI mode, API mode, `skiffd`, and `skiff-runner`.
 
-Subtasks
+### Subtasks
 
 - Define config structs for environment, state bucket URI, cloud provider, region, KMS key, auth mode, and log level.
 - Support config from file, environment variables, and flags with clear precedence.
@@ -160,7 +160,7 @@ Subtasks
 - Validate required fields differently for direct CLI, API CLI, `skiffd`, and runner modes.
 - Ensure config errors are actionable and include the source field that failed.
 
-Likely Files
+### Likely Files
 
 - `internal/config/config.go`
 - `internal/config/loader.go`
@@ -170,7 +170,7 @@ Likely Files
 - `cmd/skiff-runner/main.go`
 - `tests/config/testdata/*.yaml`
 
-Design
+### Design
 
 Configuration should not silently guess production state. Require explicit `env`, `provider`, `region`, and state bucket URI outside local tests. Keep the default local state backend as an in-memory or filesystem test backend, not an implicit cloud bucket.
 
@@ -208,15 +208,15 @@ The runner user-data should be minimal and immutable enough to bootstrap:
 }
 ```
 
-Testing / Validation
+### Testing / Validation
 
 Unit test precedence order with table-driven tests. Test invalid configs for each mode. Add tests for redacting sensitive values in `config show`. Validate runner user-data parsing with malformed JSON, missing fields, and unknown fields.
 
-Gotchas
+### Gotchas
 
 Do not put secret values in config. Secret references are acceptable; plaintext secrets are not. Do not make `skiffd` required in CLI config because direct mode is a core recovery path.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - Config can be loaded from flags, env vars, and file with deterministic precedence.
 - `skiff config show --format json` redacts sensitive values.
@@ -227,31 +227,31 @@ Acceptance Criteria
 
 ## Implement object store interface and deterministic in-memory backend
 
-ID
+### ID
 
 skiff-m1-003
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 state, object-store, testing
 
-Dependencies
+### Dependencies
 
-skiff-m1-001
+- skiff-m1-001
 
-Description
+### Description
 
 Create the provider-neutral object store abstraction used by Skiff state, release objects, event logs, and tests. Add an in-memory backend with real compare-and-swap semantics.
 
-Subtasks
+### Subtasks
 
 - Define `ObjectStore` with `Get`, `Head`, `Create`, `CompareAndSwap`, and `List`.
 - Define versioned object metadata containing key, ETag, version ID, timestamps, metadata, and content type.
@@ -260,14 +260,14 @@ Subtasks
 - Make ETags deterministic per object version for test assertions.
 - Add concurrency tests with multiple goroutines contending on the same key.
 
-Likely Files
+### Likely Files
 
 - `internal/objstore/store.go`
 - `internal/objstore/errors.go`
 - `internal/objstore/memory/store.go`
 - `internal/objstore/memory/store_test.go`
 
-Design
+### Design
 
 The object store interface is Skiff’s core coordination substrate. Keep it intentionally small:
 
@@ -283,15 +283,15 @@ type ObjectStore interface {
 
 `Create` must fail if the object already exists. `CompareAndSwap` must fail if the provided ETag is not the current ETag. All state primitives must be built on this interface, not on cloud-specific SDK types.
 
-Testing / Validation
+### Testing / Validation
 
 Run race-enabled tests for concurrent writes. Test create-if-absent, failed create, successful CAS, failed CAS, prefix list ordering, and metadata preservation. Add property-style tests where concurrent increments via CAS produce a final version count equal to successful updates.
 
-Gotchas
+### Gotchas
 
 Do not implement delete in the base interface unless a later bead proves it is needed. Deletion is dangerous for append-only history and should be handled through lifecycle policies or explicit GC APIs, not casual state code.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - ObjectStore interface compiles and is cloud-neutral.
 - In-memory backend enforces CAS correctly under concurrency.
@@ -302,33 +302,33 @@ Acceptance Criteria
 
 ## Implement AWS S3 object store backend with conditional writes
 
-ID
+### ID
 
 skiff-m1-004
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 aws, s3, object-store, cas
 
-Dependencies
+### Dependencies
 
-skiff-m1-003
+- skiff-m1-003
 
-skiff-m1-002
+- skiff-m1-002
 
-Description
+### Description
 
 Implement the production AWS object store backend using S3 conditional writes for create-if-absent and compare-and-swap updates.
 
-Subtasks
+### Subtasks
 
 - Create `s3store.Store` implementing `ObjectStore`.
 - Use `If-None-Match: *` for `Create`.
@@ -339,7 +339,7 @@ Subtasks
 - Add request logging with trace IDs but never log object bodies by default.
 - Add integration tests gated by an environment variable for real S3 buckets.
 
-Likely Files
+### Likely Files
 
 - `internal/objstore/s3/store.go`
 - `internal/objstore/s3/errors.go`
@@ -347,7 +347,7 @@ Likely Files
 - `internal/aws/session.go`
 - `tests/integration/test_s3_store.go`
 
-Design
+### Design
 
 This backend must be boring and exact. Skiff correctness depends on conditional writes. Do not emulate CAS with read-then-unconditional-write.
 
@@ -375,15 +375,15 @@ func (s *Store) CompareAndSwap(ctx context.Context, key, etag string, body []byt
 }
 ```
 
-Testing / Validation
+### Testing / Validation
 
 Unit test AWS error classification with fake Smithy errors. Integration test against a temporary bucket when `SKIFF_TEST_S3_BUCKET` is set. Validate concurrent CAS behavior with two writers. Confirm KMS options are passed to S3 calls using a stub client.
 
-Gotchas
+### Gotchas
 
 S3 multipart uploads can produce non-content MD5 ETags; Skiff should treat ETag only as an opaque version token. Do not assume ETag is a content hash. Keep body size for control docs small enough to avoid multipart writes.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - S3 backend implements the object store interface.
 - `Create` and `CompareAndSwap` use S3 conditional headers.
@@ -394,31 +394,31 @@ Acceptance Criteria
 
 ## Define object-state paths, schemas, and canonical JSON encoding
 
-ID
+### ID
 
 skiff-m1-005
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 state, schema, paths
 
-Dependencies
+### Dependencies
 
-skiff-m1-003
+- skiff-m1-003
 
-Description
+### Description
 
 Create the canonical path helpers and JSON schema conventions for all Skiff state objects. This bead makes object state legible and prevents ad hoc key construction.
 
-Subtasks
+### Subtasks
 
 - Define path helper functions for services, releases, operations, sagas, resources, indexes, audit events, and observations.
 - Define stable Go structs for service control, operation intent/control, release manifest, saga intent/control, resource records, and events.
@@ -427,7 +427,7 @@ Subtasks
 - Add `skiff state path ...` developer command to print expected paths for a service, release, operation, or saga.
 - Document path conventions with examples.
 
-Likely Files
+### Likely Files
 
 - `internal/state/paths/paths.go`
 - `internal/state/schema/*.go`
@@ -436,7 +436,7 @@ Likely Files
 - `docs/dev/object-state-layout.md`
 - `tests/state/path_test.go`
 
-Design
+### Design
 
 Object keys are part of the user-facing debuggability story. An operator should be able to inspect state with cloud CLI tools and understand what they see.
 
@@ -460,15 +460,15 @@ audit/<yyyy-mm-dd>/<ulid>.json
 
 Never concatenate paths inline in business logic. Always use helpers.
 
-Testing / Validation
+### Testing / Validation
 
 Test path helpers for names with invalid characters, reserved words, and unusual environment names. Test canonical JSON round-trips. Add golden files for representative service control, release, and saga objects.
 
-Gotchas
+### Gotchas
 
 Name normalization must be strict. If `payments_api` and `payments-api` both normalize to the same key, reject one explicitly. Avoid allowing arbitrary path separators in service names.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - All durable object paths are generated through helpers.
 - Every durable object has a schema version field.
@@ -479,31 +479,31 @@ Acceptance Criteria
 
 ## Implement signed object and release verification primitives
 
-ID
+### ID
 
 skiff-m1-006
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 security, release, signing
 
-Dependencies
+### Dependencies
 
-skiff-m1-005
+- skiff-m1-005
 
-Description
+### Description
 
 Implement signing and verification primitives for release manifests, runtime manifests, operation intents, and other critical immutable objects.
 
-Subtasks
+### Subtasks
 
 - Define `Signer` and `Verifier` interfaces independent of the concrete signing mechanism.
 - Implement local test signer/verifier using generated keys for unit tests.
@@ -512,7 +512,7 @@ Subtasks
 - Verify object schema, digest, signature, intended env/service, and expiry where applicable.
 - Add CLI commands `skiff release verify` and `skiff object verify`.
 
-Likely Files
+### Likely Files
 
 - `internal/security/signing/interface.go`
 - `internal/security/signing/local.go`
@@ -522,7 +522,7 @@ Likely Files
 - `tests/security/signing_test.go`
 - `tests/golden/release/*.json`
 
-Design
+### Design
 
 Signing must be an interface so Skiff can support different production signers later. Do not wire the core release code to one specific signing tool. The invariant is what matters:
 
@@ -540,15 +540,15 @@ Release verification should check:
 6. release is not expired
 7. rollback policy is respected by the caller
 
-Testing / Validation
+### Testing / Validation
 
 Golden tests should verify that changing one byte in a signed release fails verification. Test wrong service/env, expired release, missing signature, invalid digest, and unsupported schema. CLI verification should emit both human-readable and JSON failure reasons.
 
-Gotchas
+### Gotchas
 
 Be careful not to sign pretty-printed JSON in one place and compact JSON in another. Always sign canonical bytes. Do not let callers verify `current.json` as if it were a trusted release; pointers are not trust roots.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - Signer/verifier interfaces exist and are covered by tests.
 - Release verification fails on tampering, wrong env/service, or expiration.
@@ -559,33 +559,33 @@ Acceptance Criteria
 
 ## Implement service control documents, CAS updates, and leases
 
-ID
+### ID
 
 skiff-m1-007
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 state, lease, cas, concurrency
 
-Dependencies
+### Dependencies
 
-skiff-m1-004
+- skiff-m1-004
 
-skiff-m1-005
+- skiff-m1-005
 
-Description
+### Description
 
 Implement the mutable service control document and lease primitives that coordinate deploys, rollbacks, and service-level operations.
 
-Subtasks
+### Subtasks
 
 - Define `ServiceControl` schema with desired release, stable release, active operation, lease, version, and timestamps.
 - Implement `GetServiceControl`, `CreateServiceControl`, and `UpdateServiceControlCAS`.
@@ -594,7 +594,7 @@ Subtasks
 - Add contention-friendly retry helpers with bounded exponential backoff.
 - Add structured errors for lease held, lease lost, stale ETag, and invalid transition.
 
-Likely Files
+### Likely Files
 
 - `internal/state/service_control.go`
 - `internal/state/lease.go`
@@ -602,7 +602,7 @@ Likely Files
 - `internal/state/service_control_test.go`
 - `internal/state/lease_test.go`
 
-Design
+### Design
 
 The service control document is both state and lock. Do not create a separate lock object. The same control doc must hold the lease and the mutation being protected.
 
@@ -634,15 +634,15 @@ Example shape:
 
 Only the holder of the latest ETag and lease token can continue mutating.
 
-Testing / Validation
+### Testing / Validation
 
 Use the in-memory backend for deterministic concurrent lease tests. Spawn multiple contenders and assert only one lease is acquired. Test lease expiration and takeover. Test heartbeat failure after another writer changes the control doc. Test version increments and updated timestamps.
 
-Gotchas
+### Gotchas
 
 Clock skew matters. Use a clock interface in tests and prefer short-lived leases with heartbeat renewal. Never use lease ownership alone as proof; ETag/CAS is the fencing mechanism.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - Service control schema is implemented.
 - Lease acquisition is atomic with the control document update.
@@ -653,33 +653,33 @@ Acceptance Criteria
 
 ## Implement append-only event logs and audit records
 
-ID
+### ID
 
 skiff-m1-008
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 events, audit, state
 
-Dependencies
+### Dependencies
 
-skiff-m1-004
+- skiff-m1-004
 
-skiff-m1-005
+- skiff-m1-005
 
-Description
+### Description
 
 Implement immutable event creation for operations, sagas, service changes, and audit records. Events are the user-visible timeline for Skiff.
 
-Subtasks
+### Subtasks
 
 - Define event schemas for operation events, saga events, service events, and audit events.
 - Use ULID or comparable sortable IDs in event object keys.
@@ -689,7 +689,7 @@ Subtasks
 - Add `skiff events` command for local debugging.
 - Ensure event writes are best-effort for diagnostics but mandatory for operation state transitions where auditability is required.
 
-Likely Files
+### Likely Files
 
 - `internal/events/event.go`
 - `internal/events/log.go`
@@ -698,7 +698,7 @@ Likely Files
 - `cmd/skiff/events.go`
 - `tests/events/eventlog_test.go`
 
-Design
+### Design
 
 Events should be immutable, append-only facts. They are not the current state; control docs are current state. Events explain how we got there.
 
@@ -712,15 +712,15 @@ audit/2026-05-16/01J...json
 
 A good event includes scope, actor, trace ID, severity, type, message, timestamp, and structured data. Keep messages concise but useful for humans and agents.
 
-Testing / Validation
+### Testing / Validation
 
 Test create-only behavior by attempting duplicate event IDs. Test ordering by ULID. Test list pagination with small limits. Test hash-chain verification for an operation with multiple events.
 
-Gotchas
+### Gotchas
 
 Do not let event listing become the only way to derive current state. It is okay to use events to rebuild history, but hot state should live in control docs and in-memory indexes.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - Events are written immutably with create-if-absent.
 - `skiff events` can list service and saga events.
@@ -731,35 +731,35 @@ Acceptance Criteria
 
 ## Implement skiffd stateless server skeleton and API surface
 
-ID
+### ID
 
 skiff-m1-009
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 skiffd, api, server
 
-Dependencies
+### Dependencies
 
-skiff-m1-002
+- skiff-m1-002
 
-skiff-m1-003
+- skiff-m1-003
 
-skiff-m1-005
+- skiff-m1-005
 
-Description
+### Description
 
 Build the initial `skiffd` server as a stateless facade over object storage and provider APIs. This bead does not implement full deploys yet; it establishes the API, health, auth hook points, and dependency injection.
 
-Subtasks
+### Subtasks
 
 - Create HTTP/gRPC or Connect server skeleton with health, version, status, and config endpoints.
 - Add dependency injection for object store, provider, signer/verifier, index, and event bus.
@@ -769,7 +769,7 @@ Subtasks
 - Add basic auth middleware interfaces, even if initial local mode allows unauthenticated dev use.
 - Add graceful shutdown.
 
-Likely Files
+### Likely Files
 
 - `cmd/skiffd/main.go`
 - `internal/skiffd/server.go`
@@ -779,7 +779,7 @@ Likely Files
 - `api/proto/skiff.proto`
 - `tests/skiffd/server_test.go`
 
-Design
+### Design
 
 `skiffd` is not a durable database. It should be restartable at any time. It reads object storage and provider state, writes object storage through CAS, and maintains only rebuildable in-memory views.
 
@@ -796,15 +796,15 @@ GET /v1/events/recent
 
 All mutating endpoints added later must flow through state primitives, not custom object writes.
 
-Testing / Validation
+### Testing / Validation
 
 Use httptest or Connect test clients. Validate JSON error envelopes. Test graceful shutdown. Test readiness returns false until index has completed initial load. Test trace ID propagation to logs.
 
-Gotchas
+### Gotchas
 
 Avoid embedding cloud credentials in `skiffd` config responses. Keep auth and authorization pluggable but do not defer request context design; every handler should receive actor and trace metadata.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - `skiffd` starts locally with memory object store.
 - Health and version endpoints work in human and JSON modes.
@@ -815,37 +815,37 @@ Acceptance Criteria
 
 ## Build skiffd in-memory index and refresh loop
 
-ID
+### ID
 
 skiff-m1-010
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 skiffd, index, state, ux
 
-Dependencies
+### Dependencies
 
-skiff-m1-005
+- skiff-m1-005
 
-skiff-m1-007
+- skiff-m1-007
 
-skiff-m1-008
+- skiff-m1-008
 
-skiff-m1-009
+- skiff-m1-009
 
-Description
+### Description
 
 Implement rebuildable in-memory indexes inside `skiffd` for services, sagas, resources, operations, and recent events.
 
-Subtasks
+### Subtasks
 
 - Define immutable `IndexSnapshot` with services, sagas, operations, resources, and recent events.
 - Use atomic snapshot publication for lock-light reads.
@@ -856,7 +856,7 @@ Subtasks
 - Add `?fresh=true` behavior for critical endpoints to reload the relevant control object directly.
 - Expose index stats and generation via admin endpoint.
 
-Likely Files
+### Likely Files
 
 - `internal/index/snapshot.go`
 - `internal/index/indexer.go`
@@ -865,7 +865,7 @@ Likely Files
 - `internal/skiffd/routes_services.go`
 - `tests/index/indexer_test.go`
 
-Design
+### Design
 
 `skiffd` should feel fast without becoming a source of truth. The index is a view, not state. If it is lost, it is rebuilt from object storage.
 
@@ -892,15 +892,15 @@ Every response using the index should include freshness metadata:
 }
 ```
 
-Testing / Validation
+### Testing / Validation
 
 Unit test index rebuild from a memory store fixture. Test malformed objects are logged and skipped, not fatal. Test atomic snapshot reads while rebuilds run. Test `fresh=true` uses direct object reads. Test index freshness metadata.
 
-Gotchas
+### Gotchas
 
 Do not store unbounded event history in memory. Keep a recent window and lazy-load detailed histories by prefix. Be careful with prefix scans in large buckets; add pagination from the start.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - `skiffd` exposes service and saga lists from memory index.
 - Index rebuild can recover from an empty process.
@@ -911,33 +911,33 @@ Acceptance Criteria
 
 ## Implement CLI root, modes, JSON output, and API/direct clients
 
-ID
+### ID
 
 skiff-m1-011
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 cli, agent, direct-mode, api-mode
 
-Dependencies
+### Dependencies
 
-skiff-m1-002
+- skiff-m1-002
 
-skiff-m1-009
+- skiff-m1-009
 
-Description
+### Description
 
 Build the `skiff` CLI foundation with direct mode, API mode, structured output, and agent-safe command behavior.
 
-Subtasks
+### Subtasks
 
 - Implement root command with global flags: `--config`, `--env`, `--provider`, `--region`, `--state`, `--api`, `--direct`, `--format`, `--no-color`, `--yes`, `--trace-id`.
 - Create client interfaces for Skiff operations that can be backed by direct object/provider calls or `skiffd` API calls.
@@ -946,7 +946,7 @@ Subtasks
 - Add shell completion generation.
 - Ensure all commands are non-interactive when `--yes` or `--format json` is used.
 
-Likely Files
+### Likely Files
 
 - `cmd/skiff/main.go`
 - `internal/cli/root.go`
@@ -957,7 +957,7 @@ Likely Files
 - `internal/client/api.go`
 - `tests/cli/*.go`
 
-Design
+### Design
 
 The CLI is a first-class agent interface. Human output can be beautiful, but JSON output must be deterministic and easy to consume.
 
@@ -977,15 +977,15 @@ Exit-code plan:
 
 The client abstraction prevents commands from knowing whether they are using direct mode or API mode.
 
-Testing / Validation
+### Testing / Validation
 
 Golden-test human and JSON output. Test exit codes for representative errors. Test direct mode with memory store and API mode with httptest `skiffd`. Test `--no-color` and `--format json` never emit ANSI codes.
 
-Gotchas
+### Gotchas
 
 Do not make prompts appear in CI accidentally. JSON mode must suppress spinners, progress bars, and interactive questions. Do not bury original provider errors; preserve context and add Skiff hints.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - CLI supports direct and API clients through the same command surface.
 - All initial commands support JSON output.
@@ -996,31 +996,31 @@ Acceptance Criteria
 
 ## Implement user-facing spec parser, defaults, and validation
 
-ID
+### ID
 
 skiff-m1-012
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 spec, validation, yaml
 
-Dependencies
+### Dependencies
 
-skiff-m1-001
+- skiff-m1-001
 
-Description
+### Description
 
 Parse Skiff workload specs from YAML/JSON, apply safe defaults, and validate user-facing fields before compilation.
 
-Subtasks
+### Subtasks
 
 - Define Go structs for Service, Worker, Job, ManagedDatabase, StatefulGroup, Stack, and shared metadata.
 - Implement YAML/JSON decoding with strict unknown-field rejection by default.
@@ -1029,7 +1029,7 @@ Subtasks
 - Produce path-specific diagnostics suitable for CLI, API, and agents.
 - Add `skiff validate` command.
 
-Likely Files
+### Likely Files
 
 - `internal/spec/types.go`
 - `internal/spec/decode.go`
@@ -1039,7 +1039,7 @@ Likely Files
 - `tests/spec/*.go`
 - `examples/service/skiff.yaml`
 
-Design
+### Design
 
 Keep the public spec small and understandable. Do not mirror Kubernetes. The basic service spec should be readable by an application engineer.
 
@@ -1071,15 +1071,15 @@ network:
 
 Validation should reject mutable production artifacts, missing health checks for services, public ingress without TLS, invalid names, and unsafe scaling values.
 
-Testing / Validation
+### Testing / Validation
 
 Unit test valid and invalid examples. Golden-test diagnostics. Test strict unknown field rejection. Test production vs non-production validation differences. Test that defaults are visible through `skiff validate --show-defaulted --format yaml`.
 
-Gotchas
+### Gotchas
 
 Do not overfit the spec to AWS. Keep provider-specific details behind `provider` overrides when needed, not in the common path. Avoid permissive decoding because typos in infra specs are dangerous.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - `skiff validate` works on service examples.
 - Validation emits path-specific actionable diagnostics.
@@ -1090,31 +1090,31 @@ Acceptance Criteria
 
 ## Define typed IR and base compiler
 
-ID
+### ID
 
 skiff-m1-013
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 compiler, ir, provider
 
-Dependencies
+### Dependencies
 
-skiff-m1-012
+- skiff-m1-012
 
-Description
+### Description
 
 Compile validated user specs into provider-neutral typed IR that describes cloud resources, runtime manifests, identity, observability, and rollout intent.
 
-Subtasks
+### Subtasks
 
 - Define IR graph types for workload identity, instance template, autoscaling group, target group, listener, IAM role, security group rules, log/metric config, and runtime manifest.
 - Implement base compiler for a minimal Service spec.
@@ -1123,7 +1123,7 @@ Subtasks
 - Add `skiff compile --out ir.json` developer command.
 - Add semantic diff helpers between two IR graphs.
 
-Likely Files
+### Likely Files
 
 - `internal/ir/types.go`
 - `internal/ir/resource.go`
@@ -1133,7 +1133,7 @@ Likely Files
 - `cmd/skiff/compile.go`
 - `tests/compiler/*.go`
 
-Design
+### Design
 
 The IR is where Skiff becomes explainable. It should not be AWS-specific, but it should be cloud-shaped rather than Kubernetes-shaped.
 
@@ -1160,15 +1160,15 @@ skiff.dev/graph
 
 `skiff compile` is a dev command, but it is also useful for tests and future provider conformance.
 
-Testing / Validation
+### Testing / Validation
 
 Golden-test IR output for the example service. Test deterministic ordering and naming. Test source references in explain output. Test semantic diff does not flag reorder-only changes.
 
-Gotchas
+### Gotchas
 
 Do not let AWS ARNs leak into common IR. Provider lowering can add ARNs later. Avoid creating a generic “resource map” that loses type safety; typed resources are easier to validate and explain.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - Minimal Service spec compiles to typed IR.
 - IR output is deterministic and golden-tested.
@@ -1179,33 +1179,33 @@ Acceptance Criteria
 
 ## Create AWS provider skeleton and tagging/naming conventions
 
-ID
+### ID
 
 skiff-m1-014
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 aws, provider, ir
 
-Dependencies
+### Dependencies
 
-skiff-m1-013
+- skiff-m1-013
 
-skiff-m1-002
+- skiff-m1-002
 
-Description
+### Description
 
 Implement the AWS provider skeleton, SDK client construction, naming rules, tag application, and read-only discovery helpers.
 
-Subtasks
+### Subtasks
 
 - Define provider interface with plan, apply placeholder, inspect service, inspect resource, logs, metrics, debug, and rollout hooks.
 - Implement AWS client construction from config and environment credentials.
@@ -1214,7 +1214,7 @@ Subtasks
 - Implement read-only discovery for ASG, launch template, target group, IAM role, and log group by Skiff tags.
 - Add provider-level error classification.
 
-Likely Files
+### Likely Files
 
 - `internal/provider/provider.go`
 - `internal/provider/aws/provider.go`
@@ -1224,7 +1224,7 @@ Likely Files
 - `internal/provider/aws/errors.go`
 - `tests/provider/aws/*.go`
 
-Design
+### Design
 
 The provider package should translate typed IR into cloud actions. It should not parse YAML, know CLI flags, or mutate Skiff object state directly.
 
@@ -1242,15 +1242,15 @@ type Provider interface {
 
 Start with read-only discovery and skeleton plan results. Full apply comes later.
 
-Testing / Validation
+### Testing / Validation
 
 Unit test naming with long service names, special characters, and collision cases. Test tag filters using mocked AWS clients. Test error classification for access denied, not found, throttling, and validation errors.
 
-Gotchas
+### Gotchas
 
 AWS resource name limits differ by service. Centralize truncation and suffix logic. Do not depend solely on names for discovery; tags are the long-term source of ownership.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - AWS provider can be constructed from config.
 - Provider discovers tagged resources read-only.
@@ -1261,33 +1261,33 @@ Acceptance Criteria
 
 ## Implement AWS bootstrap for state bucket, KMS, roles, and policies
 
-ID
+### ID
 
 skiff-m1-015
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 bootstrap, aws, security
 
-Dependencies
+### Dependencies
 
-skiff-m1-004
+- skiff-m1-004
 
-skiff-m1-014
+- skiff-m1-014
 
-Description
+### Description
 
 Implement `skiff bootstrap aws` to create the minimal environment Skiff needs: state bucket, KMS key/alias, bucket policies, and IAM roles.
 
-Subtasks
+### Subtasks
 
 - Plan and create state bucket with versioning, public access block, encryption, and lifecycle placeholders.
 - Create or discover KMS key/alias for state bucket encryption.
@@ -1297,7 +1297,7 @@ Subtasks
 - Support `--dry-run`, `--emit terraform`, and `--yes` modes.
 - Make bootstrap idempotent.
 
-Likely Files
+### Likely Files
 
 - `cmd/skiff/bootstrap.go`
 - `internal/bootstrap/aws.go`
@@ -1307,7 +1307,7 @@ Likely Files
 - `examples/bootstrap/aws-minimal.yaml`
 - `tests/bootstrap/*.go`
 
-Design
+### Design
 
 Bootstrap is the only part that must create the initial state substrate. After bootstrap, normal Skiff operations can be driven by object state.
 
@@ -1325,15 +1325,15 @@ root/env control object
 
 Bucket policy must block public access and reject unconditional writes for prefixes that require create-if-absent or CAS semantics. Do not make bootstrap require `skiffd`.
 
-Testing / Validation
+### Testing / Validation
 
 Unit test generated policies. Use AWS policy JSON golden files. Integration test in a disposable AWS account if available. Dry-run must show exact resources and policies. Idempotency test should run bootstrap twice against a fake provider and result in no duplicate logical resources.
 
-Gotchas
+### Gotchas
 
 Bucket policy conditions are easy to get wrong and can lock out Skiff. Keep an emergency documented break-glass role. Emit policy before apply and keep generated statements minimal.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - `skiff bootstrap aws --dry-run` prints a complete plan.
 - Bootstrap creates or discovers minimal AWS resources idempotently.
@@ -1344,35 +1344,35 @@ Acceptance Criteria
 
 ## Implement runner identity discovery and release manifest fetch
 
-ID
+### ID
 
 skiff-m1-016
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 runner, aws, release
 
-Dependencies
+### Dependencies
 
-skiff-m1-004
+- skiff-m1-004
 
-skiff-m1-006
+- skiff-m1-006
 
-skiff-m1-002
+- skiff-m1-002
 
-Description
+### Description
 
 Implement the runner bootstrap path that discovers VM identity, reads the service control document, fetches the desired release, and verifies signed manifests.
 
-Subtasks
+### Subtasks
 
 - Parse runner user-data/cloud-init config.
 - Discover cloud instance identity and metadata needed for logs and release verification.
@@ -1382,7 +1382,7 @@ Subtasks
 - Persist last accepted release locally for rollback protection policy.
 - Emit runner state transitions as local JSON events.
 
-Likely Files
+### Likely Files
 
 - `cmd/skiff-runner/main.go`
 - `internal/runner/config.go`
@@ -1392,7 +1392,7 @@ Likely Files
 - `internal/release/fetch.go`
 - `tests/runner/manifest_test.go`
 
-Design
+### Design
 
 Runner boot path must stay minimal and robust. It should not need `skiffd`. It should need only object storage read access, artifact access, and cloud metadata.
 
@@ -1411,15 +1411,15 @@ continue to artifact prep
 
 Local state should live under `/var/lib/skiff/runner/state.json` and include last accepted release, current state, and verification metadata.
 
-Testing / Validation
+### Testing / Validation
 
 Use memory store for unit tests. Test wrong service/env, missing control doc, missing release, invalid signature, expired release, and stale rollback. Add a fake metadata provider for runner identity.
 
-Gotchas
+### Gotchas
 
 Do not assume cloud metadata is always immediately available. Add bounded retries with clear errors. Do not leak release manifest secrets in logs; runtime manifests should contain secret references, not secret values.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - Runner can fetch and verify a desired release without skiffd.
 - Runner writes a local state file.
@@ -1430,31 +1430,31 @@ Acceptance Criteria
 
 ## Implement runner finite-state machine and systemd workload lifecycle
 
-ID
+### ID
 
 skiff-m1-017
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 runner, systemd, lifecycle
 
-Dependencies
+### Dependencies
 
-skiff-m1-016
+- skiff-m1-016
 
-Description
+### Description
 
 Implement the runner’s explicit finite-state machine and systemd integration for starting, health-checking, draining, and stopping one workload per VM.
 
-Subtasks
+### Subtasks
 
 - Define runner states: Booting, FetchingManifest, VerifyingRelease, PreparingArtifact, RenderingConfig, StartingWorkload, WaitingForHealth, Serving, Draining, Stopping, Failed.
 - Implement state transition persistence and local status endpoint over Unix socket or localhost.
@@ -1464,7 +1464,7 @@ Subtasks
 - Implement graceful shutdown and drain hooks.
 - Emit runner events and metrics on every state transition.
 
-Likely Files
+### Likely Files
 
 - `internal/runner/fsm.go`
 - `internal/runner/status.go`
@@ -1474,7 +1474,7 @@ Likely Files
 - `cmd/skiff-runner/main.go`
 - `tests/runner/fsm_test.go`
 
-Design
+### Design
 
 The runner should be an idempotent reconciler for one VM, not a scheduler. Systemd is the local process supervisor.
 
@@ -1501,15 +1501,15 @@ The runner status endpoint should expose JSON suitable for `skiff doctor`:
 }
 ```
 
-Testing / Validation
+### Testing / Validation
 
 Unit test state transitions with fake systemd and fake health checker. Integration test systemd rendering without requiring root by comparing unit files to goldens. Add local Linux integration tests gated by `SKIFF_TEST_SYSTEMD=1`.
 
-Gotchas
+### Gotchas
 
 Be careful with restart loops. Systemd can restart the app, but runner state should still reflect failed health if the app never becomes ready. Do not expose the status endpoint publicly.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - Runner FSM is implemented and tested.
 - Workload systemd unit rendering is deterministic.
@@ -1520,33 +1520,33 @@ Acceptance Criteria
 
 ## Implement artifact preparation for OCI, tarball, and binary packages
 
-ID
+### ID
 
 skiff-m1-018
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 runner, artifact, oci
 
-Dependencies
+### Dependencies
 
-skiff-m1-017
+- skiff-m1-017
 
-skiff-m1-006
+- skiff-m1-006
 
-Description
+### Description
 
 Implement artifact preparation for the first supported package types. The VM remains the isolation boundary; containers are treated as packaging when used.
 
-Subtasks
+### Subtasks
 
 - Define artifact runtime interface.
 - Implement tarball artifact download, digest verification, and unpack.
@@ -1556,7 +1556,7 @@ Subtasks
 - Place artifacts under deterministic release directories.
 - Support local artifact fixtures for tests.
 
-Likely Files
+### Likely Files
 
 - `internal/artifact/artifact.go`
 - `internal/artifact/tar.go`
@@ -1565,7 +1565,7 @@ Likely Files
 - `internal/runner/artifact.go`
 - `tests/artifact/*.go`
 
-Design
+### Design
 
 Skiff must not confuse artifact format with isolation. The VM is the pod. An OCI image is acceptable as a package format, but Skiff should not promise Kubernetes container semantics.
 
@@ -1578,15 +1578,15 @@ Directory layout:
 
 Digest verification is mandatory before execution. Production artifacts must be immutable, ideally digest-pinned.
 
-Testing / Validation
+### Testing / Validation
 
 Test corrupt downloads, wrong digest, missing command, unpack traversal attempts, and idempotent re-prepare of an already prepared release. Add fixture tarball and binary. OCI tests can be gated if they require external tooling.
 
-Gotchas
+### Gotchas
 
 Tar extraction must prevent path traversal and symlink surprises. OCI support can become complex; keep v1 minimal and do not expose Docker-compatible promises unless implemented.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - Tarball and binary artifacts can be prepared and verified.
 - Production mutable tags are rejected.
@@ -1597,39 +1597,39 @@ Acceptance Criteria
 
 ## Create local integration harness for object-state workflows
 
-ID
+### ID
 
 skiff-m1-019
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 testing, integration, local
 
-Dependencies
+### Dependencies
 
-skiff-m1-003
+- skiff-m1-003
 
-skiff-m1-007
+- skiff-m1-007
 
-skiff-m1-008
+- skiff-m1-008
 
-skiff-m1-012
+- skiff-m1-012
 
-skiff-m1-013
+- skiff-m1-013
 
-Description
+### Description
 
 Create a local test harness that runs Skiff state workflows entirely against the in-memory object store. This is the release gate for core state semantics.
 
-Subtasks
+### Subtasks
 
 - Build test helpers to create envs, services, releases, operations, and events in memory.
 - Add end-to-end tests for validate -> compile -> create control doc -> acquire lease -> write release -> update desired release -> append events.
@@ -1638,14 +1638,14 @@ Subtasks
 - Add race tests for concurrent service control mutations.
 - Ensure tests do not require AWS credentials.
 
-Likely Files
+### Likely Files
 
 - `tests/harness/state_harness.go`
 - `tests/integration/test_core_state_flow.go`
 - `tests/fixtures/services/minimal.yaml`
 - `tests/golden/state/*.json`
 
-Design
+### Design
 
 Before AWS deployment works, we need proof that the state model is sound. This harness should simulate direct CLI/skiffd workflows using the same state packages that production uses.
 
@@ -1665,15 +1665,15 @@ release lease
 read final state
 ```
 
-Testing / Validation
+### Testing / Validation
 
 Run in CI on every commit. Use `-race` for the concurrency subset. Golden-test expected object keys and final control documents.
 
-Gotchas
+### Gotchas
 
 Do not create a separate fake Skiff implementation in tests. The harness should use real packages and only fake external dependencies such as object storage, signer, and provider.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - Core object-state flow passes without cloud credentials.
 - Expected state objects are created at documented paths.
@@ -1684,35 +1684,35 @@ Acceptance Criteria
 
 ## Implement state bucket security policy generation and validation
 
-ID
+### ID
 
 skiff-m1-020
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 security, policy, aws, state
 
-Dependencies
+### Dependencies
 
-skiff-m1-015
+- skiff-m1-015
 
-skiff-m1-006
+- skiff-m1-006
 
-skiff-m1-007
+- skiff-m1-007
 
-Description
+### Description
 
 Generate and validate security policies for the state bucket, KMS access, runner reads, deployer writes, and skiffd operations.
 
-Subtasks
+### Subtasks
 
 - Define least-privilege policy templates for runner, deployer, skiffd, and break-glass admin.
 - Restrict runner role to read only the service control and release prefixes it needs.
@@ -1722,7 +1722,7 @@ Subtasks
 - Add `skiff policy explain` for generated policies.
 - Add tests for dangerous policy regressions.
 
-Likely Files
+### Likely Files
 
 - `internal/security/policy/aws_state_bucket.go`
 - `internal/security/policy/iam.go`
@@ -1730,7 +1730,7 @@ Likely Files
 - `cmd/skiff/policy.go`
 - `tests/security/policy/*.go`
 
-Design
+### Design
 
 Security must be defaulted, not delegated to the user. Users should not need to deeply understand bucket policies to get safe behavior.
 
@@ -1745,15 +1745,15 @@ break-glass: tightly documented emergency recovery
 
 `skiff policy explain` should show why each permission exists.
 
-Testing / Validation
+### Testing / Validation
 
 Golden-test generated IAM and bucket policies. Lint must catch `s3:*`, `Resource: *`, delete privileges on state prefixes, missing TLS condition, missing encryption condition, and unconditioned writes. Test explain output for each role.
 
-Gotchas
+### Gotchas
 
 AWS policy condition keys are subtle. Keep templates small and well-covered. Avoid deleting permissions in default roles; state cleanup should be handled by explicit GC with safeguards.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - Generated state policies are least-privilege by default.
 - Policy linter blocks dangerous wildcards.
@@ -1764,41 +1764,41 @@ Acceptance Criteria
 
 ## End-to-end MVP: boot one VM runner against a signed release fixture
 
-ID
+### ID
 
 skiff-m1-021
 
-Priority
+### Priority
 
 P0
 
-Type
+### Type
 
 task
 
-Labels
+### Labels
 
 e2e, release-gate, runner, aws
 
-Dependencies
+### Dependencies
 
-skiff-m1-015
+- skiff-m1-015
 
-skiff-m1-016
+- skiff-m1-016
 
-skiff-m1-017
+- skiff-m1-017
 
-skiff-m1-018
+- skiff-m1-018
 
-skiff-m1-019
+- skiff-m1-019
 
-skiff-m1-020
+- skiff-m1-020
 
-Description
+### Description
 
 Prove the foundation by booting a runner, fetching a signed release fixture from object storage, starting a tiny app, and serving health locally. This is the Milestone 1 release gate.
 
-Subtasks
+### Subtasks
 
 - Create a tiny hello-world service artifact fixture.
 - Publish a signed release and runtime manifest into a test state bucket or memory-backed local runner mode.
@@ -1808,7 +1808,7 @@ Subtasks
 - Assert state transitions and local status are correct.
 - Add optional AWS EC2 smoke test gated by explicit environment variables.
 
-Likely Files
+### Likely Files
 
 - `tests/e2e/test_runner_fixture.go`
 - `tests/fixtures/hello-service/`
@@ -1816,7 +1816,7 @@ Likely Files
 - `examples/service/hello/skiff.yaml`
 - `cmd/skiff-runner/main.go`
 
-Design
+### Design
 
 This bead proves that the object-state and runner model works before we implement full AWS deploys. It can run in two modes:
 
@@ -1825,15 +1825,15 @@ This bead proves that the object-state and runner model works before we implemen
 
 The local mode is mandatory in CI. AWS mode can be nightly or manual.
 
-Testing / Validation
+### Testing / Validation
 
 CI must run the local e2e. Optional AWS test should create isolated resources, tag them, and clean them up. Validate logs for state transitions. Validate JSON status output.
 
-Gotchas
+### Gotchas
 
 Do not let the optional AWS test become required for normal PRs. Keep the fixture app tiny and deterministic. Ensure runner does not require skiffd for this test.
 
-Acceptance Criteria
+### Acceptance Criteria
 
 - Local e2e proves runner can serve a signed release fixture.
 - Runner reaches Serving and exposes healthy status.
