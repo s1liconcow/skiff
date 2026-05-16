@@ -209,7 +209,7 @@ func NewDirect(cfg config.Config, opts DirectOptions) (*Direct, error) {
 	store := opts.Store
 	var err error
 	if store == nil {
-		store, err = openObjectStore(cfg)
+		store, err = OpenObjectStore(cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -287,7 +287,7 @@ func (c *Direct) Events(ctx context.Context, opts EventOptions) (*EventList, err
 	}, nil
 }
 
-func openObjectStore(cfg config.Config) (objstore.ObjectStore, error) {
+func OpenObjectStore(cfg config.Config) (objstore.ObjectStore, error) {
 	value := strings.TrimSpace(cfg.StateBucket)
 	if value == "" {
 		return nil, Fail("STATE_REQUIRED", "direct mode requires --state or state_bucket in config", ExitUserError, nil)

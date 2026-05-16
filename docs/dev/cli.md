@@ -88,3 +88,12 @@ skiff explain examples/service/skiff.yaml --format json --trace-id tr_explain
 skiff plan examples/service/skiff.yaml --provider aws --region us-west-2 --state s3://skiff-state-prod
 skiff plan examples/service/skiff.yaml --format json --trace-id tr_plan
 ```
+
+## Deploy
+
+`skiff deploy` is direct-mode first. `--dry-run` and `--plan-only` render the deploy plan and write no object state. A mutating deploy requires an explicit signing seed so release manifests are signed before service control is updated.
+
+```bash
+skiff deploy examples/service/skiff.yaml --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --dry-run --format json
+skiff deploy examples/service/skiff.yaml --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --release-id rel_01J... --signing-seed-base64 <seed>
+```

@@ -311,6 +311,62 @@ func TestPlanAWSJSON(t *testing.T) {
 	}
 }
 
+func TestDeployDryRunJSON(t *testing.T) {
+	root := t.TempDir()
+	specPath := filepath.Join("..", "..", "examples", "service", "skiff.yaml")
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"deploy",
+		specPath,
+		"--direct",
+		"--state", "file://" + root,
+		"--env", "prod",
+		"--provider", "aws",
+		"--region", "us-west-2",
+		"--dry-run",
+		"--format", "json",
+		"--trace-id", "tr_deploy_dry",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var got struct {
+		OK      bool   `json:"ok"`
+		TraceID string `json:"trace_id"`
+		Result  struct {
+			OK          bool   `json:"ok"`
+			DryRun      bool   `json:"dry_run"`
+			OperationID string `json:"operation_id"`
+			ReleaseID   string `json:"release_id"`
+			Plan        struct {
+				Resources []struct {
+					Action string `json:"action"`
+					Kind   string `json:"kind"`
+				} `json:"resources"`
+			} `json:"plan"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("deploy output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_deploy_dry" || !got.Result.OK || !got.Result.DryRun || got.Result.OperationID == "" || got.Result.ReleaseID == "" {
+		t.Fatalf("unexpected deploy dry-run envelope: %+v", got)
+	}
+	if len(got.Result.Plan.Resources) == 0 {
+		t.Fatalf("dry-run deploy did not include plan resources")
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("dry-run deploy wrote files under state root: %+v", entries)
+	}
+}
+
 func writeStateObject(t *testing.T, root, key string, value any) {
 	t.Helper()
 	body, err := canonical.Marshal(value)
