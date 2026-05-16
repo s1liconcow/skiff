@@ -1,0 +1,24 @@
+apiVersion: skiff.dev/v1alpha1
+kind: Service
+metadata:
+  name: payments-api
+  env: prod
+artifact:
+  type: oci
+  ref: registry.example.com/payments-api@sha256:abc123
+runtime:
+  port: 8080
+  health:
+    path: /healthz
+machine:
+  size: small
+scale:
+  min: 3
+  max: 20
+network:
+  ingress:
+    type: public-http
+    host: payments.example.com
+    tls:
+      enabled: true
+      certRef: aws-acm://us-west-2/certificate/payments-api

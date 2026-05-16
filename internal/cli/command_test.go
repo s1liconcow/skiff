@@ -3,7 +3,9 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -173,6 +175,130 @@ func TestStatePathJSONValidationError(t *testing.T) {
 	}
 }
 
+func TestValidateJSONServiceExample(t *testing.T) {
+	examplePath := filepath.Join("..", "..", "examples", "service", "skiff.yaml")
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"validate",
+		examplePath,
+		"--format", "json",
+		"--trace-id", "tr_validate",
+		"--show-defaulted",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	var got struct {
+		OK      bool   `json:"ok"`
+		TraceID string `json:"trace_id"`
+		Result  struct {
+			OK   bool   `json:"ok"`
+			Kind string `json:"kind"`
+			Name string `json:"name"`
+			Env  string `json:"env"`
+		} `json:"result"`
+		Spec struct {
+			Machine struct {
+				Arch string `json:"arch"`
+			} `json:"machine"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("validate output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || !got.Result.OK || got.TraceID != "tr_validate" {
+		t.Fatalf("unexpected envelope: %+v", got)
+	}
+	if got.Result.Kind != "Service" || got.Result.Name != "payments-api" || got.Result.Env != "prod" {
+		t.Fatalf("unexpected result: %+v", got.Result)
+	}
+	if got.Spec.Machine.Arch != "x86_64" {
+		t.Fatalf("defaulted arch = %q, want x86_64", got.Spec.Machine.Arch)
+	}
+}
+
+func TestValidateYAMLShowsDefaults(t *testing.T) {
+	examplePath := filepath.Join("..", "..", "examples", "service", "skiff.yaml")
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"validate",
+		examplePath,
+		"--format", "yaml",
+		"--show-defaulted",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	for _, want := range []string{"arch: x86_64", "shutdownGrace: 30s", "strategy: rolling"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("yaml output missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestValidateJSONDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "skiff.yaml")
+	body := []byte(`apiVersion: skiff.dev/v1alpha1
+kind: Service
+metadata:
+  name: payments-api
+  env: prod
+artifact:
+  type: oci
+  ref: registry.example.com/payments-api:latest
+runtime:
+  port: 8080
+  health:
+    path: /healthz
+network:
+  ingress:
+    type: public-http
+    host: payments.example.com
+`)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{"validate", path, "--format", "json", "--trace-id", "tr_bad_spec"}, &stdout, &stderr)
+	if code != ExitUserError {
+		t.Fatalf("exit code = %d, want %d", code, ExitUserError)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty JSON-mode stderr", stderr.String())
+	}
+
+	var got struct {
+		OK      bool   `json:"ok"`
+		Code    string `json:"code"`
+		TraceID string `json:"trace_id"`
+		Fields  []struct {
+			Path string `json:"path"`
+			Code string `json:"code"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("validate error output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if got.OK || got.Code != "SPEC_INVALID" || got.TraceID != "tr_bad_spec" {
+		t.Fatalf("unexpected error envelope: %+v", got)
+	}
+	if !hasPathCode(got.Fields, "$.artifact.ref", "MUTABLE_ARTIFACT_REF") {
+		t.Fatalf("missing mutable artifact diagnostic: %+v", got.Fields)
+	}
+	if !hasPathCode(got.Fields, "$.network.ingress.tls", "TLS_REQUIRED") {
+		t.Fatalf("missing TLS diagnostic: %+v", got.Fields)
+	}
+}
+
 func TestReleaseVerifyJSONGoldenRelease(t *testing.T) {
 	goldenDir := filepath.Join("..", "..", "tests", "golden", "release")
 	var stdout, stderr bytes.Buffer
@@ -290,6 +416,18 @@ type codeFinding struct {
 func hasCode(items []codeFinding, code string) bool {
 	for _, item := range items {
 		if item.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func hasPathCode(items []struct {
+	Path string `json:"path"`
+	Code string `json:"code"`
+}, path, code string) bool {
+	for _, item := range items {
+		if item.Path == path && item.Code == code {
 			return true
 		}
 	}

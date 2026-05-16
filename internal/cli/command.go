@@ -17,6 +17,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/config"
 	"github.com/s1liconcow/skiff/internal/release"
 	"github.com/s1liconcow/skiff/internal/security/signing"
+	"github.com/s1liconcow/skiff/internal/spec"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
 	"github.com/s1liconcow/skiff/internal/state/paths"
 	"github.com/s1liconcow/skiff/internal/state/schema"
@@ -51,6 +52,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runRelease(binary, args[1:], stdout, stderr)
 	case "state":
 		return runState(binary, args[1:], stdout, stderr)
+	case "validate":
+		return runValidate(binary, args[1:], stdout, stderr)
 	case "version":
 		if err := runVersion(binary, args[1:], stdout); err != nil {
 			fmt.Fprintf(stderr, "%s: %v\n", binary, err)
@@ -120,6 +123,7 @@ func printUsage(w io.Writer, binary string) {
 		fmt.Fprintln(w, "  serve      Start the stateless skiffd API server")
 	}
 	fmt.Fprintln(w, "  state      Inspect object-state paths and developer helpers")
+	fmt.Fprintln(w, "  validate   Parse, default, and validate a Skiff spec")
 	fmt.Fprintln(w, "  version    Print version, commit, and build date")
 }
 
@@ -181,6 +185,22 @@ type objectVerifyOutput struct {
 	OK      bool                       `json:"ok"`
 	TraceID string                     `json:"trace_id,omitempty"`
 	Result  signing.ObjectVerification `json:"result"`
+}
+
+type specValidateOutput struct {
+	OK      bool           `json:"ok"`
+	TraceID string         `json:"trace_id,omitempty"`
+	Result  spec.Result    `json:"result"`
+	Spec    *spec.Document `json:"spec,omitempty"`
+}
+
+type specErrorOutput struct {
+	OK                 bool                `json:"ok"`
+	Code               string              `json:"code"`
+	Summary            string              `json:"summary"`
+	TraceID            string              `json:"trace_id,omitempty"`
+	Fields             []spec.Diagnostic   `json:"fields,omitempty"`
+	RecommendedActions []recommendedAction `json:"recommended_actions,omitempty"`
 }
 
 func runConfig(binary string, args []string, stdout, stderr io.Writer) int {
@@ -336,10 +356,130 @@ func writeConfigError(binary, format, traceID string, err error, sources map[str
 	return ExitUserError
 }
 
+func runValidate(binary string, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		printValidateUsage(stderr, binary)
+		return ExitUserError
+	}
+	if args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
+		printValidateUsage(stdout, binary)
+		return ExitSuccess
+	}
+
+	fs := flag.NewFlagSet(binary+" validate", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	format := fs.String("format", "human", "output format: human, json, or yaml")
+	noColor := fs.Bool("no-color", false, "disable ANSI color output")
+	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
+	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
+	filePath := fs.String("file", "", "Skiff YAML or JSON spec file")
+	allowUnknown := fs.Bool("allow-unknown-fields", false, "accept unknown fields for compatibility checks")
+	showDefaulted := fs.Bool("show-defaulted", false, "include the defaulted spec in output")
+
+	flagArgs, positionals, err := splitValidateArgs(args)
+	if err != nil {
+		return writeSpecError(binary, "SPEC_VALIDATE_INVALID", *format, *traceID, err, nil, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeSpecError(binary, "SPEC_VALIDATE_INVALID", *format, *traceID, err, nil, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeSpecError(binary, "SPEC_VALIDATE_INVALID", *format, *traceID, fmt.Errorf("unexpected argument %q", positionals[1]), nil, stdout, stderr)
+	}
+	if *filePath == "" && len(positionals) == 1 {
+		*filePath = positionals[0]
+	}
+	if *filePath == "" {
+		return writeSpecError(binary, "SPEC_VALIDATE_INVALID", *format, *traceID, errors.New("spec file is required"), nil, stdout, stderr)
+	}
+	_ = noColor
+	_ = yes
+
+	doc, err := spec.LoadFile(*filePath, spec.DecodeOptions{AllowUnknownFields: *allowUnknown})
+	if err != nil {
+		return writeSpecError(binary, "SPEC_DECODE_FAILED", *format, *traceID, err, nil, stdout, stderr)
+	}
+	result := spec.Validate(*doc)
+	if !result.OK {
+		return writeSpecError(binary, "SPEC_INVALID", *format, *traceID, errors.New("spec validation failed"), result.Diagnostics, stdout, stderr)
+	}
+
+	switch *format {
+	case "human", "text":
+		fmt.Fprintf(stdout, "%s %s/%s valid\n", result.Kind, result.Env, result.Name)
+		if *showDefaulted {
+			body, err := spec.MarshalYAML(*doc)
+			if err != nil {
+				return writeSpecError(binary, "SPEC_RENDER_FAILED", *format, *traceID, err, nil, stdout, stderr)
+			}
+			fmt.Fprint(stdout, string(body))
+		}
+		return ExitSuccess
+	case "json":
+		out := specValidateOutput{OK: true, TraceID: *traceID, Result: result}
+		if *showDefaulted {
+			out.Spec = doc
+		}
+		enc := json.NewEncoder(stdout)
+		if err := enc.Encode(out); err != nil {
+			fmt.Fprintf(stderr, "%s validate: %v\n", binary, err)
+			return ExitUserError
+		}
+		return ExitSuccess
+	case "yaml":
+		body, err := spec.MarshalYAML(*doc)
+		if err != nil {
+			return writeSpecError(binary, "SPEC_RENDER_FAILED", *format, *traceID, err, nil, stdout, stderr)
+		}
+		fmt.Fprint(stdout, string(body))
+		return ExitSuccess
+	default:
+		return writeSpecError(binary, "SPEC_VALIDATE_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "yaml"`), nil, stdout, stderr)
+	}
+}
+
+func writeSpecError(binary, code, format, traceID string, err error, fields []spec.Diagnostic, stdout, stderr io.Writer) int {
+	if format == "json" {
+		enc := json.NewEncoder(stdout)
+		if encErr := enc.Encode(specErrorOutput{
+			OK:      false,
+			Code:    code,
+			Summary: err.Error(),
+			TraceID: traceID,
+			Fields:  fields,
+			RecommendedActions: []recommendedAction{
+				{
+					ID:       "inspect_spec",
+					Command:  binary + " validate <skiff.yaml> --format json --show-defaulted",
+					Mutating: false,
+				},
+			},
+		}); encErr != nil {
+			fmt.Fprintf(stderr, "%s validate: %v\n", binary, encErr)
+		}
+		return ExitUserError
+	}
+	fmt.Fprintf(stderr, "%s validate: %v\n", binary, err)
+	for _, field := range fields {
+		fmt.Fprintf(stderr, "- %s %s: %s\n", field.Path, field.Code, field.Message)
+	}
+	return ExitUserError
+}
+
 func printConfigUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s config <command> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  show       Print effective configuration")
+}
+
+func printValidateUsage(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s validate <skiff.yaml> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Flags:")
+	fmt.Fprintln(w, "  --format human|json|yaml")
+	fmt.Fprintln(w, "  --show-defaulted")
+	fmt.Fprintln(w, "  --allow-unknown-fields")
+	fmt.Fprintln(w, "  --trace-id <id>")
 }
 
 func runRelease(binary string, args []string, stdout, stderr io.Writer) int {
@@ -750,6 +890,19 @@ func splitVerifyArgs(args []string) ([]string, []string, error) {
 		"service":          true,
 		"trace-id":         true,
 	}
+	return splitArgs(args, valueFlags)
+}
+
+func splitValidateArgs(args []string) ([]string, []string, error) {
+	valueFlags := map[string]bool{
+		"file":     true,
+		"format":   true,
+		"trace-id": true,
+	}
+	return splitArgs(args, valueFlags)
+}
+
+func splitArgs(args []string, valueFlags map[string]bool) ([]string, []string, error) {
 	var flagArgs []string
 	var positionals []string
 	for i := 0; i < len(args); i++ {
