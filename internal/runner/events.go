@@ -18,20 +18,29 @@ const (
 	StateFetchingManifest  State = "FetchingManifest"
 	StateVerifyingRelease  State = "VerifyingRelease"
 	StatePreparingArtifact State = "PreparingArtifact"
+	StateRenderingConfig   State = "RenderingConfig"
+	StateStartingWorkload  State = "StartingWorkload"
+	StateWaitingForHealth  State = "WaitingForHealth"
+	StateServing           State = "Serving"
+	StateDraining          State = "Draining"
+	StateStopping          State = "Stopping"
+	StateStopped           State = "Stopped"
 	StateFailed            State = "Failed"
 )
 
 type StateEvent struct {
-	SchemaVersion string    `json:"schema_version"`
-	Time          string    `json:"time"`
-	State         State     `json:"state"`
-	Service       string    `json:"service"`
-	Env           string    `json:"env"`
-	ReleaseID     string    `json:"release_id,omitempty"`
-	TraceID       string    `json:"trace_id,omitempty"`
-	Identity      *Identity `json:"identity,omitempty"`
-	Summary       string    `json:"summary"`
-	Error         string    `json:"error,omitempty"`
+	SchemaVersion string       `json:"schema_version"`
+	Time          string       `json:"time"`
+	State         State        `json:"state"`
+	Service       string       `json:"service"`
+	Env           string       `json:"env"`
+	ReleaseID     string       `json:"release_id,omitempty"`
+	TraceID       string       `json:"trace_id,omitempty"`
+	Identity      *Identity    `json:"identity,omitempty"`
+	Health        HealthStatus `json:"health,omitempty"`
+	UnitName      string       `json:"unit_name,omitempty"`
+	Summary       string       `json:"summary"`
+	Error         string       `json:"error,omitempty"`
 }
 
 type EventSink interface {

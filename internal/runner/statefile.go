@@ -24,6 +24,7 @@ type LocalState struct {
 	Service                    string                     `json:"service"`
 	Env                        string                     `json:"env"`
 	CurrentState               State                      `json:"current_state"`
+	Health                     HealthStatus               `json:"health,omitempty"`
 	LastAcceptedRelease        string                     `json:"last_accepted_release"`
 	LastAcceptedReleaseCreated string                     `json:"last_accepted_release_created_at,omitempty"`
 	ReleaseDigest              string                     `json:"release_digest,omitempty"`
@@ -31,6 +32,7 @@ type LocalState struct {
 	ControlKey                 string                     `json:"control_key"`
 	ReleaseKey                 string                     `json:"release_key"`
 	RuntimeManifestKey         string                     `json:"runtime_manifest_key"`
+	WorkloadUnit               string                     `json:"workload_unit,omitempty"`
 	TraceID                    string                     `json:"trace_id,omitempty"`
 	UpdatedAt                  string                     `json:"updated_at"`
 	Identity                   *Identity                  `json:"identity,omitempty"`

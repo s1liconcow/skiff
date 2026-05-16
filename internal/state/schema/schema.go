@@ -166,11 +166,12 @@ type RuntimeManifest struct {
 }
 
 type HealthCheck struct {
-	Type     string `json:"type"`
-	Path     string `json:"path,omitempty"`
-	Port     int    `json:"port,omitempty"`
-	Interval string `json:"interval,omitempty"`
-	Timeout  string `json:"timeout,omitempty"`
+	Type     string   `json:"type"`
+	Path     string   `json:"path,omitempty"`
+	Port     int      `json:"port,omitempty"`
+	Command  []string `json:"command,omitempty"`
+	Interval string   `json:"interval,omitempty"`
+	Timeout  string   `json:"timeout,omitempty"`
 }
 
 type SagaIntent struct {
