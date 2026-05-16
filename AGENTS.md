@@ -590,6 +590,9 @@ When implementing a bead:
 5. Do not widen scope without creating a new bead or note.
 6. Update docs/examples when user-facing behavior changes.
 
+## Docs
+The docs/ folder has very long implementation designs that can fill up context.  Please treat the bead as the primary source of truth and only consult docs/DESIGN.md to resolve ambiguity.  
+
 ## Common gotchas
 
 ### Do not add a new durable database
