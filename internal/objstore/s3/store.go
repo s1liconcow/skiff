@@ -361,6 +361,18 @@ func logListRequest(logger Logger, ctx context.Context, bucket, prefix string) {
 	logger.Printf("s3 LIST bucket=%s prefix=%s trace_id=%s", bucket, prefix, traceID)
 }
 
+func logBucketRequest(logger Logger, ctx context.Context, method, bucket string) {
+	if logger == nil {
+		return
+	}
+	traceID := traceIDFromContext(ctx)
+	if traceID == "" {
+		logger.Printf("s3 %s bucket=%s", method, bucket)
+		return
+	}
+	logger.Printf("s3 %s bucket=%s trace_id=%s", method, bucket, traceID)
+}
+
 func validateBucketAndKey(bucket, key string) error {
 	if strings.TrimSpace(bucket) == "" {
 		return errors.New("s3 bucket is required")

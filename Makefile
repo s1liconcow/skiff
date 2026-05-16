@@ -1,4 +1,5 @@
 GO ?= go
+GO_TEST_ENV := GOCACHE=$(CURDIR)/.cache/go-build GOMODCACHE=$(CURDIR)/.cache/gomod
 
 MODULE := github.com/s1liconcow/skiff
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -6,7 +7,7 @@ COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X '$(MODULE)/internal/buildinfo.Version=$(VERSION)' -X '$(MODULE)/internal/buildinfo.Commit=$(COMMIT)' -X '$(MODULE)/internal/buildinfo.BuildDate=$(BUILD_DATE)'
 
-.PHONY: build test vet fmt lint generate smoke clean
+.PHONY: build test e2e-apple-container vet fmt lint generate smoke clean
 
 build:
 	mkdir -p bin
@@ -15,7 +16,10 @@ build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/skiff-runner ./cmd/skiff-runner
 
 test:
-	$(GO) test ./...
+	$(GO_TEST_ENV) $(GO) test ./...
+
+e2e-apple-container:
+	SKIFF_APPLE_CONTAINER_E2E=1 $(GO_TEST_ENV) $(GO) test ./tests/e2e -run TestAppleContainerRustFSCaddyRollout -count=1 -v
 
 vet:
 	$(GO) vet ./...

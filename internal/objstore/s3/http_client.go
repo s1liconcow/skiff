@@ -219,6 +219,26 @@ func (c *HTTPClient) ListObjectsV2(ctx context.Context, input ListObjectsV2Input
 	}, nil
 }
 
+func (c *HTTPClient) CreateBucket(ctx context.Context, bucket string) error {
+	if strings.TrimSpace(bucket) == "" {
+		return errors.New("s3 bucket is required")
+	}
+	logBucketRequest(c.logger, ctx, http.MethodPut, bucket)
+	req, err := c.newBucketRequest(ctx, http.MethodPut, bucket, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return responseError(resp)
+	}
+	return nil
+}
+
 func (c *HTTPClient) DeleteObject(ctx context.Context, bucket, key string) error {
 	if err := validateBucketAndKey(bucket, key); err != nil {
 		return err

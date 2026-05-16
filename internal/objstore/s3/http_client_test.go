@@ -156,6 +156,30 @@ func TestHTTPClientDeleteObject(t *testing.T) {
 	}
 }
 
+func TestHTTPClientCreateBucket(t *testing.T) {
+	var created bool
+	client := mustHTTPClientWithTransport(t, "https://s3.test", roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPut {
+			t.Fatalf("method = %s", r.Method)
+		}
+		if r.URL.Path != "/state-bucket" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "AWS4-HMAC-SHA256 ") {
+			t.Fatalf("Authorization header = %q", r.Header.Get("Authorization"))
+		}
+		created = true
+		return response(http.StatusOK, nil, ""), nil
+	}))
+
+	if err := client.CreateBucket(context.Background(), "state-bucket"); err != nil {
+		t.Fatalf("CreateBucket returned error: %v", err)
+	}
+	if !created {
+		t.Fatalf("server did not see bucket create")
+	}
+}
+
 func mustHTTPClientWithTransport(t *testing.T, endpoint string, transport http.RoundTripper) *HTTPClient {
 	t.Helper()
 	client, err := NewHTTPClient(HTTPClientOptions{
