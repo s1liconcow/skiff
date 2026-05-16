@@ -97,3 +97,11 @@ skiff plan examples/service/skiff.yaml --format json --trace-id tr_plan
 skiff deploy examples/service/skiff.yaml --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --dry-run --format json
 skiff deploy examples/service/skiff.yaml --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --release-id rel_01J... --signing-seed-base64 <seed>
 ```
+
+## Rollout
+
+`skiff rollout watch` resumes from the provider rollout ID stored in operation control and emits stable rollout status values such as `starting`, `rolling_out`, `succeeded`, `failed`, `cancelled`, and `rolling_back`.
+
+```bash
+skiff rollout watch payments-api --operation op_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+```

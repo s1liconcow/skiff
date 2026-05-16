@@ -322,20 +322,6 @@ func (p *Provider) Debug(ctx context.Context, req provider.DebugRequest) (*provi
 	return nil, provider.Unsupported(Name, "debug")
 }
 
-func (p *Provider) StartRollout(ctx context.Context, req provider.RolloutRequest) (*provider.Rollout, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return nil, provider.Unsupported(Name, "start_rollout")
-}
-
-func (p *Provider) WatchRollout(ctx context.Context, req provider.WatchRolloutRequest) (*provider.RolloutStatus, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return nil, provider.Unsupported(Name, "watch_rollout")
-}
-
 func (p *Provider) Rollback(ctx context.Context, req provider.RollbackRequest) (*provider.Rollout, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

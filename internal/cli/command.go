@@ -85,6 +85,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runPolicy(binary, root.Args, stdout, stderr)
 	case "release":
 		return runRelease(binary, root.Args, stdout, stderr)
+	case "rollout":
+		return runRollout(binary, root.Args, root, stdout, stderr)
 	case "state":
 		return runState(binary, root.Args, stdout, stderr)
 	case "status":
@@ -172,6 +174,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  plan       Dry-run provider resource changes for a spec")
 	fmt.Fprintln(w, "  policy     Explain generated state security policies")
 	fmt.Fprintln(w, "  release    Verify release manifests")
+	fmt.Fprintln(w, "  rollout    Watch rollout progress")
 	if binary == "skiffd" {
 		fmt.Fprintln(w, "  serve      Start the stateless skiffd API server")
 	}

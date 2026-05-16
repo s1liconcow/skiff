@@ -94,7 +94,7 @@ func (d Deployer) Deploy(ctx context.Context, graph *ir.Graph, req Request) (*Re
 	if err != nil {
 		return nil, err
 	}
-	stateClient := state.NewClient(d.Store)
+	stateClient := state.NewClient(d.Store, state.WithClock(clockFunc(d.now)))
 	if err := d.createOperationIntent(ctx, graph, req, now); err != nil {
 		return nil, err
 	}
@@ -335,6 +335,12 @@ func (d Deployer) now() time.Time {
 		return d.Clock().UTC()
 	}
 	return time.Now().UTC()
+}
+
+type clockFunc func() time.Time
+
+func (f clockFunc) Now() time.Time {
+	return f()
 }
 
 func normalizeRequest(req Request, graph *ir.Graph, now time.Time) Request {

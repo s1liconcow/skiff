@@ -142,15 +142,19 @@ type DebugSession struct {
 }
 
 type RolloutRequest struct {
-	Service   string `json:"service"`
-	Env       string `json:"env"`
-	ReleaseID string `json:"release_id"`
+	Service              string `json:"service"`
+	Env                  string `json:"env"`
+	ReleaseID            string `json:"release_id"`
+	OperationID          string `json:"operation_id,omitempty"`
+	MinHealthyPercentage int    `json:"min_healthy_percentage,omitempty"`
+	InstanceWarmup       int    `json:"instance_warmup,omitempty"`
 }
 
 type WatchRolloutRequest struct {
-	Service   string `json:"service"`
-	Env       string `json:"env"`
-	RolloutID string `json:"rollout_id"`
+	Service    string `json:"service"`
+	Env        string `json:"env"`
+	RolloutID  string `json:"rollout_id"`
+	ProviderID string `json:"provider_id,omitempty"`
 }
 
 type RollbackRequest struct {
