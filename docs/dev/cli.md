@@ -1,0 +1,72 @@
+# CLI contract
+
+The `skiff` CLI is both a human operator tool and an agent interface.
+
+## Global flags
+
+Root-level flags can appear before initial client commands:
+
+```bash
+skiff --direct --state file:///var/lib/skiff-state --env prod --provider aws --region us-west-2 status --format json
+skiff --api --api-url http://127.0.0.1:8585 events --format json --limit 20
+```
+
+Supported global flags:
+
+```text
+--config
+--env
+--provider
+--region
+--state
+--api
+--direct
+--format
+--no-color
+--yes
+--trace-id
+```
+
+`--direct` reads durable object state directly. `--api` calls `skiffd` through the API client. Both modes use the same client command surface for `status` and config-backed `events`.
+
+JSON mode is non-interactive and emits valid JSON only on stdout. Human-mode diagnostics go to stderr.
+
+## Exit codes
+
+```text
+0 success
+1 user/spec error
+2 policy denied
+3 provider/cloud error
+4 rollout/operation failed
+5 partial success
+6 auth error
+7 timeout
+8 internal error
+```
+
+JSON error envelope:
+
+```json
+{
+  "ok": false,
+  "code": "CONFIG_INVALID",
+  "summary": "config validation failed",
+  "trace_id": "tr_...",
+  "recommended_actions": [
+    {
+      "id": "inspect_config",
+      "command": "skiff config show --format json",
+      "mutating": false
+    }
+  ]
+}
+```
+
+Completion scripts are generated with:
+
+```bash
+skiff completion bash
+skiff completion zsh
+skiff completion fish
+```

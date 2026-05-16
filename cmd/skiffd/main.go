@@ -20,6 +20,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/buildinfo"
 	"github.com/s1liconcow/skiff/internal/cli"
 	"github.com/s1liconcow/skiff/internal/config"
+	stateindex "github.com/s1liconcow/skiff/internal/index"
 	"github.com/s1liconcow/skiff/internal/objstore/memory"
 	"github.com/s1liconcow/skiff/internal/skiffd"
 )
@@ -114,16 +115,18 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 
 	store := memory.New()
-	now := time.Now().UTC()
-	snapshot, err := skiffd.SnapshotFromObjectStore(context.Background(), store, now)
+	idx, err := stateindex.New(store, stateindex.Options{Clock: func() time.Time { return time.Now().UTC() }})
 	if err != nil {
+		return writeServeError(*format, *traceID, err, stdout, stderr)
+	}
+	if _, err := idx.Rebuild(context.Background()); err != nil {
 		return writeServeError(*format, *traceID, err, stdout, stderr)
 	}
 	logger := slog.New(slog.NewJSONHandler(stderr, nil))
 	server, err := skiffd.New(skiffd.Options{
 		Config:      loaded.Config,
 		ObjectStore: store,
-		Index:       skiffd.NewStaticIndex(snapshot),
+		Index:       idx,
 		BuildInfo:   buildinfo.Current("skiffd"),
 		Logger:      logger,
 	})
@@ -154,6 +157,11 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go func() {
+		if err := idx.RunRefreshLoop(ctx, 30*time.Second); err != nil && !errors.Is(err, context.Canceled) {
+			logger.WarnContext(ctx, "skiffd index refresh loop stopped", "error", err)
+		}
+	}()
 	if err := server.Serve(ctx, listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return writeServeError(*format, *traceID, err, stdout, stderr)
 	}

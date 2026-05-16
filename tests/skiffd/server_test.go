@@ -143,6 +143,14 @@ func TestSnapshotBackedEnvServicesAndRecentEvents(t *testing.T) {
 		Severity:      "info",
 		Summary:       "deploy started",
 	})
+	createJSON(t, store, "sagas/saga_01JABC/control.json", schema.SagaControl{
+		SchemaVersion: schema.Version,
+		SagaID:        "saga_01JABC",
+		Status:        schema.SagaRunning,
+		CurrentSteps:  []string{"shift-traffic"},
+		UpdatedAt:     "2026-05-16T19:02:00Z",
+		TraceID:       "tr_saga",
+	})
 	snapshot, err := skiffd.SnapshotFromObjectStore(context.Background(), store, fixedTime())
 	if err != nil {
 		t.Fatalf("snapshot from object store: %v", err)
@@ -179,6 +187,11 @@ func TestSnapshotBackedEnvServicesAndRecentEvents(t *testing.T) {
 	var servicesBody struct {
 		OK       bool                    `json:"ok"`
 		Services []skiffd.ServiceSummary `json:"services"`
+		Index    struct {
+			Source           string `json:"source"`
+			Generation       int64  `json:"generation"`
+			FreshnessSeconds int64  `json:"freshness_seconds"`
+		} `json:"index"`
 	}
 	decodeJSON(t, services, &servicesBody)
 	if !servicesBody.OK || len(servicesBody.Services) != 1 {
@@ -186,6 +199,22 @@ func TestSnapshotBackedEnvServicesAndRecentEvents(t *testing.T) {
 	}
 	if servicesBody.Services[0].Service != "payments-api" || servicesBody.Services[0].DesiredRelease != "rel_02" {
 		t.Fatalf("unexpected service summary: %+v", servicesBody.Services[0])
+	}
+	if servicesBody.Index.Source != "memory" || servicesBody.Index.Generation != 1 {
+		t.Fatalf("unexpected index freshness: %+v", servicesBody.Index)
+	}
+
+	sagas := get(t, handler, "/v1/sagas", "application/json")
+	if sagas.Code != http.StatusOK {
+		t.Fatalf("sagas status = %d, body = %s", sagas.Code, sagas.Body.String())
+	}
+	var sagasBody struct {
+		OK    bool                 `json:"ok"`
+		Sagas []skiffd.SagaSummary `json:"sagas"`
+	}
+	decodeJSON(t, sagas, &sagasBody)
+	if !sagasBody.OK || len(sagasBody.Sagas) != 1 || sagasBody.Sagas[0].SagaID != "saga_01JABC" {
+		t.Fatalf("unexpected sagas body: %+v", sagasBody)
 	}
 
 	events := get(t, handler, "/v1/events/recent?limit=1", "application/json")
@@ -199,6 +228,78 @@ func TestSnapshotBackedEnvServicesAndRecentEvents(t *testing.T) {
 	decodeJSON(t, events, &eventsBody)
 	if !eventsBody.OK || len(eventsBody.Events) != 1 || eventsBody.Events[0].ID != "01JSTARTED" {
 		t.Fatalf("unexpected events body: %+v", eventsBody)
+	}
+
+	admin := get(t, handler, "/v1/admin/index", "application/json")
+	if admin.Code != http.StatusOK {
+		t.Fatalf("admin index status = %d, body = %s", admin.Code, admin.Body.String())
+	}
+	var adminBody struct {
+		OK    bool           `json:"ok"`
+		Index map[string]any `json:"index"`
+		Stats struct {
+			Services     int `json:"services"`
+			Sagas        int `json:"sagas"`
+			RecentEvents int `json:"recent_events"`
+		} `json:"stats"`
+	}
+	decodeJSON(t, admin, &adminBody)
+	if !adminBody.OK || adminBody.Stats.Services != 1 || adminBody.Stats.Sagas != 1 || adminBody.Stats.RecentEvents != 1 {
+		t.Fatalf("unexpected admin index body: %+v", adminBody)
+	}
+}
+
+func TestFreshServicesBypassesStaleMemoryIndex(t *testing.T) {
+	store := memory.New()
+	createJSON(t, store, "services/payments-api/control.json", schema.ServiceControl{
+		SchemaVersion:  schema.Version,
+		Service:        "payments-api",
+		Env:            "prod",
+		DesiredRelease: "rel_fresh",
+		Version:        1,
+		UpdatedAt:      "2026-05-16T19:00:00Z",
+		UpdatedBy:      schema.Actor{ID: "alpha-one", Type: "agent"},
+	})
+	server := newTestServerWithStoreAndIndex(t, store, skiffd.NewStaticIndex(skiffd.Snapshot{
+		Ready:      true,
+		Generation: 99,
+		Services: []skiffd.ServiceSummary{
+			{Service: "payments-api", Env: "prod", DesiredRelease: "rel_stale"},
+		},
+	}))
+	handler := server.Handler()
+
+	stale := get(t, handler, "/v1/services", "application/json")
+	if stale.Code != http.StatusOK {
+		t.Fatalf("stale services status = %d, body = %s", stale.Code, stale.Body.String())
+	}
+	var staleBody struct {
+		Services []skiffd.ServiceSummary `json:"services"`
+		Index    struct {
+			Source string `json:"source"`
+		} `json:"index"`
+	}
+	decodeJSON(t, stale, &staleBody)
+	if len(staleBody.Services) != 1 || staleBody.Services[0].DesiredRelease != "rel_stale" || staleBody.Index.Source != "memory" {
+		t.Fatalf("unexpected stale body: %+v", staleBody)
+	}
+
+	fresh := get(t, handler, "/v1/services?fresh=true", "application/json")
+	if fresh.Code != http.StatusOK {
+		t.Fatalf("fresh services status = %d, body = %s", fresh.Code, fresh.Body.String())
+	}
+	var freshBody struct {
+		Services []skiffd.ServiceSummary `json:"services"`
+		Index    struct {
+			Source string `json:"source"`
+		} `json:"index"`
+	}
+	decodeJSON(t, fresh, &freshBody)
+	if len(freshBody.Services) != 1 || freshBody.Services[0].DesiredRelease != "rel_fresh" {
+		t.Fatalf("fresh=true did not read object state: %+v", freshBody.Services)
+	}
+	if freshBody.Index.Source != "direct_object_store" {
+		t.Fatalf("fresh index source = %q", freshBody.Index.Source)
 	}
 }
 

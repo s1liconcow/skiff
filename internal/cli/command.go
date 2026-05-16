@@ -17,6 +17,7 @@ import (
 
 	"github.com/s1liconcow/skiff/internal/bootstrap"
 	"github.com/s1liconcow/skiff/internal/buildinfo"
+	"github.com/s1liconcow/skiff/internal/client"
 	"github.com/s1liconcow/skiff/internal/compiler"
 	"github.com/s1liconcow/skiff/internal/config"
 	"github.com/s1liconcow/skiff/internal/events"
@@ -31,8 +32,15 @@ import (
 )
 
 const (
-	ExitSuccess   = 0
-	ExitUserError = 1
+	ExitSuccess       = 0
+	ExitUserError     = 1
+	ExitPolicyDenied  = 2
+	ExitProviderError = 3
+	ExitRolloutFailed = 4
+	ExitPartial       = 5
+	ExitAuthError     = 6
+	ExitTimeout       = 7
+	ExitInternalError = 8
 )
 
 type versionOutput struct {
@@ -45,65 +53,77 @@ type versionOutput struct {
 }
 
 func Run(binary string, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
+	root, err := parseRootArgs(args)
+	if err != nil {
+		return writeRootError(binary, root.Format, root.TraceID, err, stdout, stderr)
+	}
+	if root.Command == "" {
 		printUsage(stderr, binary)
 		return ExitUserError
 	}
 
-	switch args[0] {
+	switch root.Command {
 	case "bootstrap":
-		return runBootstrap(binary, args[1:], stdout, stderr)
+		return runBootstrap(binary, root.Args, stdout, stderr)
 	case "compile":
-		return runCompile(binary, args[1:], stdout, stderr)
+		return runCompile(binary, root.Args, stdout, stderr)
 	case "config":
-		return runConfig(binary, args[1:], stdout, stderr)
+		return runConfig(binary, root.Args, root, stdout, stderr)
+	case "completion":
+		return runCompletion(binary, root.Args, stdout, stderr)
 	case "events":
-		return runEvents(binary, args[1:], stdout, stderr)
+		return runEvents(binary, root.Args, root, stdout, stderr)
 	case "object":
-		return runObject(binary, args[1:], stdout, stderr)
+		return runObject(binary, root.Args, stdout, stderr)
 	case "policy":
-		return runPolicy(binary, args[1:], stdout, stderr)
+		return runPolicy(binary, root.Args, stdout, stderr)
 	case "release":
-		return runRelease(binary, args[1:], stdout, stderr)
+		return runRelease(binary, root.Args, stdout, stderr)
 	case "state":
-		return runState(binary, args[1:], stdout, stderr)
+		return runState(binary, root.Args, stdout, stderr)
+	case "status":
+		return runStatus(binary, root.Args, root, stdout, stderr)
 	case "validate":
-		return runValidate(binary, args[1:], stdout, stderr)
+		return runValidate(binary, root.Args, stdout, stderr)
 	case "version":
-		if err := runVersion(binary, args[1:], stdout); err != nil {
-			fmt.Fprintf(stderr, "%s: %v\n", binary, err)
-			return ExitUserError
-		}
-		return ExitSuccess
+		return runVersion(binary, root.Args, root, stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout, binary)
 		return ExitSuccess
 	default:
-		fmt.Fprintf(stderr, "%s: unknown command %q\n", binary, args[0])
+		fmt.Fprintf(stderr, "%s: unknown command %q\n", binary, root.Command)
 		printUsage(stderr, binary)
 		return ExitUserError
 	}
 }
 
-func runVersion(binary string, args []string, stdout io.Writer) error {
+func runVersion(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" version", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	format := fs.String("format", "human", "output format: human or json")
-	noColor := fs.Bool("no-color", false, "disable ANSI color output")
-	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
-	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
+	format := fs.String("format", root.Format, "output format: human or json")
+	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
+	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
+	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
 
 	if err := fs.Parse(args); err != nil {
-		return err
+		return writeRootError(binary, *format, *traceID, err, stdout, stderr)
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("unexpected argument %q", fs.Arg(0))
+		return writeRootError(binary, *format, *traceID, fmt.Errorf("unexpected argument %q", fs.Arg(0)), stdout, stderr)
 	}
 	_ = noColor
 	_ = yes
 
-	info := buildinfo.Current(binary)
+	cfg := config.Config{Mode: config.ModeDirect, StateBucket: "memory://version"}
+	apiClient, err := client.NewDirect(cfg, client.DirectOptions{BuildInfo: buildinfo.Current(binary)})
+	if err != nil {
+		return writeClientError(binary, "version", *format, *traceID, err, stdout, stderr)
+	}
+	info, err := apiClient.Version(nilContext(), client.VersionOptions{Binary: binary, TraceID: *traceID})
+	if err != nil {
+		return writeClientError(binary, "version", *format, *traceID, err, stdout, stderr)
+	}
 	switch *format {
 	case "human", "text":
 		fmt.Fprintf(stdout, "%s version %s\n", info.Binary, info.Version)
@@ -112,19 +132,23 @@ func runVersion(binary string, args []string, stdout io.Writer) error {
 		if *traceID != "" {
 			fmt.Fprintf(stdout, "trace_id: %s\n", *traceID)
 		}
-		return nil
+		return ExitSuccess
 	case "json":
 		enc := json.NewEncoder(stdout)
-		return enc.Encode(versionOutput{
+		if err := enc.Encode(versionOutput{
 			OK:        true,
 			Binary:    info.Binary,
 			Version:   info.Version,
 			Commit:    info.Commit,
 			BuildDate: info.BuildDate,
 			TraceID:   *traceID,
-		})
+		}); err != nil {
+			fmt.Fprintf(stderr, "%s version: %v\n", binary, err)
+			return ExitInternalError
+		}
+		return ExitSuccess
 	default:
-		return errors.New(`unsupported format; expected "human" or "json"`)
+		return writeRootError(binary, *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
 	}
 }
 
@@ -134,6 +158,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  bootstrap  Bootstrap initial cloud state substrate")
 	fmt.Fprintln(w, "  compile    Compile a Skiff spec to provider-neutral IR")
 	fmt.Fprintln(w, "  config     Inspect effective configuration")
+	fmt.Fprintln(w, "  completion Generate shell completions")
 	fmt.Fprintln(w, "  events     List local service, operation, or saga events")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
 	fmt.Fprintln(w, "  policy     Explain generated state security policies")
@@ -142,8 +167,13 @@ func printUsage(w io.Writer, binary string) {
 		fmt.Fprintln(w, "  serve      Start the stateless skiffd API server")
 	}
 	fmt.Fprintln(w, "  state      Inspect object-state paths and developer helpers")
+	fmt.Fprintln(w, "  status     Show service status through direct or API mode")
 	fmt.Fprintln(w, "  validate   Parse, default, and validate a Skiff spec")
 	fmt.Fprintln(w, "  version    Print version, commit, and build date")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Global flags:")
+	fmt.Fprintln(w, "  --config <path> --env <env> --provider <provider> --region <region>")
+	fmt.Fprintln(w, "  --state <uri> --api --direct --format human|json --no-color --yes --trace-id <id>")
 }
 
 type configShowOutput struct {
@@ -254,14 +284,14 @@ type specErrorOutput struct {
 	RecommendedActions []recommendedAction `json:"recommended_actions,omitempty"`
 }
 
-func runConfig(binary string, args []string, stdout, stderr io.Writer) int {
+func runConfig(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		printConfigUsage(stderr, binary)
 		return ExitUserError
 	}
 	switch args[0] {
 	case "show":
-		return runConfigShow(binary, args[1:], stdout, stderr)
+		return runConfigShow(binary, args[1:], root, stdout, stderr)
 	case "help", "-h", "--help":
 		printConfigUsage(stdout, binary)
 		return ExitSuccess
@@ -272,29 +302,31 @@ func runConfig(binary string, args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-func runConfigShow(binary string, args []string, stdout, stderr io.Writer) int {
+func runConfigShow(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" config show", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	format := fs.String("format", "human", "output format: human or json")
-	noColor := fs.Bool("no-color", false, "disable ANSI color output")
-	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
-	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
-	configPath := fs.String("config", "", "path to Skiff config file")
+	format := fs.String("format", root.Format, "output format: human or json")
+	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
+	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
+	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
+	configPath := fs.String("config", root.ConfigPath, "path to Skiff config file")
 	userDataPath := fs.String("user-data", "", "path to runner cloud-init/user-data JSON")
 
-	fs.String("env", "", "Skiff environment name")
-	fs.String("provider", "", "cloud provider name")
-	fs.String("region", "", "cloud provider region")
-	fs.String("state-bucket", "", "object-state bucket URI")
+	fs.String("env", root.Env, "Skiff environment name")
+	fs.String("provider", root.Provider, "cloud provider name")
+	fs.String("region", root.Region, "cloud provider region")
+	fs.String("state-bucket", root.State, "object-state bucket URI")
 	fs.String("kms-key", "", "KMS key ID or alias")
 	fs.String("auth-mode", "", "auth mode")
 	fs.String("log-level", "", "log level")
-	fs.String("mode", "", "config mode: api, direct, skiffd, or runner")
-	fs.String("api-url", "", "skiffd API URL")
+	fs.String("mode", string(root.Mode), "config mode: api, direct, skiffd, or runner")
+	fs.String("api-url", root.APIURL, "skiffd API URL")
 	fs.String("service", "", "runner service name")
 	fs.String("control-key", "", "runner service control object key")
-	fs.String("state", "", "alias for --state-bucket")
+	fs.String("state", root.State, "alias for --state-bucket")
+	direct := fs.Bool("direct", root.directSet, "use direct object-state mode")
+	apiMode := fs.Bool("api", root.apiSet, "use skiffd API mode")
 
 	if err := fs.Parse(args); err != nil {
 		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
@@ -305,7 +337,7 @@ func runConfigShow(binary string, args []string, stdout, stderr io.Writer) int {
 	_ = noColor
 	_ = yes
 
-	overrides := make(map[string]string)
+	overrides := root.configOverrides()
 	flagToField := map[string]string{
 		"env":          config.FieldEnv,
 		"provider":     config.FieldProvider,
@@ -325,6 +357,15 @@ func runConfigShow(binary string, args []string, stdout, stderr io.Writer) int {
 			overrides[field] = f.Value.String()
 		}
 	})
+	if *direct && *apiMode {
+		return writeConfigError(binary, *format, *traceID, errors.New("--api and --direct cannot both be set"), nil, stdout, stderr)
+	}
+	if *direct {
+		overrides[config.FieldMode] = string(config.ModeDirect)
+	}
+	if *apiMode {
+		overrides[config.FieldMode] = string(config.ModeAPI)
+	}
 
 	loaded, err := config.Load(config.LoadOptions{
 		ModeDefault:  defaultMode(binary),
@@ -674,7 +715,7 @@ func writePolicyError(binary, format, traceID string, err error, stdout, stderr 
 	return ExitUserError
 }
 
-func runEvents(binary string, args []string, stdout, stderr io.Writer) int {
+func runEvents(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
 		printEventsUsage(stdout, binary)
 		return ExitSuccess
@@ -683,50 +724,84 @@ func runEvents(binary string, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" events", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	format := fs.String("format", "human", "output format: human or json")
-	noColor := fs.Bool("no-color", false, "disable ANSI color output")
-	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
-	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
+	flags := addClientFlags(fs, root)
 	stateDir := fs.String("state-dir", "", "local object-state directory mirror")
-	scopeKind := fs.String("scope", "service", "event scope: service, operation, or saga")
+	scopeKind := fs.String("scope", "recent", "event scope: recent, service, operation, or saga")
 	service := fs.String("service", "", "service name")
 	operation := fs.String("operation", "", "operation ID")
 	saga := fs.String("saga", "", "saga ID")
 	limit := fs.Int("limit", 0, "maximum events to list")
+	fresh := fs.Bool("fresh", false, "bypass cached API views where supported")
 
 	if err := fs.Parse(args); err != nil {
-		return writeEventsError(binary, *format, *traceID, err, stdout, stderr)
+		return writeEventsError(binary, *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if fs.NArg() != 0 {
-		return writeEventsError(binary, *format, *traceID, fmt.Errorf("unexpected argument %q", fs.Arg(0)), stdout, stderr)
+		return writeEventsError(binary, *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", fs.Arg(0)), stdout, stderr)
 	}
-	_ = noColor
-	_ = yes
+	_ = flags.noColor
+	_ = flags.yes
 
-	if *stateDir == "" {
-		return writeEventsError(binary, *format, *traceID, errors.New("events requires --state-dir until direct/API clients are wired"), stdout, stderr)
+	if *stateDir != "" {
+		scope := events.Scope{Kind: events.ScopeKind(*scopeKind), Service: *service, Operation: *operation, Saga: *saga}
+		listed, err := readEventsFromStateDir(*stateDir, scope, *limit)
+		if err != nil {
+			return writeEventsError(binary, *flags.format, *flags.traceID, err, stdout, stderr)
+		}
+		switch *flags.format {
+		case "human", "text":
+			for _, event := range listed {
+				fmt.Fprintf(stdout, "%s %s %s %s\n", event.Time, event.ID, event.Type, event.Summary)
+			}
+			return ExitSuccess
+		case "json":
+			enc := json.NewEncoder(stdout)
+			if err := enc.Encode(eventsListOutput{OK: true, TraceID: *flags.traceID, Scope: scope, Events: listed}); err != nil {
+				fmt.Fprintf(stderr, "%s events: %v\n", binary, err)
+				return ExitInternalError
+			}
+			return ExitSuccess
+		default:
+			return writeEventsError(binary, *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		}
 	}
-	scope := events.Scope{Kind: events.ScopeKind(*scopeKind), Service: *service, Operation: *operation, Saga: *saga}
-	listed, err := readEventsFromStateDir(*stateDir, scope, *limit)
+
+	loaded, err := flags.load(binary, root, fs)
 	if err != nil {
-		return writeEventsError(binary, *format, *traceID, err, stdout, stderr)
+		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+	}
+	skiffClient, err := client.New(loaded.Config, client.Options{})
+	if err != nil {
+		return writeClientError(binary, "events", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	listed, err := skiffClient.Events(nilContext(), client.EventOptions{
+		Scope:     *scopeKind,
+		Service:   *service,
+		Operation: *operation,
+		Saga:      *saga,
+		Limit:     *limit,
+		Fresh:     *fresh,
+		TraceID:   *flags.traceID,
+	})
+	if err != nil {
+		return writeClientError(binary, "events", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 
-	switch *format {
+	switch *flags.format {
 	case "human", "text":
-		for _, event := range listed {
+		for _, event := range listed.Events {
 			fmt.Fprintf(stdout, "%s %s %s %s\n", event.Time, event.ID, event.Type, event.Summary)
 		}
 		return ExitSuccess
 	case "json":
 		enc := json.NewEncoder(stdout)
-		if err := enc.Encode(eventsListOutput{OK: true, TraceID: *traceID, Scope: scope, Events: listed}); err != nil {
+		if err := enc.Encode(clientEventsOutput{OK: true, TraceID: *flags.traceID, Result: *listed}); err != nil {
 			fmt.Fprintf(stderr, "%s events: %v\n", binary, err)
-			return ExitUserError
+			return ExitInternalError
 		}
 		return ExitSuccess
 	default:
-		return writeEventsError(binary, *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeEventsError(binary, *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
 	}
 }
 

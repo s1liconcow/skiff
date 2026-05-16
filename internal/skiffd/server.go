@@ -10,15 +10,14 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/s1liconcow/skiff/internal/buildinfo"
 	"github.com/s1liconcow/skiff/internal/config"
+	stateindex "github.com/s1liconcow/skiff/internal/index"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 )
@@ -125,7 +124,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/version", s.handleVersion)
 	mux.HandleFunc("/v1/env", s.handleEnv)
 	mux.HandleFunc("/v1/services", s.handleServices)
+	mux.HandleFunc("/v1/sagas", s.handleSagas)
 	mux.HandleFunc("/v1/events/recent", s.handleRecentEvents)
+	mux.HandleFunc("/v1/admin/index", s.handleAdminIndex)
 	mux.HandleFunc("/", s.handleNotFound)
 	return s.withMiddleware(mux)
 }
@@ -255,6 +256,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		"trace_id":   traceIDFromContext(r.Context()),
 		"request_id": requestIDFromContext(r.Context()),
 		"freshness":  freshness,
+		"index":      freshness,
 	})
 }
 
@@ -291,11 +293,12 @@ func (s *Server) handleEnv(w http.ResponseWriter, r *http.Request) {
 	if _, ok := negotiateFormat(w, r, true); !ok {
 		return
 	}
-	snapshot, err := s.index.Snapshot(r.Context())
+	read, err := s.snapshotForRequest(r)
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "INDEX_SNAPSHOT_FAILED", err.Error(), nil)
 		return
 	}
+	freshness := read.freshness
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":         true,
@@ -317,7 +320,8 @@ func (s *Server) handleEnv(w http.ResponseWriter, r *http.Request) {
 			"verifier":     s.verifier != nil,
 			"event_bus":    s.eventBus != nil,
 		},
-		"freshness": freshnessFromSnapshot(snapshot),
+		"freshness": freshness,
+		"index":     freshness,
 	})
 }
 
@@ -328,21 +332,58 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 	if _, ok := negotiateFormat(w, r, true); !ok {
 		return
 	}
-	snapshot, err := s.index.Snapshot(r.Context())
+	read, err := s.snapshotForRequest(r)
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "INDEX_SNAPSHOT_FAILED", err.Error(), nil)
 		return
 	}
+	snapshot := read.snapshot
 	if !snapshot.Ready {
 		writeError(w, r, http.StatusServiceUnavailable, "INDEX_NOT_READY", "index has not completed initial load", nil)
 		return
+	}
+	services := snapshot.Services
+	if service := strings.TrimSpace(r.URL.Query().Get("service")); service != "" {
+		services = filterServices(services, service)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":         true,
 		"trace_id":   traceIDFromContext(r.Context()),
 		"request_id": requestIDFromContext(r.Context()),
-		"freshness":  freshnessFromSnapshot(snapshot),
-		"services":   snapshot.Services,
+		"freshness":  read.freshness,
+		"index":      read.freshness,
+		"services":   services,
+	})
+}
+
+func (s *Server) handleSagas(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if _, ok := negotiateFormat(w, r, true); !ok {
+		return
+	}
+	read, err := s.snapshotForRequest(r)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "INDEX_SNAPSHOT_FAILED", err.Error(), nil)
+		return
+	}
+	snapshot := read.snapshot
+	if !snapshot.Ready {
+		writeError(w, r, http.StatusServiceUnavailable, "INDEX_NOT_READY", "index has not completed initial load", nil)
+		return
+	}
+	sagas := snapshot.Sagas
+	if sagaID := strings.TrimSpace(r.URL.Query().Get("saga")); sagaID != "" {
+		sagas = filterSagas(sagas, sagaID)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"trace_id":   traceIDFromContext(r.Context()),
+		"request_id": requestIDFromContext(r.Context()),
+		"freshness":  read.freshness,
+		"index":      read.freshness,
+		"sagas":      sagas,
 	})
 }
 
@@ -358,11 +399,12 @@ func (s *Server) handleRecentEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "INVALID_LIMIT", err.Error(), nil)
 		return
 	}
-	snapshot, err := s.index.Snapshot(r.Context())
+	read, err := s.snapshotForRequest(r)
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "INDEX_SNAPSHOT_FAILED", err.Error(), nil)
 		return
 	}
+	snapshot := read.snapshot
 	if !snapshot.Ready {
 		writeError(w, r, http.StatusServiceUnavailable, "INDEX_NOT_READY", "index has not completed initial load", nil)
 		return
@@ -372,8 +414,38 @@ func (s *Server) handleRecentEvents(w http.ResponseWriter, r *http.Request) {
 		"ok":         true,
 		"trace_id":   traceIDFromContext(r.Context()),
 		"request_id": requestIDFromContext(r.Context()),
-		"freshness":  freshnessFromSnapshot(snapshot),
+		"freshness":  read.freshness,
+		"index":      read.freshness,
 		"events":     events,
+	})
+}
+
+func (s *Server) handleAdminIndex(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if _, ok := negotiateFormat(w, r, true); !ok {
+		return
+	}
+	read, err := s.snapshotForRequest(r)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "INDEX_SNAPSHOT_FAILED", err.Error(), nil)
+		return
+	}
+	snapshot := read.snapshot
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"trace_id":   traceIDFromContext(r.Context()),
+		"request_id": requestIDFromContext(r.Context()),
+		"index":      read.freshness,
+		"stats": map[string]int{
+			"services":      len(snapshot.Services),
+			"sagas":         len(snapshot.Sagas),
+			"operations":    len(snapshot.Operations),
+			"resources":     len(snapshot.Resources),
+			"recent_events": len(snapshot.RecentEvents),
+			"findings":      len(snapshot.Findings),
+		},
 	})
 }
 
@@ -394,188 +466,77 @@ type Index interface {
 	Snapshot(ctx context.Context) (Snapshot, error)
 }
 
-type Snapshot struct {
-	Ready        bool
-	Generation   int64
-	RefreshedAt  time.Time
-	Services     []ServiceSummary
-	RecentEvents []schema.Event
-	Findings     []Finding
-}
-
-type ServiceSummary struct {
-	Service        string `json:"service"`
-	Env            string `json:"env,omitempty"`
-	DesiredRelease string `json:"desired_release,omitempty"`
-	StableRelease  string `json:"stable_release,omitempty"`
-	UpdatedAt      string `json:"updated_at,omitempty"`
-}
-
-type Finding struct {
-	Code    string `json:"code"`
-	Summary string `json:"summary"`
-	Key     string `json:"key,omitempty"`
-}
-
-type StaticIndex struct {
-	mu       sync.RWMutex
-	snapshot Snapshot
-}
+type Snapshot = stateindex.Snapshot
+type ServiceSummary = stateindex.ServiceSummary
+type SagaSummary = stateindex.SagaSummary
+type OperationSummary = stateindex.OperationSummary
+type ResourceSummary = stateindex.ResourceSummary
+type Finding = stateindex.Finding
+type StaticIndex = stateindex.Static
 
 func NewStaticIndex(snapshot Snapshot) *StaticIndex {
-	return &StaticIndex{snapshot: cloneSnapshot(snapshot)}
-}
-
-func (i *StaticIndex) Snapshot(ctx context.Context) (Snapshot, error) {
-	if err := ctx.Err(); err != nil {
-		return Snapshot{}, err
-	}
-	i.mu.RLock()
-	defer i.mu.RUnlock()
-	return cloneSnapshot(i.snapshot), nil
-}
-
-func (i *StaticIndex) Set(snapshot Snapshot) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	i.snapshot = cloneSnapshot(snapshot)
+	return stateindex.NewStatic(snapshot)
 }
 
 func SnapshotFromObjectStore(ctx context.Context, store objstore.ObjectStore, now time.Time) (Snapshot, error) {
-	if store == nil {
-		return Snapshot{}, errors.New("object store is required")
-	}
-	snapshot := Snapshot{
-		Ready:       true,
-		Generation:  1,
-		RefreshedAt: now.UTC(),
-	}
-
-	serviceMetas, err := store.List(ctx, "services/", objstore.ListOptions{})
-	if err != nil {
-		return Snapshot{}, err
-	}
-	for _, meta := range serviceMetas {
-		if !strings.HasSuffix(meta.Key, "/control.json") {
-			continue
-		}
-		service, ok := serviceFromControlKey(meta.Key)
-		if !ok {
-			snapshot.Findings = append(snapshot.Findings, Finding{
-				Code:    "MALFORMED_SERVICE_CONTROL_KEY",
-				Summary: "service control key does not match services/<service>/control.json",
-				Key:     meta.Key,
-			})
-			continue
-		}
-		obj, err := store.Get(ctx, meta.Key)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		var control schema.ServiceControl
-		if err := json.Unmarshal(obj.Body, &control); err != nil {
-			snapshot.Findings = append(snapshot.Findings, Finding{
-				Code:    "MALFORMED_SERVICE_CONTROL",
-				Summary: err.Error(),
-				Key:     meta.Key,
-			})
-			continue
-		}
-		if control.Service == "" {
-			control.Service = service
-		}
-		snapshot.Services = append(snapshot.Services, ServiceSummary{
-			Service:        control.Service,
-			Env:            control.Env,
-			DesiredRelease: control.DesiredRelease,
-			StableRelease:  control.StableRelease,
-			UpdatedAt:      control.UpdatedAt,
-		})
-	}
-	sort.Slice(snapshot.Services, func(i, j int) bool {
-		if snapshot.Services[i].Service == snapshot.Services[j].Service {
-			return snapshot.Services[i].Env < snapshot.Services[j].Env
-		}
-		return snapshot.Services[i].Service < snapshot.Services[j].Service
+	return stateindex.BuildSnapshot(ctx, store, stateindex.BuildOptions{
+		Now:               now,
+		Generation:        1,
+		RecentEventsLimit: maxRecentEventsLimit,
 	})
-
-	events, findings, err := eventsFromObjectStore(ctx, store)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	snapshot.RecentEvents = events
-	snapshot.Findings = append(snapshot.Findings, findings...)
-	return snapshot, nil
 }
 
-func eventsFromObjectStore(ctx context.Context, store objstore.ObjectStore) ([]schema.Event, []Finding, error) {
-	var metas []objstore.ObjectMeta
-	for _, prefix := range []string{"services/", "sagas/"} {
-		listed, err := store.List(ctx, prefix, objstore.ListOptions{})
-		if err != nil {
-			return nil, nil, err
-		}
-		metas = append(metas, listed...)
-	}
-
-	events := make([]schema.Event, 0)
-	findings := make([]Finding, 0)
-	for _, meta := range metas {
-		if !isEventKey(meta.Key) {
-			continue
-		}
-		obj, err := store.Get(ctx, meta.Key)
-		if err != nil {
-			return nil, nil, err
-		}
-		var event schema.Event
-		if err := json.Unmarshal(obj.Body, &event); err != nil {
-			findings = append(findings, Finding{
-				Code:    "MALFORMED_EVENT",
-				Summary: err.Error(),
-				Key:     meta.Key,
-			})
-			continue
-		}
-		events = append(events, event)
-	}
-	sort.Slice(events, func(i, j int) bool {
-		if events[i].Time == events[j].Time {
-			return events[i].ID < events[j].ID
-		}
-		return events[i].Time < events[j].Time
-	})
-	return events, findings, nil
-}
-
-func serviceFromControlKey(key string) (string, bool) {
-	parts := strings.Split(key, "/")
-	if len(parts) != 3 || parts[0] != "services" || parts[2] != "control.json" || parts[1] == "" {
-		return "", false
-	}
-	return parts[1], true
-}
-
-func isEventKey(key string) bool {
-	return strings.Contains(key, "/events/") && strings.HasSuffix(key, ".json")
-}
-
-type freshness struct {
-	Source      string    `json:"source"`
-	Ready       bool      `json:"ready"`
-	Generation  int64     `json:"generation"`
-	RefreshedAt time.Time `json:"refreshed_at,omitempty"`
-	Findings    []Finding `json:"findings,omitempty"`
-}
+type freshness = stateindex.Freshness
 
 func freshnessFromSnapshot(snapshot Snapshot) freshness {
-	return freshness{
-		Source:      "memory_index",
-		Ready:       snapshot.Ready,
-		Generation:  snapshot.Generation,
-		RefreshedAt: snapshot.RefreshedAt,
-		Findings:    snapshot.Findings,
+	return stateindex.FreshnessFromSnapshot(snapshot, time.Now().UTC(), "memory")
+}
+
+type snapshotRead struct {
+	snapshot  Snapshot
+	freshness freshness
+}
+
+type freshSnapshotReader interface {
+	FreshSnapshot(ctx context.Context) (stateindex.FreshRead, error)
+}
+
+func (s *Server) snapshotForRequest(r *http.Request) (snapshotRead, error) {
+	if freshRequested(r) {
+		if reader, ok := s.index.(freshSnapshotReader); ok {
+			read, err := reader.FreshSnapshot(r.Context())
+			if err != nil {
+				return snapshotRead{}, err
+			}
+			return snapshotRead{snapshot: read.Snapshot, freshness: read.Freshness}, nil
+		}
+		snapshot, err := stateindex.BuildSnapshot(r.Context(), s.store, stateindex.BuildOptions{
+			Now:               s.clock(),
+			Generation:        1,
+			RecentEventsLimit: maxRecentEventsLimit,
+		})
+		if err != nil {
+			return snapshotRead{}, err
+		}
+		return snapshotRead{
+			snapshot:  snapshot,
+			freshness: stateindex.FreshnessFromSnapshot(snapshot, s.clock(), "direct_object_store"),
+		}, nil
 	}
+	snapshot, err := s.index.Snapshot(r.Context())
+	if err != nil {
+		return snapshotRead{}, err
+	}
+	return snapshotRead{snapshot: snapshot, freshness: freshnessFromSnapshot(snapshot)}, nil
+}
+
+func freshRequested(r *http.Request) bool {
+	value := strings.TrimSpace(r.URL.Query().Get("fresh"))
+	if value == "" {
+		return false
+	}
+	parsed, err := strconv.ParseBool(value)
+	return err == nil && parsed
 }
 
 func latestEvents(events []schema.Event, limit int) []schema.Event {
@@ -585,7 +546,27 @@ func latestEvents(events []schema.Event, limit int) []schema.Event {
 	start := len(events) - limit
 	out := make([]schema.Event, 0, limit)
 	for i := len(events) - 1; i >= start; i-- {
-		out = append(out, cloneEvent(events[i]))
+		out = append(out, stateindex.CloneEvent(events[i]))
+	}
+	return out
+}
+
+func filterServices(services []ServiceSummary, service string) []ServiceSummary {
+	out := make([]ServiceSummary, 0, len(services))
+	for _, item := range services {
+		if item.Service == service {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func filterSagas(sagas []SagaSummary, sagaID string) []SagaSummary {
+	out := make([]SagaSummary, 0, len(sagas))
+	for _, item := range sagas {
+		if item.SagaID == sagaID {
+			out = append(out, item)
+		}
 	}
 	return out
 }
@@ -600,30 +581,6 @@ func parseLimit(r *http.Request) (int, error) {
 		return 0, fmt.Errorf("limit must be an integer between 1 and %d", maxRecentEventsLimit)
 	}
 	return limit, nil
-}
-
-func cloneSnapshot(snapshot Snapshot) Snapshot {
-	out := snapshot
-	out.Services = append([]ServiceSummary(nil), snapshot.Services...)
-	out.Findings = append([]Finding(nil), snapshot.Findings...)
-	out.RecentEvents = make([]schema.Event, 0, len(snapshot.RecentEvents))
-	for _, event := range snapshot.RecentEvents {
-		out.RecentEvents = append(out.RecentEvents, cloneEvent(event))
-	}
-	return out
-}
-
-func cloneEvent(event schema.Event) schema.Event {
-	out := event
-	if event.Actor != nil {
-		actor := *event.Actor
-		out.Actor = &actor
-	}
-	out.Facts = append([]schema.Fact(nil), event.Facts...)
-	if event.Data != nil {
-		out.Data = append([]byte(nil), event.Data...)
-	}
-	return out
 }
 
 type requestIDKey struct{}
