@@ -3,3 +3,7 @@
 
 # ralph local agent coordination state
 .ralph/
+
+# Local build and sandboxed Go caches
+bin/
+.cache/
