@@ -238,6 +238,35 @@ func TestSnapshotBackedEnvServicesAndRecentEvents(t *testing.T) {
 		t.Fatalf("missing dependency status: %+v", statusBody.Status.Services[0])
 	}
 
+	doctor := get(t, handler, "/v1/doctor?service=payments-api", "application/json")
+	if doctor.Code != http.StatusOK {
+		t.Fatalf("doctor endpoint = %d, body = %s", doctor.Code, doctor.Body.String())
+	}
+	var doctorBody struct {
+		OK      bool   `json:"ok"`
+		TraceID string `json:"trace_id"`
+		Doctor  struct {
+			Service  string `json:"service"`
+			Health   string `json:"health"`
+			Findings []struct {
+				Code     string `json:"code"`
+				Severity string `json:"severity"`
+			} `json:"findings"`
+			RecommendedActions []struct {
+				ID       string `json:"id"`
+				Mutating bool   `json:"mutating"`
+				Command  string `json:"command"`
+			} `json:"recommended_actions"`
+		} `json:"doctor"`
+	}
+	decodeJSON(t, doctor, &doctorBody)
+	if !doctorBody.OK || doctorBody.Doctor.Service != "payments-api" || doctorBody.Doctor.Health == "" {
+		t.Fatalf("unexpected doctor body: %+v", doctorBody)
+	}
+	if len(doctorBody.Doctor.Findings) == 0 || len(doctorBody.Doctor.RecommendedActions) == 0 {
+		t.Fatalf("doctor missing findings/actions: %+v", doctorBody.Doctor)
+	}
+
 	sagas := get(t, handler, "/v1/sagas", "application/json")
 	if sagas.Code != http.StatusOK {
 		t.Fatalf("sagas status = %d, body = %s", sagas.Code, sagas.Body.String())

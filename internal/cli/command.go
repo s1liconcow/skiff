@@ -73,6 +73,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runCompletion(binary, root.Args, stdout, stderr)
 	case "deploy":
 		return runDeploy(binary, root.Args, root, stdout, stderr)
+	case "doctor":
+		return runDoctor(binary, root.Args, root, stdout, stderr)
 	case "events":
 		return runEvents(binary, root.Args, root, stdout, stderr)
 	case "explain":
@@ -172,6 +174,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  config     Inspect effective configuration")
 	fmt.Fprintln(w, "  completion Generate shell completions")
 	fmt.Fprintln(w, "  deploy     Publish and deploy a service release")
+	fmt.Fprintln(w, "  doctor     Diagnose service health and recommend actions")
 	fmt.Fprintln(w, "  events     List local service, operation, or saga events")
 	fmt.Fprintln(w, "  explain    Explain provider cloud primitives for a spec")
 	fmt.Fprintln(w, "  logs       Query service logs through the cloud provider")

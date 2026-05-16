@@ -90,6 +90,39 @@ func (c *API) Status(ctx context.Context, opts StatusOptions) (*Status, error) {
 	return &body.Status, nil
 }
 
+func (c *API) Doctor(ctx context.Context, opts DoctorOptions) (*Doctor, error) {
+	query := url.Values{}
+	if opts.Fresh {
+		query.Set("fresh", "true")
+	}
+	if opts.Service != "" {
+		query.Set("service", opts.Service)
+	}
+	var body struct {
+		OK     bool   `json:"ok"`
+		Doctor Doctor `json:"doctor"`
+	}
+	if err := c.getJSON(ctx, "/v1/doctor", opts.TraceID, query, &body); err != nil {
+		return nil, err
+	}
+	if body.Doctor.Source == "" {
+		body.Doctor.Source = "api"
+	}
+	if body.Doctor.Env == "" {
+		body.Doctor.Env = c.cfg.Env
+	}
+	if body.Doctor.Provider == "" {
+		body.Doctor.Provider = c.cfg.Provider
+	}
+	if body.Doctor.Region == "" {
+		body.Doctor.Region = c.cfg.Region
+	}
+	if body.Doctor.TraceID == "" {
+		body.Doctor.TraceID = opts.TraceID
+	}
+	return &body.Doctor, nil
+}
+
 func (c *API) Events(ctx context.Context, opts EventOptions) (*EventList, error) {
 	query := url.Values{}
 	if opts.Limit > 0 {

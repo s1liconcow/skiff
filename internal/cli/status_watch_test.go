@@ -87,6 +87,10 @@ func (c *fakeStatusClient) Status(ctx context.Context, opts client.StatusOptions
 	return c.status, nil
 }
 
+func (c *fakeStatusClient) Doctor(ctx context.Context, opts client.DoctorOptions) (*client.Doctor, error) {
+	return &client.Doctor{}, nil
+}
+
 func (c *fakeStatusClient) Events(ctx context.Context, opts client.EventOptions) (*client.EventList, error) {
 	return &client.EventList{}, nil
 }

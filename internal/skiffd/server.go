@@ -17,6 +17,7 @@ import (
 
 	"github.com/s1liconcow/skiff/internal/buildinfo"
 	"github.com/s1liconcow/skiff/internal/config"
+	servicedoctor "github.com/s1liconcow/skiff/internal/doctor"
 	stateindex "github.com/s1liconcow/skiff/internal/index"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/state/schema"
@@ -125,6 +126,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/version", s.handleVersion)
 	mux.HandleFunc("/v1/env", s.handleEnv)
 	mux.HandleFunc("/v1/status", s.handleStatus)
+	mux.HandleFunc("/v1/doctor", s.handleDoctor)
 	mux.HandleFunc("/v1/services", s.handleServices)
 	mux.HandleFunc("/v1/sagas", s.handleSagas)
 	mux.HandleFunc("/v1/events/recent", s.handleRecentEvents)
@@ -358,6 +360,50 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"trace_id":   traceIDFromContext(r.Context()),
 		"request_id": requestIDFromContext(r.Context()),
 		"status":     status,
+	})
+}
+
+func (s *Server) handleDoctor(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if _, ok := negotiateFormat(w, r, true); !ok {
+		return
+	}
+	read, err := s.snapshotForRequest(r)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "INDEX_SNAPSHOT_FAILED", err.Error(), nil)
+		return
+	}
+	if !read.snapshot.Ready {
+		writeError(w, r, http.StatusServiceUnavailable, "INDEX_NOT_READY", "index has not completed initial load", nil)
+		return
+	}
+	service := strings.TrimSpace(r.URL.Query().Get("service"))
+	status := servicestatus.FromSnapshot(read.snapshot, servicestatus.Options{
+		Mode:        config.ModeAPI,
+		Env:         s.cfg.Env,
+		Provider:    s.cfg.Provider,
+		Region:      s.cfg.Region,
+		StateBucket: redactURI(s.cfg.StateBucket),
+		Service:     service,
+		Source:      "api",
+		Freshness:   servicestatus.FreshnessFromIndex(read.freshness),
+	})
+	result, err := servicedoctor.Diagnose(r.Context(), status, servicedoctor.Options{
+		Service: service,
+		TraceID: traceIDFromContext(r.Context()),
+		Binary:  "skiff",
+	})
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "DOCTOR_FAILED", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"trace_id":   traceIDFromContext(r.Context()),
+		"request_id": requestIDFromContext(r.Context()),
+		"doctor":     result,
 	})
 }
 

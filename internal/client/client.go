@@ -13,6 +13,7 @@ import (
 
 	"github.com/s1liconcow/skiff/internal/buildinfo"
 	"github.com/s1liconcow/skiff/internal/config"
+	servicedoctor "github.com/s1liconcow/skiff/internal/doctor"
 	stateindex "github.com/s1liconcow/skiff/internal/index"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/objstore/file"
@@ -34,6 +35,7 @@ const (
 type Interface interface {
 	Version(ctx context.Context, opts VersionOptions) (*Version, error)
 	Status(ctx context.Context, opts StatusOptions) (*Status, error)
+	Doctor(ctx context.Context, opts DoctorOptions) (*Doctor, error)
 	Events(ctx context.Context, opts EventOptions) (*EventList, error)
 }
 
@@ -59,6 +61,14 @@ type Status = servicestatus.Result
 type ServiceStatus = servicestatus.Service
 type Freshness = servicestatus.Freshness
 type Finding = servicestatus.Finding
+
+type DoctorOptions struct {
+	Service string
+	Fresh   bool
+	TraceID string
+}
+
+type Doctor = servicedoctor.Result
 
 type EventOptions struct {
 	Scope     string `json:"scope,omitempty"`
@@ -231,6 +241,22 @@ func (c *Direct) Status(ctx context.Context, opts StatusOptions) (*Status, error
 		Service:     opts.Service,
 	})
 	return &status, nil
+}
+
+func (c *Direct) Doctor(ctx context.Context, opts DoctorOptions) (*Doctor, error) {
+	status, err := c.Status(ctx, StatusOptions{Service: opts.Service, Fresh: opts.Fresh, TraceID: opts.TraceID})
+	if err != nil {
+		return nil, err
+	}
+	result, err := servicedoctor.Diagnose(ctx, *status, servicedoctor.Options{
+		Service: opts.Service,
+		TraceID: opts.TraceID,
+		Binary:  "skiff",
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 func (c *Direct) Events(ctx context.Context, opts EventOptions) (*EventList, error) {

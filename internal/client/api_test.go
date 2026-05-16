@@ -52,6 +52,45 @@ func TestAPIStatusUsesSkiffdJSONEndpoints(t *testing.T) {
 	}
 }
 
+func TestAPIDoctorUsesSkiffdJSONEndpoint(t *testing.T) {
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/v1/doctor" {
+			t.Fatalf("unexpected path %s", req.URL.Path)
+		}
+		if req.URL.Query().Get("format") != "json" || req.URL.Query().Get("fresh") != "true" || req.URL.Query().Get("service") != "payments-api" {
+			t.Fatalf("unexpected query %s", req.URL.RawQuery)
+		}
+		if req.Header.Get("X-Skiff-Trace-Id") != "tr_api_doctor" {
+			t.Fatalf("trace header = %q", req.Header.Get("X-Skiff-Trace-Id"))
+		}
+		body := `{"ok":true,"doctor":{"service":"payments-api","env":"prod","provider":"aws","region":"us-west-2","source":"api","health":"degraded","freshness":{"source":"memory","ready":true},"facts":[{"type":"target_health","message":"1 target unhealthy","service":"payments-api"}],"findings":[{"id":"payments-api_target_health_unhealthy","code":"TARGET_HEALTH_UNHEALTHY","severity":"high","service":"payments-api","summary":"target unhealthy","confidence":0.83}],"hypotheses":[{"id":"payments-api_hypothesis_target_health_bad","service":"payments-api","message":"health check mismatch","confidence":0.72}],"recommended_actions":[{"id":"payments-api_inspect_logs","kind":"command","service":"payments-api","command":"skiff logs payments-api --since 20m --format json","mutating":false}]}}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})
+
+	api, err := NewAPI(config.Config{
+		Mode:   config.ModeAPI,
+		APIURL: "http://skiffd.example.test",
+	}, APIOptions{HTTPClient: &http.Client{Transport: transport}})
+	if err != nil {
+		t.Fatalf("new API client: %v", err)
+	}
+	result, err := api.Doctor(context.Background(), DoctorOptions{Service: "payments-api", Fresh: true, TraceID: "tr_api_doctor"})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	if result.TraceID != "tr_api_doctor" || result.Service != "payments-api" || result.Health != "degraded" {
+		t.Fatalf("unexpected doctor result: %+v", result)
+	}
+	if len(result.Findings) != 1 || result.Findings[0].Code != "TARGET_HEALTH_UNHEALTHY" {
+		t.Fatalf("unexpected findings: %+v", result.Findings)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
