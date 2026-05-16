@@ -96,6 +96,33 @@ func OperationEvent(service, operation, event string) (string, error) {
 	return "services/" + service + "/operations/" + operation + "/events/" + event + ".json", nil
 }
 
+func ServiceEvent(service, event string) (string, error) {
+	if err := validateName("service", service); err != nil {
+		return "", err
+	}
+	if err := validateID("event", event); err != nil {
+		return "", err
+	}
+	return "services/" + service + "/events/" + event + ".json", nil
+}
+
+func ServiceEventsPrefix(service string) (string, error) {
+	if err := validateName("service", service); err != nil {
+		return "", err
+	}
+	return "services/" + service + "/events/", nil
+}
+
+func OperationEventsPrefix(service, operation string) (string, error) {
+	if err := validateName("service", service); err != nil {
+		return "", err
+	}
+	if err := validateID("operation", operation); err != nil {
+		return "", err
+	}
+	return "services/" + service + "/operations/" + operation + "/events/", nil
+}
+
 func SagaIntent(saga string) (string, error) {
 	if err := validateID("saga", saga); err != nil {
 		return "", err
@@ -125,6 +152,13 @@ func SagaEvent(saga, event string) (string, error) {
 		return "", err
 	}
 	return "sagas/" + saga + "/events/" + event + ".json", nil
+}
+
+func SagaEventsPrefix(saga string) (string, error) {
+	if err := validateID("saga", saga); err != nil {
+		return "", err
+	}
+	return "sagas/" + saga + "/events/", nil
 }
 
 func LogicalResource(kind, name string) (string, error) {

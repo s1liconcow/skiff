@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/buildinfo"
 	"github.com/s1liconcow/skiff/internal/compiler"
 	"github.com/s1liconcow/skiff/internal/config"
+	"github.com/s1liconcow/skiff/internal/events"
 	"github.com/s1liconcow/skiff/internal/ir"
 	"github.com/s1liconcow/skiff/internal/release"
 	"github.com/s1liconcow/skiff/internal/security/signing"
@@ -53,6 +56,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runCompile(binary, args[1:], stdout, stderr)
 	case "config":
 		return runConfig(binary, args[1:], stdout, stderr)
+	case "events":
+		return runEvents(binary, args[1:], stdout, stderr)
 	case "object":
 		return runObject(binary, args[1:], stdout, stderr)
 	case "release":
@@ -126,6 +131,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  bootstrap  Bootstrap initial cloud state substrate")
 	fmt.Fprintln(w, "  compile    Compile a Skiff spec to provider-neutral IR")
 	fmt.Fprintln(w, "  config     Inspect effective configuration")
+	fmt.Fprintln(w, "  events     List local service, operation, or saga events")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
 	fmt.Fprintln(w, "  release    Verify release manifests")
 	if binary == "skiffd" {
@@ -216,6 +222,13 @@ type bootstrapAWSOutput struct {
 	DryRun    bool               `json:"dry_run"`
 	Terraform string             `json:"terraform,omitempty"`
 	Plan      *bootstrap.AWSPlan `json:"plan"`
+}
+
+type eventsListOutput struct {
+	OK      bool           `json:"ok"`
+	TraceID string         `json:"trace_id,omitempty"`
+	Scope   events.Scope   `json:"scope"`
+	Events  []events.Event `json:"events"`
 }
 
 type specErrorOutput struct {
@@ -530,6 +543,138 @@ func bucketNameFromStateBucket(value string) string {
 	return value
 }
 
+func runEvents(binary string, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
+		printEventsUsage(stdout, binary)
+		return ExitSuccess
+	}
+
+	fs := flag.NewFlagSet(binary+" events", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	format := fs.String("format", "human", "output format: human or json")
+	noColor := fs.Bool("no-color", false, "disable ANSI color output")
+	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
+	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
+	stateDir := fs.String("state-dir", "", "local object-state directory mirror")
+	scopeKind := fs.String("scope", "service", "event scope: service, operation, or saga")
+	service := fs.String("service", "", "service name")
+	operation := fs.String("operation", "", "operation ID")
+	saga := fs.String("saga", "", "saga ID")
+	limit := fs.Int("limit", 0, "maximum events to list")
+
+	if err := fs.Parse(args); err != nil {
+		return writeEventsError(binary, *format, *traceID, err, stdout, stderr)
+	}
+	if fs.NArg() != 0 {
+		return writeEventsError(binary, *format, *traceID, fmt.Errorf("unexpected argument %q", fs.Arg(0)), stdout, stderr)
+	}
+	_ = noColor
+	_ = yes
+
+	if *stateDir == "" {
+		return writeEventsError(binary, *format, *traceID, errors.New("events requires --state-dir until direct/API clients are wired"), stdout, stderr)
+	}
+	scope := events.Scope{Kind: events.ScopeKind(*scopeKind), Service: *service, Operation: *operation, Saga: *saga}
+	listed, err := readEventsFromStateDir(*stateDir, scope, *limit)
+	if err != nil {
+		return writeEventsError(binary, *format, *traceID, err, stdout, stderr)
+	}
+
+	switch *format {
+	case "human", "text":
+		for _, event := range listed {
+			fmt.Fprintf(stdout, "%s %s %s %s\n", event.Time, event.ID, event.Type, event.Summary)
+		}
+		return ExitSuccess
+	case "json":
+		enc := json.NewEncoder(stdout)
+		if err := enc.Encode(eventsListOutput{OK: true, TraceID: *traceID, Scope: scope, Events: listed}); err != nil {
+			fmt.Fprintf(stderr, "%s events: %v\n", binary, err)
+			return ExitUserError
+		}
+		return ExitSuccess
+	default:
+		return writeEventsError(binary, *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+	}
+}
+
+func readEventsFromStateDir(root string, scope events.Scope, limit int) ([]events.Event, error) {
+	prefix, err := eventPrefix(scope)
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(root, filepath.FromSlash(prefix))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var files []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		files = append(files, filepath.Join(dir, entry.Name()))
+	}
+	sort.Strings(files)
+	if limit > 0 && limit < len(files) {
+		files = files[:limit]
+	}
+	out := make([]events.Event, 0, len(files))
+	for _, file := range files {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			return nil, err
+		}
+		var event events.Event
+		if err := canonical.UnmarshalStrict(body, &event); err != nil {
+			return nil, fmt.Errorf("decode event %q: %w", file, err)
+		}
+		out = append(out, event)
+	}
+	return out, nil
+}
+
+func eventPrefix(scope events.Scope) (string, error) {
+	switch scope.Kind {
+	case events.ScopeService:
+		return paths.ServiceEventsPrefix(scope.Service)
+	case events.ScopeOperation:
+		return paths.OperationEventsPrefix(scope.Service, scope.Operation)
+	case events.ScopeSaga:
+		return paths.SagaEventsPrefix(scope.Saga)
+	default:
+		return "", fmt.Errorf("unknown events scope %q", scope.Kind)
+	}
+}
+
+func writeEventsError(binary, format, traceID string, err error, stdout, stderr io.Writer) int {
+	if format == "json" {
+		enc := json.NewEncoder(stdout)
+		if encErr := enc.Encode(commandErrorOutput{
+			OK:      false,
+			Code:    "EVENTS_INVALID",
+			Summary: err.Error(),
+			TraceID: traceID,
+			RecommendedActions: []recommendedAction{
+				{
+					ID:       "list_service_events",
+					Command:  binary + " events --scope service --service <service> --state-dir <dir> --format json",
+					Mutating: false,
+				},
+			},
+		}); encErr != nil {
+			fmt.Fprintf(stderr, "%s events: %v\n", binary, encErr)
+		}
+		return ExitUserError
+	}
+	fmt.Fprintf(stderr, "%s events: %v\n", binary, err)
+	return ExitUserError
+}
+
 func runCompile(binary string, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		printCompileUsage(stderr, binary)
@@ -783,6 +928,18 @@ func printBootstrapUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  --bucket <bucket>")
 	fmt.Fprintln(w, "  --dry-run")
 	fmt.Fprintln(w, "  --emit terraform")
+	fmt.Fprintln(w, "  --format human|json")
+}
+
+func printEventsUsage(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s events [flags]\n\n", binary)
+	fmt.Fprintln(w, "Flags:")
+	fmt.Fprintln(w, "  --state-dir <dir>")
+	fmt.Fprintln(w, "  --scope service|operation|saga")
+	fmt.Fprintln(w, "  --service <service>")
+	fmt.Fprintln(w, "  --operation <operation>")
+	fmt.Fprintln(w, "  --saga <saga>")
+	fmt.Fprintln(w, "  --limit <n>")
 	fmt.Fprintln(w, "  --format human|json")
 }
 

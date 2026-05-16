@@ -260,6 +260,101 @@ func TestBootstrapAWSEmitTerraform(t *testing.T) {
 	}
 }
 
+func TestEventsListServiceJSONFromStateDir(t *testing.T) {
+	dir := t.TempDir()
+	eventDir := filepath.Join(dir, "services", "payments-api", "events")
+	if err := os.MkdirAll(eventDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(eventDir, "01JABC-service-created.json"), []byte(`{
+		"schema_version":"skiff.event/v1",
+		"id":"01JABC-service-created",
+		"time":"2026-05-16T21:30:00Z",
+		"trace_id":"tr_events",
+		"scope":{"kind":"service","service":"payments-api"},
+		"type":"service.created",
+		"summary":"service control created"
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"events",
+		"--state-dir", dir,
+		"--scope", "service",
+		"--service", "payments-api",
+		"--format", "json",
+		"--trace-id", "tr_list",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var got struct {
+		OK      bool   `json:"ok"`
+		TraceID string `json:"trace_id"`
+		Events  []struct {
+			ID      string `json:"id"`
+			Type    string `json:"type"`
+			Summary string `json:"summary"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("events output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_list" || len(got.Events) != 1 {
+		t.Fatalf("unexpected events output: %+v", got)
+	}
+	if got.Events[0].Type != "service.created" || got.Events[0].Summary != "service control created" {
+		t.Fatalf("unexpected event: %+v", got.Events[0])
+	}
+}
+
+func TestEventsListSagaJSONFromStateDir(t *testing.T) {
+	dir := t.TempDir()
+	eventDir := filepath.Join(dir, "sagas", "saga_01JABC", "events")
+	if err := os.MkdirAll(eventDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(eventDir, "01JABC-approval-required.json"), []byte(`{
+		"schema_version":"skiff.event/v1",
+		"id":"01JABC-approval-required",
+		"time":"2026-05-16T21:30:00Z",
+		"scope":{"kind":"saga","saga":"saga_01JABC"},
+		"type":"approval.required",
+		"summary":"manual approval required"
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"events",
+		"--state-dir", dir,
+		"--scope", "saga",
+		"--saga", "saga_01JABC",
+		"--format", "json",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	var got struct {
+		OK     bool `json:"ok"`
+		Events []struct {
+			Type string `json:"type"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("events output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || len(got.Events) != 1 || got.Events[0].Type != "approval.required" {
+		t.Fatalf("unexpected saga events output: %+v", got)
+	}
+}
+
 func TestValidateJSONServiceExample(t *testing.T) {
 	examplePath := filepath.Join("..", "..", "examples", "service", "skiff.yaml")
 	var stdout, stderr bytes.Buffer
