@@ -49,6 +49,17 @@ Use `internal/state/canonical.Marshal` for durable JSON bodies. It emits a singl
 
 Timestamps in schema structs are stored as UTC RFC3339 strings. Use `canonical.Time(t)` to remove monotonic clock data and format in UTC.
 
+## Signed Objects
+
+Signed immutable objects carry a top-level `digest` and `signatures` array. The digest is calculated from the canonical unsigned object with `digest` and `signatures` excluded, then signatures are verified against that digest. Release verification also checks schema version, service/env target, production artifact digest pinning, runtime manifest digest, and expiry.
+
+Developer verification commands:
+
+```bash
+skiff release verify release.json --runtime-manifest runtime-manifest.json --public-key local-test=<base64-ed25519-public-key>
+skiff object verify release.json --public-key local-test=<base64-ed25519-public-key>
+```
+
 ## Developer Command
 
 Use `skiff state path` to print the expected key:

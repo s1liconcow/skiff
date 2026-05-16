@@ -127,19 +127,21 @@ type Signature struct {
 	Algorithm string `json:"algorithm"`
 	Signature string `json:"signature"`
 	SignedAt  string `json:"signed_at"`
+	Signer    *Actor `json:"signer,omitempty"`
 }
 
 type ReleaseManifest struct {
-	SchemaVersion      string      `json:"schema_version"`
-	Service            string      `json:"service"`
-	Env                string      `json:"env"`
-	ReleaseID          string      `json:"release_id"`
-	Artifact           ArtifactRef `json:"artifact"`
-	RuntimeManifestKey string      `json:"runtime_manifest_key"`
-	Digest             string      `json:"digest"`
-	CreatedAt          string      `json:"created_at"`
-	ExpiresAt          string      `json:"expires_at,omitempty"`
-	Signatures         []Signature `json:"signatures,omitempty"`
+	SchemaVersion         string      `json:"schema_version"`
+	Service               string      `json:"service"`
+	Env                   string      `json:"env"`
+	ReleaseID             string      `json:"release_id"`
+	Artifact              ArtifactRef `json:"artifact"`
+	RuntimeManifestKey    string      `json:"runtime_manifest_key"`
+	RuntimeManifestDigest string      `json:"runtime_manifest_digest,omitempty"`
+	Digest                string      `json:"digest,omitempty"`
+	CreatedAt             string      `json:"created_at"`
+	ExpiresAt             string      `json:"expires_at,omitempty"`
+	Signatures            []Signature `json:"signatures,omitempty"`
 }
 
 type RuntimeManifest struct {

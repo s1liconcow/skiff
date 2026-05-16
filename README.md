@@ -353,6 +353,8 @@ skiff compile skiff.yaml
 skiff plan skiff.yaml
 skiff deploy skiff.yaml
 skiff deploy skiff.yaml --canary
+skiff release verify release.json --runtime-manifest runtime-manifest.json
+skiff object verify release.json
 skiff status payments-api
 skiff logs payments-api --follow
 skiff metrics payments-api

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 )
 
@@ -170,6 +171,129 @@ func TestStatePathJSONValidationError(t *testing.T) {
 	if len(got.Fields) != 1 || got.Fields[0].Field != "service" || got.Fields[0].Code != "INVALID_NAME" {
 		t.Fatalf("unexpected fields: %+v", got.Fields)
 	}
+}
+
+func TestReleaseVerifyJSONGoldenRelease(t *testing.T) {
+	goldenDir := filepath.Join("..", "..", "tests", "golden", "release")
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"release", "verify",
+		filepath.Join(goldenDir, "release.json"),
+		"--runtime-manifest", filepath.Join(goldenDir, "runtime-manifest.json"),
+		"--public-key", "local-test=25lf4lFp0UHKubu6krqgH58uHs599MsqwFGQ83/MH50=",
+		"--service", "payments-api",
+		"--env", "prod",
+		"--now", "2026-05-16T18:00:00Z",
+		"--format", "json",
+		"--trace-id", "tr_release",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	var got struct {
+		OK      bool   `json:"ok"`
+		TraceID string `json:"trace_id"`
+		Result  struct {
+			OK                bool   `json:"ok"`
+			ReleaseID         string `json:"release_id"`
+			Digest            string `json:"digest"`
+			VerifiedSignature *struct {
+				KeyID string `json:"key_id"`
+			} `json:"verified_signature"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("release verify output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || !got.Result.OK || got.TraceID != "tr_release" {
+		t.Fatalf("unexpected envelope: %+v", got)
+	}
+	if got.Result.ReleaseID != "rel_01JABC" || got.Result.Digest == "" {
+		t.Fatalf("unexpected result: %+v", got.Result)
+	}
+	if got.Result.VerifiedSignature == nil || got.Result.VerifiedSignature.KeyID != "local-test" {
+		t.Fatalf("verified signature = %+v", got.Result.VerifiedSignature)
+	}
+}
+
+func TestReleaseVerifyJSONReportsWrongEnv(t *testing.T) {
+	goldenDir := filepath.Join("..", "..", "tests", "golden", "release")
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"release", "verify",
+		filepath.Join(goldenDir, "release.json"),
+		"--public-key", "local-test=25lf4lFp0UHKubu6krqgH58uHs599MsqwFGQ83/MH50=",
+		"--service", "payments-api",
+		"--env", "staging",
+		"--now", "2026-05-16T18:00:00Z",
+		"--format", "json",
+	}, &stdout, &stderr)
+	if code != ExitUserError {
+		t.Fatalf("exit code = %d, want %d", code, ExitUserError)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var got struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			OK       bool          `json:"ok"`
+			Findings []codeFinding `json:"findings"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("release verify output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if got.OK || got.Result.OK {
+		t.Fatalf("unexpected successful result: %+v", got)
+	}
+	if !hasCode(got.Result.Findings, "ENV_MISMATCH") {
+		t.Fatalf("findings = %+v, want ENV_MISMATCH", got.Result.Findings)
+	}
+}
+
+func TestObjectVerifyJSONGoldenRelease(t *testing.T) {
+	goldenDir := filepath.Join("..", "..", "tests", "golden", "release")
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"object", "verify",
+		filepath.Join(goldenDir, "release.json"),
+		"--public-key", "local-test=25lf4lFp0UHKubu6krqgH58uHs599MsqwFGQ83/MH50=",
+		"--format", "json",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	var got struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			OK     bool   `json:"ok"`
+			Digest string `json:"digest"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("object verify output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || !got.Result.OK || got.Result.Digest == "" {
+		t.Fatalf("unexpected object verify result: %+v", got)
+	}
+}
+
+type codeFinding struct {
+	Code string `json:"code"`
+}
+
+func hasCode(items []codeFinding, code string) bool {
+	for _, item := range items {
+		if item.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func clearSkiffEnv(t *testing.T) {

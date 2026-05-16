@@ -1,15 +1,25 @@
 package cli
 
 import (
+	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/s1liconcow/skiff/internal/buildinfo"
 	"github.com/s1liconcow/skiff/internal/config"
+	"github.com/s1liconcow/skiff/internal/release"
+	"github.com/s1liconcow/skiff/internal/security/signing"
+	"github.com/s1liconcow/skiff/internal/state/canonical"
 	"github.com/s1liconcow/skiff/internal/state/paths"
+	"github.com/s1liconcow/skiff/internal/state/schema"
 )
 
 const (
@@ -35,6 +45,10 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "config":
 		return runConfig(binary, args[1:], stdout, stderr)
+	case "object":
+		return runObject(binary, args[1:], stdout, stderr)
+	case "release":
+		return runRelease(binary, args[1:], stdout, stderr)
 	case "state":
 		return runState(binary, args[1:], stdout, stderr)
 	case "version":
@@ -100,6 +114,8 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s <command> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  config     Inspect effective configuration")
+	fmt.Fprintln(w, "  object     Verify signed immutable objects")
+	fmt.Fprintln(w, "  release    Verify release manifests")
 	fmt.Fprintln(w, "  state      Inspect object-state paths and developer helpers")
 	fmt.Fprintln(w, "  version    Print version, commit, and build date")
 }
@@ -142,6 +158,26 @@ type stateErrorOutput struct {
 	TraceID            string              `json:"trace_id,omitempty"`
 	Fields             []paths.InputError  `json:"fields,omitempty"`
 	RecommendedActions []recommendedAction `json:"recommended_actions,omitempty"`
+}
+
+type verifyErrorOutput struct {
+	OK                 bool                `json:"ok"`
+	Code               string              `json:"code"`
+	Summary            string              `json:"summary"`
+	TraceID            string              `json:"trace_id,omitempty"`
+	RecommendedActions []recommendedAction `json:"recommended_actions,omitempty"`
+}
+
+type releaseVerifyOutput struct {
+	OK      bool                       `json:"ok"`
+	TraceID string                     `json:"trace_id,omitempty"`
+	Result  release.VerificationResult `json:"result"`
+}
+
+type objectVerifyOutput struct {
+	OK      bool                       `json:"ok"`
+	TraceID string                     `json:"trace_id,omitempty"`
+	Result  signing.ObjectVerification `json:"result"`
 }
 
 func runConfig(binary string, args []string, stdout, stderr io.Writer) int {
@@ -301,6 +337,185 @@ func printConfigUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s config <command> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  show       Print effective configuration")
+}
+
+func runRelease(binary string, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		printReleaseUsage(stderr, binary)
+		return ExitUserError
+	}
+	switch args[0] {
+	case "verify":
+		return runReleaseVerify(binary, args[1:], stdout, stderr)
+	case "help", "-h", "--help":
+		printReleaseUsage(stdout, binary)
+		return ExitSuccess
+	default:
+		fmt.Fprintf(stderr, "%s release: unknown command %q\n", binary, args[0])
+		printReleaseUsage(stderr, binary)
+		return ExitUserError
+	}
+}
+
+func runReleaseVerify(binary string, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" release verify", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	format := fs.String("format", "human", "output format: human or json")
+	noColor := fs.Bool("no-color", false, "disable ANSI color output")
+	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
+	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
+	filePath := fs.String("file", "", "release manifest JSON file")
+	runtimePath := fs.String("runtime-manifest", "", "runtime manifest JSON file")
+	service := fs.String("service", "", "expected service name")
+	env := fs.String("env", "", "expected environment name")
+	nowValue := fs.String("now", "", "RFC3339 verification time")
+	var publicKeys publicKeyFlags
+	fs.Var(&publicKeys, "public-key", "trusted public key as key_id=base64-ed25519-public-key; may be repeated")
+
+	flagArgs, positionals, err := splitVerifyArgs(args)
+	if err != nil {
+		return writeVerifyError(binary, "RELEASE_VERIFY_INVALID", *format, *traceID, err, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeVerifyError(binary, "RELEASE_VERIFY_INVALID", *format, *traceID, err, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeVerifyError(binary, "RELEASE_VERIFY_INVALID", *format, *traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	if *filePath == "" && len(positionals) == 1 {
+		*filePath = positionals[0]
+	}
+	if *filePath == "" {
+		return writeVerifyError(binary, "RELEASE_VERIFY_INVALID", *format, *traceID, errors.New("release manifest file is required"), stdout, stderr)
+	}
+	_ = noColor
+	_ = yes
+
+	manifest, err := readReleaseManifest(*filePath)
+	if err != nil {
+		return writeVerifyError(binary, "RELEASE_VERIFY_INVALID", *format, *traceID, err, stdout, stderr)
+	}
+	var runtimeManifest *schema.RuntimeManifest
+	if *runtimePath != "" {
+		runtimeManifest, err = readRuntimeManifest(*runtimePath)
+		if err != nil {
+			return writeVerifyError(binary, "RELEASE_VERIFY_INVALID", *format, *traceID, err, stdout, stderr)
+		}
+	}
+	verifier, err := publicKeys.verifier()
+	if err != nil {
+		return writeVerifyError(binary, "RELEASE_VERIFY_INVALID", *format, *traceID, err, stdout, stderr)
+	}
+	now, err := parseVerifyTime(*nowValue)
+	if err != nil {
+		return writeVerifyError(binary, "RELEASE_VERIFY_INVALID", *format, *traceID, err, stdout, stderr)
+	}
+	result := release.VerifyManifest(nilContext(), manifest, release.VerifyOptions{
+		Service:         *service,
+		Env:             *env,
+		RuntimeManifest: runtimeManifest,
+		Verifier:        verifier,
+		Now:             now,
+	})
+	if *format == "json" {
+		enc := json.NewEncoder(stdout)
+		if err := enc.Encode(releaseVerifyOutput{OK: result.OK, TraceID: *traceID, Result: result}); err != nil {
+			fmt.Fprintf(stderr, "%s release verify: %v\n", binary, err)
+			return ExitUserError
+		}
+		if result.OK {
+			return ExitSuccess
+		}
+		return ExitUserError
+	}
+	if *format != "human" && *format != "text" {
+		return writeVerifyError(binary, "RELEASE_VERIFY_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+	}
+	printReleaseVerification(stdout, result)
+	if result.OK {
+		return ExitSuccess
+	}
+	return ExitUserError
+}
+
+func runObject(binary string, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		printObjectUsage(stderr, binary)
+		return ExitUserError
+	}
+	switch args[0] {
+	case "verify":
+		return runObjectVerify(binary, args[1:], stdout, stderr)
+	case "help", "-h", "--help":
+		printObjectUsage(stdout, binary)
+		return ExitSuccess
+	default:
+		fmt.Fprintf(stderr, "%s object: unknown command %q\n", binary, args[0])
+		printObjectUsage(stderr, binary)
+		return ExitUserError
+	}
+}
+
+func runObjectVerify(binary string, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" object verify", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	format := fs.String("format", "human", "output format: human or json")
+	noColor := fs.Bool("no-color", false, "disable ANSI color output")
+	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
+	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
+	filePath := fs.String("file", "", "signed object JSON file")
+	var publicKeys publicKeyFlags
+	fs.Var(&publicKeys, "public-key", "trusted public key as key_id=base64-ed25519-public-key; may be repeated")
+
+	flagArgs, positionals, err := splitVerifyArgs(args)
+	if err != nil {
+		return writeVerifyError(binary, "OBJECT_VERIFY_INVALID", *format, *traceID, err, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeVerifyError(binary, "OBJECT_VERIFY_INVALID", *format, *traceID, err, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeVerifyError(binary, "OBJECT_VERIFY_INVALID", *format, *traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	if *filePath == "" && len(positionals) == 1 {
+		*filePath = positionals[0]
+	}
+	if *filePath == "" {
+		return writeVerifyError(binary, "OBJECT_VERIFY_INVALID", *format, *traceID, errors.New("signed object file is required"), stdout, stderr)
+	}
+	_ = noColor
+	_ = yes
+
+	body, err := os.ReadFile(*filePath)
+	if err != nil {
+		return writeVerifyError(binary, "OBJECT_VERIFY_INVALID", *format, *traceID, err, stdout, stderr)
+	}
+	verifier, err := publicKeys.verifier()
+	if err != nil {
+		return writeVerifyError(binary, "OBJECT_VERIFY_INVALID", *format, *traceID, err, stdout, stderr)
+	}
+	result := signing.VerifySignedJSON(nilContext(), body, verifier, schema.Version)
+	if *format == "json" {
+		enc := json.NewEncoder(stdout)
+		if err := enc.Encode(objectVerifyOutput{OK: result.OK, TraceID: *traceID, Result: result}); err != nil {
+			fmt.Fprintf(stderr, "%s object verify: %v\n", binary, err)
+			return ExitUserError
+		}
+		if result.OK {
+			return ExitSuccess
+		}
+		return ExitUserError
+	}
+	if *format != "human" && *format != "text" {
+		return writeVerifyError(binary, "OBJECT_VERIFY_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+	}
+	printObjectVerification(stdout, result)
+	if result.OK {
+		return ExitSuccess
+	}
+	return ExitUserError
 }
 
 func runState(binary string, args []string, stdout, stderr io.Writer) int {
@@ -515,6 +730,182 @@ func statePathInputMap(in statePathInputs) map[string]string {
 		return nil
 	}
 	return out
+}
+
+type publicKeyFlags struct {
+	keys map[string]ed25519.PublicKey
+}
+
+func splitVerifyArgs(args []string) ([]string, []string, error) {
+	valueFlags := map[string]bool{
+		"env":              true,
+		"file":             true,
+		"format":           true,
+		"now":              true,
+		"public-key":       true,
+		"runtime-manifest": true,
+		"service":          true,
+		"trace-id":         true,
+	}
+	var flagArgs []string
+	var positionals []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			positionals = append(positionals, args[i+1:]...)
+			break
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			positionals = append(positionals, arg)
+			continue
+		}
+		flagArgs = append(flagArgs, arg)
+		name := strings.TrimLeft(arg, "-")
+		if name == "" {
+			continue
+		}
+		if before, _, ok := strings.Cut(name, "="); ok {
+			name = before
+		}
+		if valueFlags[name] && !strings.Contains(arg, "=") {
+			if i+1 >= len(args) {
+				return nil, nil, fmt.Errorf("missing value for %s", arg)
+			}
+			i++
+			flagArgs = append(flagArgs, args[i])
+		}
+	}
+	return flagArgs, positionals, nil
+}
+
+func (f *publicKeyFlags) String() string {
+	if f == nil || len(f.keys) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d public key(s)", len(f.keys))
+}
+
+func (f *publicKeyFlags) Set(value string) error {
+	keyID, rawValue, ok := strings.Cut(value, "=")
+	if !ok || strings.TrimSpace(keyID) == "" || strings.TrimSpace(rawValue) == "" {
+		return fmt.Errorf("public key must be key_id=base64-ed25519-public-key")
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(rawValue))
+	if err != nil {
+		return fmt.Errorf("public key for %q must be base64: %w", keyID, err)
+	}
+	if len(raw) != ed25519.PublicKeySize {
+		return fmt.Errorf("public key for %q must be %d bytes", keyID, ed25519.PublicKeySize)
+	}
+	if f.keys == nil {
+		f.keys = make(map[string]ed25519.PublicKey)
+	}
+	f.keys[strings.TrimSpace(keyID)] = append(ed25519.PublicKey(nil), raw...)
+	return nil
+}
+
+func (f publicKeyFlags) verifier() (*signing.LocalVerifier, error) {
+	if len(f.keys) == 0 {
+		return nil, fmt.Errorf("at least one --public-key is required")
+	}
+	return signing.NewLocalVerifier(f.keys)
+}
+
+func readReleaseManifest(path string) (schema.ReleaseManifest, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return schema.ReleaseManifest{}, err
+	}
+	var manifest schema.ReleaseManifest
+	if err := canonical.UnmarshalStrict(body, &manifest); err != nil {
+		return schema.ReleaseManifest{}, fmt.Errorf("read release manifest: %w", err)
+	}
+	return manifest, nil
+}
+
+func readRuntimeManifest(path string) (*schema.RuntimeManifest, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var manifest schema.RuntimeManifest
+	if err := canonical.UnmarshalStrict(body, &manifest); err != nil {
+		return nil, fmt.Errorf("read runtime manifest: %w", err)
+	}
+	return &manifest, nil
+}
+
+func parseVerifyTime(value string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("--now must be RFC3339: %w", err)
+	}
+	return parsed, nil
+}
+
+func printReleaseVerification(w io.Writer, result release.VerificationResult) {
+	if result.OK {
+		fmt.Fprintf(w, "release %s verified\n", result.ReleaseID)
+		return
+	}
+	fmt.Fprintf(w, "release %s verification failed\n", result.ReleaseID)
+	for _, finding := range result.Findings {
+		fmt.Fprintf(w, "- %s: %s\n", finding.Code, finding.Summary)
+	}
+}
+
+func printObjectVerification(w io.Writer, result signing.ObjectVerification) {
+	if result.OK {
+		fmt.Fprintf(w, "object verified: %s\n", result.Digest)
+		return
+	}
+	fmt.Fprintln(w, "object verification failed")
+	for _, finding := range result.Findings {
+		fmt.Fprintf(w, "- %s: %s\n", finding.Code, finding.Summary)
+	}
+}
+
+func writeVerifyError(binary, code, format, traceID string, err error, stdout, stderr io.Writer) int {
+	if format == "json" {
+		enc := json.NewEncoder(stdout)
+		if encErr := enc.Encode(verifyErrorOutput{
+			OK:      false,
+			Code:    code,
+			Summary: err.Error(),
+			TraceID: traceID,
+			RecommendedActions: []recommendedAction{
+				{
+					ID:       "inspect_verify_usage",
+					Command:  binary + " release verify <release.json> --public-key <key-id=base64> --format json",
+					Mutating: false,
+				},
+			},
+		}); encErr != nil {
+			fmt.Fprintf(stderr, "%s verify: %v\n", binary, encErr)
+		}
+		return ExitUserError
+	}
+	fmt.Fprintf(stderr, "%s verify: %v\n", binary, err)
+	return ExitUserError
+}
+
+func printReleaseUsage(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s release <command> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  verify     Verify a signed release manifest")
+}
+
+func printObjectUsage(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s object <command> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  verify     Verify a signed immutable object")
+}
+
+func nilContext() context.Context {
+	return context.Background()
 }
 
 func defaultString(value, fallback string) string {

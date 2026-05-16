@@ -1,0 +1,1 @@
+{"schema_version":"skiff.state/v1","service":"payments-api","env":"prod","release_id":"rel_01JABC","command":["./payments-api","serve"],"env_vars":{"PORT":"8080"},"health_check":{"type":"http","path":"/healthz","port":8080,"interval":"10s","timeout":"2s"},"created_at":"2026-05-16T17:00:00Z"}
