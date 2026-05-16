@@ -129,6 +129,7 @@ func TestSnapshotBackedEnvServicesAndRecentEvents(t *testing.T) {
 		Env:            "prod",
 		DesiredRelease: "rel_02",
 		StableRelease:  "rel_01",
+		Version:        1,
 		UpdatedAt:      "2026-05-16T19:00:00Z",
 		UpdatedBy:      schema.Actor{ID: "alpha-one", Type: "agent"},
 	})

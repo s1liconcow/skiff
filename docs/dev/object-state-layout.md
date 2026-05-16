@@ -43,6 +43,37 @@ Durable structs live in `internal/state/schema`. Each durable object includes:
 
 Control documents include embedded lease fields when they need locking. Skiff does not create separate lock objects. Immutable history objects such as release manifests, operation intents, saga graphs, events, and audit records are create-only.
 
+Service control documents are the service-level CAS object and lease object:
+
+```json
+{
+  "schema_version": "skiff.state/v1",
+  "service": "payments-api",
+  "env": "prod",
+  "desired_release": "rel_01JNEW",
+  "stable_release": "rel_01JOLD",
+  "operation": {
+    "id": "op_01JDEPLOY",
+    "kind": "deploy",
+    "state": "rolling_out",
+    "step": "canary"
+  },
+  "lease": {
+    "owner": "skiffd/instance-a",
+    "token": "lease_01J...",
+    "generation": 42,
+    "expires_at": "2026-05-16T20:05:00Z"
+  },
+  "version": 18,
+  "updated_at": "2026-05-16T20:04:30Z",
+  "updated_by": {
+    "id": "alpha-one",
+    "type": "agent"
+  },
+  "trace_id": "tr_01J..."
+}
+```
+
 ## Canonical JSON
 
 Use `internal/state/canonical.Marshal` for durable JSON bodies. It emits a single-line JSON document with HTML escaping disabled and stable struct/map ordering from Go's JSON encoder. Use `canonical.UnmarshalStrict` when reading schema documents so unknown fields are findings instead of silently accepted state.

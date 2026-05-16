@@ -15,9 +15,10 @@ type Target struct {
 }
 
 type Lease struct {
-	Holder    string `json:"holder"`
-	Token     string `json:"token"`
-	ExpiresAt string `json:"expires_at"`
+	Owner      string `json:"owner"`
+	Token      string `json:"token"`
+	Generation int64  `json:"generation"`
+	ExpiresAt  string `json:"expires_at"`
 }
 
 type ProviderOperationRef struct {
@@ -68,15 +69,24 @@ const (
 )
 
 type ServiceControl struct {
-	SchemaVersion  string `json:"schema_version"`
-	Service        string `json:"service"`
-	Env            string `json:"env"`
-	DesiredRelease string `json:"desired_release,omitempty"`
-	StableRelease  string `json:"stable_release,omitempty"`
-	Lease          *Lease `json:"lease,omitempty"`
-	UpdatedAt      string `json:"updated_at"`
-	UpdatedBy      Actor  `json:"updated_by"`
-	TraceID        string `json:"trace_id,omitempty"`
+	SchemaVersion  string           `json:"schema_version"`
+	Service        string           `json:"service"`
+	Env            string           `json:"env"`
+	DesiredRelease string           `json:"desired_release,omitempty"`
+	StableRelease  string           `json:"stable_release,omitempty"`
+	Operation      *ActiveOperation `json:"operation,omitempty"`
+	Lease          *Lease           `json:"lease,omitempty"`
+	Version        int64            `json:"version"`
+	UpdatedAt      string           `json:"updated_at"`
+	UpdatedBy      Actor            `json:"updated_by"`
+	TraceID        string           `json:"trace_id,omitempty"`
+}
+
+type ActiveOperation struct {
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	State string `json:"state"`
+	Step  string `json:"step,omitempty"`
 }
 
 type OperationIntent struct {
@@ -316,6 +326,7 @@ func NewServiceControl(service, env, updatedAt string, actor Actor) ServiceContr
 		SchemaVersion: Version,
 		Service:       service,
 		Env:           env,
+		Version:       1,
 		UpdatedAt:     updatedAt,
 		UpdatedBy:     actor,
 	}

@@ -68,6 +68,7 @@ func TestGoldenDurableObjects(t *testing.T) {
 				Env:            "prod",
 				DesiredRelease: "rel_01JABC",
 				StableRelease:  "rel_01JAAA",
+				Version:        1,
 				UpdatedAt:      "2026-05-16T17:00:00Z",
 				UpdatedBy:      actor,
 				TraceID:        "tr_01JABC",

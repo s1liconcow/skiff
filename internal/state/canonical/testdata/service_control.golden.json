@@ -1,1 +1,1 @@
-{"schema_version":"skiff.state/v1","service":"payments-api","env":"prod","desired_release":"rel_01JABC","stable_release":"rel_01JAAA","updated_at":"2026-05-16T17:00:00Z","updated_by":{"id":"alpha-one","type":"agent"},"trace_id":"tr_01JABC"}
+{"schema_version":"skiff.state/v1","service":"payments-api","env":"prod","desired_release":"rel_01JABC","stable_release":"rel_01JAAA","version":1,"updated_at":"2026-05-16T17:00:00Z","updated_by":{"id":"alpha-one","type":"agent"},"trace_id":"tr_01JABC"}
