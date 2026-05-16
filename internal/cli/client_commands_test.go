@@ -201,6 +201,64 @@ func TestCompletionGeneration(t *testing.T) {
 	}
 }
 
+func TestExplainAWSJSON(t *testing.T) {
+	specPath := filepath.Join("..", "..", "examples", "service", "skiff.yaml")
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"explain",
+		specPath,
+		"--format", "json",
+		"--trace-id", "tr_explain",
+		"--region", "us-west-2",
+		"--state", "s3://skiff-state-prod",
+		"--release-id", "rel_01JABC",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var got struct {
+		OK      bool   `json:"ok"`
+		TraceID string `json:"trace_id"`
+		Result  struct {
+			Provider  string `json:"provider"`
+			Service   string `json:"service"`
+			Resources []struct {
+				CloudPrimitive string `json:"cloud_primitive"`
+				Why            string `json:"why"`
+			} `json:"resources"`
+		} `json:"result"`
+		AWS struct {
+			LaunchTemplates []struct {
+				UserData string `json:"user_data"`
+			} `json:"launch_templates"`
+		} `json:"aws"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("explain output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_explain" || got.Result.Provider != "aws" || got.Result.Service != "payments-api" {
+		t.Fatalf("unexpected explain envelope: %+v", got)
+	}
+	primitives := map[string]bool{}
+	for _, resource := range got.Result.Resources {
+		primitives[resource.CloudPrimitive] = true
+		if resource.Why == "" {
+			t.Fatalf("resource missing why text: %+v", resource)
+		}
+	}
+	for _, want := range []string{"IAM role", "EC2 launch template", "Auto Scaling Group", "load balancer target group", "load balancer listener rule", "EC2 security group", "CloudWatch log group"} {
+		if !primitives[want] {
+			t.Fatalf("missing primitive %q in %+v", want, primitives)
+		}
+	}
+	if len(got.AWS.LaunchTemplates) != 1 || !strings.Contains(got.AWS.LaunchTemplates[0].UserData, `"state_bucket":"s3://skiff-state-prod"`) {
+		t.Fatalf("explain output missing runner user-data state bucket: %+v", got.AWS.LaunchTemplates)
+	}
+}
+
 func writeStateObject(t *testing.T, root, key string, value any) {
 	t.Helper()
 	body, err := canonical.Marshal(value)

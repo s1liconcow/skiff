@@ -73,6 +73,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runCompletion(binary, root.Args, stdout, stderr)
 	case "events":
 		return runEvents(binary, root.Args, root, stdout, stderr)
+	case "explain":
+		return runExplain(binary, root.Args, root, stdout, stderr)
 	case "object":
 		return runObject(binary, root.Args, stdout, stderr)
 	case "policy":
@@ -160,6 +162,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  config     Inspect effective configuration")
 	fmt.Fprintln(w, "  completion Generate shell completions")
 	fmt.Fprintln(w, "  events     List local service, operation, or saga events")
+	fmt.Fprintln(w, "  explain    Explain provider cloud primitives for a spec")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
 	fmt.Fprintln(w, "  policy     Explain generated state security policies")
 	fmt.Fprintln(w, "  release    Verify release manifests")

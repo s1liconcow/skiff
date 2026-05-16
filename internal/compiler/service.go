@@ -196,21 +196,34 @@ func compileSecretRefs(secrets []spec.SecretRef) []ir.SecretRef {
 }
 
 func compileListener(doc spec.Document, targetGroupRef, env, service string, tags map[string]string) *ir.Listener {
-	if doc.Network.Ingress == nil || doc.Network.Ingress.Type != "public-http" {
+	if doc.Network.Ingress == nil {
 		return nil
 	}
+	if doc.Network.Ingress.Type != "public-http" && doc.Network.Ingress.Type != "internal-http" {
+		return nil
+	}
+	visibility := "internal"
+	protocol := "HTTP"
+	port := 80
+	tls := ir.TLS{}
 	certRef := doc.Network.Ingress.CertRef
 	if doc.Network.Ingress.TLS != nil && doc.Network.Ingress.TLS.CertRef != "" {
 		certRef = doc.Network.Ingress.TLS.CertRef
 	}
+	if doc.Network.Ingress.Type == "public-http" {
+		visibility = "public"
+		protocol = "HTTPS"
+		port = 443
+		tls = ir.TLS{Enabled: true, CertRef: certRef}
+	}
 	ids := resourceIDs(service)
 	return &ir.Listener{
 		Meta:           meta(ids.listener, ir.ResourceKindListener, resourceName(env, service, "listener"), tags, "$.network.ingress"),
-		Visibility:     "public",
-		Protocol:       "HTTPS",
-		Port:           443,
+		Visibility:     visibility,
+		Protocol:       protocol,
+		Port:           port,
 		Host:           doc.Network.Ingress.Host,
-		TLS:            ir.TLS{Enabled: true, CertRef: certRef},
+		TLS:            tls,
 		TargetGroupRef: targetGroupRef,
 	}
 }
@@ -224,7 +237,7 @@ func securityRules(doc spec.Document) []ir.SecurityRule {
 			Description: "allow workload egress",
 		},
 	}
-	if doc.Network.Ingress != nil && doc.Network.Ingress.Type == "public-http" {
+	if doc.Network.Ingress != nil && (doc.Network.Ingress.Type == "public-http" || doc.Network.Ingress.Type == "internal-http") {
 		rules = append(rules, ir.SecurityRule{
 			Direction:   "ingress",
 			Protocol:    "tcp",

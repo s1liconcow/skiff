@@ -70,3 +70,12 @@ skiff completion bash
 skiff completion zsh
 skiff completion fish
 ```
+
+## Explain
+
+`skiff explain` compiles a Service spec and shows the provider primitives Skiff will use. For AWS, the output includes IAM roles and instance profiles, security groups, CloudWatch logs and metrics, target groups, listener rules, launch templates, Auto Scaling Groups, and the runner user-data that points at object state.
+
+```bash
+skiff explain examples/service/skiff.yaml --provider aws --region us-west-2 --state s3://skiff-state-prod
+skiff explain examples/service/skiff.yaml --format json --trace-id tr_explain
+```

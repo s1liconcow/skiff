@@ -16,6 +16,7 @@ const Name = "aws"
 
 type Config struct {
 	Region         string
+	StateBucket    string
 	Endpoint       string
 	ForcePathStyle bool
 	Credentials    baseaws.Credentials
@@ -45,7 +46,7 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 }
 
 func NewFromConfig(cfg config.Config, opts ...Option) (*Provider, error) {
-	awsCfg := Config{Region: cfg.Region}
+	awsCfg := Config{Region: cfg.Region, StateBucket: cfg.StateBucket}
 	return New(awsCfg, opts...)
 }
 
@@ -95,20 +96,29 @@ func (p *Provider) Plan(ctx context.Context, graph *ir.Graph) (*provider.Plan, e
 		}
 	}
 
-	resources := resourceMetas(graph)
-	changes := make([]provider.PlannedChange, 0, len(resources))
-	for _, meta := range resources {
-		name, err := NameForResource(graph.Service, graph.Env, meta)
-		if err != nil {
-			return nil, err
+	resources, err := LowerService(graph, LowerOptions{
+		Region:      p.cfg.Region,
+		StateBucket: p.cfg.StateBucket,
+	})
+	if err != nil {
+		return nil, &provider.Error{
+			Code:     provider.CodeValidation,
+			Provider: Name,
+			Op:       "plan",
+			Summary:  err.Error(),
+			Cause:    err,
 		}
+	}
+	planned := resources.PlannedResources()
+	changes := make([]provider.PlannedChange, 0, len(planned))
+	for _, resource := range planned {
 		changes = append(changes, provider.PlannedChange{
 			Action:    "ensure",
-			Kind:      meta.Kind,
-			LogicalID: meta.LogicalID,
-			Name:      name,
-			Tags:      TagsMap(meta, nil),
-			Summary:   "provider skeleton plan; apply is intentionally not implemented yet",
+			Kind:      resource.Kind,
+			LogicalID: resource.LogicalID,
+			Name:      resource.Name,
+			Tags:      cloneTags(resource.Tags),
+			Summary:   resource.Summary,
 		})
 	}
 	return &provider.Plan{
@@ -237,44 +247,6 @@ func (p *Provider) Rollback(ctx context.Context, req provider.RollbackRequest) (
 		return nil, err
 	}
 	return nil, provider.Unsupported(Name, "rollback")
-}
-
-func resourceMetas(graph *ir.Graph) []ir.ResourceMeta {
-	if graph == nil {
-		return nil
-	}
-	var out []ir.ResourceMeta
-	for _, resource := range graph.Resources.WorkloadIdentities {
-		out = append(out, resource.Meta)
-	}
-	for _, resource := range graph.Resources.IAMRoles {
-		out = append(out, resource.Meta)
-	}
-	for _, resource := range graph.Resources.SecurityGroups {
-		out = append(out, resource.Meta)
-	}
-	for _, resource := range graph.Resources.LogConfigs {
-		out = append(out, resource.Meta)
-	}
-	for _, resource := range graph.Resources.MetricConfigs {
-		out = append(out, resource.Meta)
-	}
-	for _, resource := range graph.Resources.TargetGroups {
-		out = append(out, resource.Meta)
-	}
-	for _, resource := range graph.Resources.Listeners {
-		out = append(out, resource.Meta)
-	}
-	for _, resource := range graph.Resources.InstanceTemplates {
-		out = append(out, resource.Meta)
-	}
-	for _, resource := range graph.Resources.AutoscalingGroups {
-		out = append(out, resource.Meta)
-	}
-	for _, resource := range graph.Resources.RuntimeManifests {
-		out = append(out, resource.Meta)
-	}
-	return out
 }
 
 func missingClients(op string) error {

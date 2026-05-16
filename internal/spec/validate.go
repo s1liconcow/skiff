@@ -176,9 +176,9 @@ func validateNetwork(diagnostics *[]Diagnostic, doc Document) {
 	}
 	ingress := doc.Network.Ingress
 	switch ingress.Type {
-	case "", "private", "public-http":
+	case "", "private", "public-http", "internal-http":
 	default:
-		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.network.ingress.type", Code: "UNSUPPORTED_INGRESS_TYPE", Severity: SeverityError, Message: "ingress type must be private or public-http"})
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.network.ingress.type", Code: "UNSUPPORTED_INGRESS_TYPE", Severity: SeverityError, Message: "ingress type must be private, public-http, or internal-http"})
 	}
 	if ingress.Type == "public-http" {
 		if strings.TrimSpace(ingress.Host) == "" {
