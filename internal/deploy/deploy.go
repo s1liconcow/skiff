@@ -285,6 +285,7 @@ func (d Deployer) publishRelease(ctx context.Context, graph *ir.Graph, req Reque
 		Command:       append([]string(nil), compiled.Command...),
 		EnvVars:       cloneStringMap(compiled.Env),
 		HealthCheck:   healthCheck(compiled.HealthCheck),
+		Metrics:       metricsConfig(compiled.Metrics),
 		CreatedAt:     canonical.Time(now),
 	}
 	runtimeDigest, err := release.RuntimeManifestDigest(runtimeManifest)
@@ -405,6 +406,17 @@ func healthCheck(health ir.HealthCheck) *schema.HealthCheck {
 		Command:  append([]string(nil), health.Command...),
 		Interval: health.Interval,
 		Timeout:  health.Timeout,
+	}
+}
+
+func metricsConfig(metrics ir.AppMetrics) *schema.MetricsConfig {
+	if !metrics.Enabled {
+		return nil
+	}
+	return &schema.MetricsConfig{
+		Enabled: true,
+		Path:    metrics.Path,
+		Port:    metrics.Port,
 	}
 }
 

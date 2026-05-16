@@ -117,6 +117,7 @@ type RuntimeManifest struct {
 	Env         map[string]string `json:"env,omitempty"`
 	SecretRefs  []SecretRef       `json:"secret_refs,omitempty"`
 	HealthCheck HealthCheck       `json:"health_check"`
+	Metrics     AppMetrics        `json:"metrics,omitempty"`
 }
 
 type Artifact struct {
@@ -131,6 +132,12 @@ type Runtime struct {
 	Env           map[string]string `json:"env,omitempty"`
 	HealthCheck   HealthCheck       `json:"health_check"`
 	ShutdownGrace string            `json:"shutdown_grace,omitempty"`
+}
+
+type AppMetrics struct {
+	Enabled bool   `json:"enabled"`
+	Path    string `json:"path,omitempty"`
+	Port    int    `json:"port,omitempty"`
 }
 
 type HealthCheck struct {

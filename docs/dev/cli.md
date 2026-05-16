@@ -115,3 +115,14 @@ AWS service logs use the CloudWatch log group `/skiff/<env>/<service>`. Runner u
 skiff logs payments-api --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --since 20m --release rel_01J... --format json
 skiff logs payments-api --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --follow --instance i-abc123 --format json
 ```
+
+## Metrics
+
+`skiff metrics` queries the hot cloud metrics backend. JSON series include metric name, unit, provider source, service labels, and timestamped points. AWS core metrics cover ASG capacity, target health, ALB request count, ALB latency, ALB 5xx, and EC2 CPU.
+
+Runtime manifests also carry the app metrics endpoint (`/metrics` by default), which the runner can render into local collector config with service/env/release/instance labels.
+
+```bash
+skiff metrics payments-api --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --since 15m --format json
+skiff metrics payments-api --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --metric aws.elb.request_count --release rel_01J... --format json
+```

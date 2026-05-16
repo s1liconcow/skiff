@@ -99,6 +99,11 @@ func compileService(doc spec.Document, _ Options) *ir.Graph {
 			Env:         cloneMap(doc.Runtime.Env),
 			SecretRefs:  secretRefs,
 			HealthCheck: health,
+			Metrics: ir.AppMetrics{
+				Enabled: doc.Runtime.Metrics.Enabled,
+				Path:    doc.Runtime.Metrics.Path,
+				Port:    doc.Runtime.Port,
+			},
 		},
 	}
 

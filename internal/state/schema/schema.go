@@ -162,7 +162,14 @@ type RuntimeManifest struct {
 	Command       []string          `json:"command,omitempty"`
 	EnvVars       map[string]string `json:"env_vars,omitempty"`
 	HealthCheck   *HealthCheck      `json:"health_check,omitempty"`
+	Metrics       *MetricsConfig    `json:"metrics,omitempty"`
 	CreatedAt     string            `json:"created_at"`
+}
+
+type MetricsConfig struct {
+	Enabled bool   `json:"enabled"`
+	Path    string `json:"path,omitempty"`
+	Port    int    `json:"port,omitempty"`
 }
 
 type HealthCheck struct {

@@ -34,6 +34,9 @@ func TestCompileServiceGoldenIR(t *testing.T) {
 
 func TestCompileServiceResourceMetadata(t *testing.T) {
 	graph := compileExample(t)
+	if len(graph.Resources.RuntimeManifests) != 1 || !graph.Resources.RuntimeManifests[0].Metrics.Enabled || graph.Resources.RuntimeManifests[0].Metrics.Path != "/metrics" {
+		t.Fatalf("runtime manifest missing app metrics endpoint: %+v", graph.Resources.RuntimeManifests)
+	}
 	for _, meta := range resourceMetas(graph) {
 		if meta.LogicalID == "" || meta.Kind == "" || meta.Name == "" {
 			t.Fatalf("resource metadata missing identity: %+v", meta)

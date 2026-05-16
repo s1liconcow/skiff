@@ -21,6 +21,7 @@ type Clients struct {
 	IAM              IAMClient
 	Logs             LogsClient
 	LogQueries       LogQueryClient
+	MetricQueries    MetricQueryClient
 	Rollouts         ASGRolloutClient
 	ServiceResources ServiceResourceManager
 }
@@ -113,7 +114,7 @@ func (p *Provider) DiscoverService(ctx context.Context, service, env string) ([]
 }
 
 func (c Clients) Empty() bool {
-	return c.AutoScaling == nil && c.EC2 == nil && c.ELBV2 == nil && c.IAM == nil && c.Logs == nil && c.LogQueries == nil && c.Rollouts == nil && c.ServiceResources == nil
+	return c.AutoScaling == nil && c.EC2 == nil && c.ELBV2 == nil && c.IAM == nil && c.Logs == nil && c.LogQueries == nil && c.MetricQueries == nil && c.Rollouts == nil && c.ServiceResources == nil
 }
 
 func appendKind(out []DiscoveredResource, kind string, resources []DiscoveredResource) []DiscoveredResource {

@@ -301,13 +301,6 @@ func (p *Provider) InspectResource(ctx context.Context, ref provider.ResourceRef
 	}
 }
 
-func (p *Provider) Metrics(ctx context.Context, req provider.MetricsRequest) (*provider.MetricsResult, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return nil, provider.Unsupported(Name, "metrics")
-}
-
 func (p *Provider) Debug(ctx context.Context, req provider.DebugRequest) (*provider.DebugSession, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

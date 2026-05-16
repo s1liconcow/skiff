@@ -87,6 +87,9 @@ func TestDeployPublishesReleaseUpdatesControlAndEvents(t *testing.T) {
 	}
 	runtimeManifest := readObject[schema.RuntimeManifest](t, store, runtimeKey)
 	releaseManifest := readObject[schema.ReleaseManifest](t, store, releaseKey)
+	if runtimeManifest.Metrics == nil || !runtimeManifest.Metrics.Enabled || runtimeManifest.Metrics.Path != "/metrics" {
+		t.Fatalf("runtime manifest missing metrics config: %+v", runtimeManifest.Metrics)
+	}
 	verifier, err := signing.NewLocalVerifier(map[string]ed25519.PublicKey{signer.KeyID(): signer.PublicKey()})
 	if err != nil {
 		t.Fatal(err)

@@ -111,10 +111,14 @@ type LogEntry struct {
 }
 
 type MetricsRequest struct {
-	Service string    `json:"service"`
-	Env     string    `json:"env"`
-	From    time.Time `json:"from,omitempty"`
-	To      time.Time `json:"to,omitempty"`
+	Service       string    `json:"service"`
+	Env           string    `json:"env"`
+	ReleaseID     string    `json:"release_id,omitempty"`
+	InstanceID    string    `json:"instance_id,omitempty"`
+	Names         []string  `json:"names,omitempty"`
+	From          time.Time `json:"from,omitempty"`
+	To            time.Time `json:"to,omitempty"`
+	PeriodSeconds int       `json:"period_seconds,omitempty"`
 }
 
 type MetricsResult struct {
@@ -122,9 +126,12 @@ type MetricsResult struct {
 }
 
 type MetricSeries struct {
-	Name   string        `json:"name"`
-	Unit   string        `json:"unit,omitempty"`
-	Points []MetricPoint `json:"points,omitempty"`
+	Name     string            `json:"name"`
+	Category string            `json:"category,omitempty"`
+	Source   string            `json:"source,omitempty"`
+	Unit     string            `json:"unit,omitempty"`
+	Labels   map[string]string `json:"labels,omitempty"`
+	Points   []MetricPoint     `json:"points,omitempty"`
 }
 
 type MetricPoint struct {
