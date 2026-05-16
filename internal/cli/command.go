@@ -93,6 +93,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runRelease(binary, root.Args, stdout, stderr)
 	case "rollout":
 		return runRollout(binary, root.Args, root, stdout, stderr)
+	case "saga":
+		return runSaga(binary, root.Args, root, stdout, stderr)
 	case "state":
 		return runState(binary, root.Args, stdout, stderr)
 	case "status":
@@ -184,6 +186,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  policy     Explain generated state security policies")
 	fmt.Fprintln(w, "  release    Verify release manifests")
 	fmt.Fprintln(w, "  rollout    Watch rollout progress")
+	fmt.Fprintln(w, "  saga       Inspect saga object state")
 	if binary == "skiffd" {
 		fmt.Fprintln(w, "  serve      Start the stateless skiffd API server")
 	}
@@ -1420,6 +1423,8 @@ func runStatePath(binary string, args []string, stdout, stderr io.Writer) int {
 	operation := fs.String("operation", "", "operation ID")
 	saga := fs.String("saga", "", "saga ID")
 	event := fs.String("event", "", "event ID")
+	artifact := fs.String("artifact", "", "saga artifact path")
+	step := fs.String("step", "", "saga step ID")
 	doc := fs.String("doc", "", "document selector")
 	resourceKind := fs.String("resource-kind", "", "resource kind")
 	name := fs.String("name", "", "logical resource name")
@@ -1443,6 +1448,8 @@ func runStatePath(binary string, args []string, stdout, stderr io.Writer) int {
 		operation:    *operation,
 		saga:         *saga,
 		event:        *event,
+		artifact:     *artifact,
+		step:         *step,
 		doc:          *doc,
 		resourceKind: *resourceKind,
 		name:         *name,
@@ -1472,6 +1479,8 @@ func runStatePath(binary string, args []string, stdout, stderr io.Writer) int {
 				operation:    *operation,
 				saga:         *saga,
 				event:        *event,
+				artifact:     *artifact,
+				step:         *step,
 				doc:          *doc,
 				resourceKind: *resourceKind,
 				name:         *name,
@@ -1496,6 +1505,8 @@ type statePathInputs struct {
 	operation    string
 	saga         string
 	event        string
+	artifact     string
+	step         string
 	doc          string
 	resourceKind string
 	name         string
@@ -1541,8 +1552,12 @@ func statePathFor(kind string, in statePathInputs) (string, error) {
 			return paths.SagaControl(in.saga)
 		case "event":
 			return paths.SagaEvent(in.saga, in.event)
+		case "artifact":
+			return paths.SagaArtifact(in.saga, in.artifact)
+		case "result":
+			return paths.SagaStepResult(in.saga, in.step)
 		default:
-			return "", fmt.Errorf("saga --doc must be intent, graph, control, or event")
+			return "", fmt.Errorf("saga --doc must be intent, graph, control, event, artifact, or result")
 		}
 	case "resource-logical":
 		return paths.LogicalResource(in.resourceKind, in.name)
@@ -1575,6 +1590,8 @@ func statePathInputMap(in statePathInputs) map[string]string {
 		"operation":     in.operation,
 		"saga":          in.saga,
 		"event":         in.event,
+		"artifact":      in.artifact,
+		"step":          in.step,
 		"doc":           in.doc,
 		"resource_kind": in.resourceKind,
 		"name":          in.name,
@@ -1843,7 +1860,7 @@ func printStatePathUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  service             --service <name>")
 	fmt.Fprintln(w, "  release             --service <name> --release <id> [--doc release|runtime-manifest]")
 	fmt.Fprintln(w, "  operation           --service <name> --operation <id> [--doc intent|control|event] [--event <id>]")
-	fmt.Fprintln(w, "  saga                --saga <id> [--doc intent|graph|control|event] [--event <id>]")
+	fmt.Fprintln(w, "  saga                --saga <id> [--doc intent|graph|control|event|artifact|result] [--event <id>] [--artifact <path>] [--step <id>]")
 	fmt.Fprintln(w, "  resource-logical    --resource-kind <kind> --name <name>")
 	fmt.Fprintln(w, "  resource-provider   --provider <name> --resource-kind <kind> --id <provider-id>")
 	fmt.Fprintln(w, "  index               --doc services|active-sagas|recent-events")

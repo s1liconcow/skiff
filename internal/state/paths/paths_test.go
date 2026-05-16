@@ -50,6 +50,20 @@ func TestCoreObjectPaths(t *testing.T) {
 			want: "sagas/saga_01JABC/graph.json",
 		},
 		{
+			name: "saga artifact",
+			path: func() (string, error) {
+				return paths.SagaArtifact("saga_01JABC", "plans/shift-traffic.json")
+			},
+			want: "sagas/saga_01JABC/artifacts/plans/shift-traffic.json",
+		},
+		{
+			name: "saga step result",
+			path: func() (string, error) {
+				return paths.SagaStepResult("saga_01JABC", "shift-traffic")
+			},
+			want: "sagas/saga_01JABC/artifacts/results/shift-traffic.json",
+		},
+		{
 			name: "logical resource",
 			path: func() (string, error) {
 				return paths.LogicalResource("target-group", "payments-api")
@@ -119,6 +133,11 @@ func TestPathInputValidation(t *testing.T) {
 			code: "INVALID_ID",
 		},
 		{
+			name: "rejects relative saga artifact",
+			err:  sagaArtifactErr("saga_01JABC", "../secret.json"),
+			code: "INVALID_ID",
+		},
+		{
 			name: "rejects invalid audit date",
 			err:  auditEventErr("2026-5-16", "01JABCDEF"),
 			code: "INVALID_DATE",
@@ -158,6 +177,11 @@ func serviceControlErr(service string) error {
 
 func sagaEventErr(saga, event string) error {
 	_, err := paths.SagaEvent(saga, event)
+	return err
+}
+
+func sagaArtifactErr(saga, artifact string) error {
+	_, err := paths.SagaArtifact(saga, artifact)
 	return err
 }
 

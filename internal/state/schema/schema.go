@@ -123,7 +123,31 @@ type StepResultRef struct {
 	Kind        string          `json:"kind"`
 	Status      string          `json:"status"`
 	Result      json.RawMessage `json:"result,omitempty"`
+	ResultRef   string          `json:"result_ref,omitempty"`
+	Failure     *StepFailure    `json:"failure,omitempty"`
 	CompletedAt string          `json:"completed_at,omitempty"`
+}
+
+type StepResult struct {
+	SchemaVersion      string                 `json:"schema_version"`
+	SagaID             string                 `json:"saga_id,omitempty"`
+	OperationID        string                 `json:"operation_id,omitempty"`
+	StepID             string                 `json:"step_id"`
+	Kind               string                 `json:"kind"`
+	Status             string                 `json:"status"`
+	Result             json.RawMessage        `json:"result,omitempty"`
+	Failure            *StepFailure           `json:"failure,omitempty"`
+	ProviderOperations []ProviderOperationRef `json:"provider_operations,omitempty"`
+	StartedAt          string                 `json:"started_at,omitempty"`
+	CompletedAt        string                 `json:"completed_at,omitempty"`
+}
+
+type StepFailure struct {
+	Code       string `json:"code"`
+	Summary    string `json:"summary"`
+	Cause      string `json:"cause,omitempty"`
+	Retriable  bool   `json:"retriable,omitempty"`
+	RetryAfter string `json:"retry_after,omitempty"`
 }
 
 type ArtifactRef struct {
@@ -204,7 +228,22 @@ type SagaGraph struct {
 }
 
 type SagaNode struct {
-	ID     string          `json:"id"`
+	ID            string            `json:"id"`
+	Kind          string            `json:"kind"`
+	Requires      []string          `json:"requires,omitempty"`
+	Params        json.RawMessage   `json:"params,omitempty"`
+	Retry         *RetryPolicy      `json:"retry,omitempty"`
+	Compensate    *CompensationSpec `json:"compensate,omitempty"`
+	Risk          Risk              `json:"risk,omitempty"`
+	Reversibility Reversibility     `json:"reversibility,omitempty"`
+}
+
+type RetryPolicy struct {
+	MaxAttempts int    `json:"max_attempts,omitempty"`
+	Backoff     string `json:"backoff,omitempty"`
+}
+
+type CompensationSpec struct {
 	Kind   string          `json:"kind"`
 	Params json.RawMessage `json:"params,omitempty"`
 }
@@ -259,6 +298,8 @@ type Event struct {
 	Facts         []Fact          `json:"facts,omitempty"`
 	Data          json.RawMessage `json:"data,omitempty"`
 }
+
+type SagaEvent = Event
 
 type Fact struct {
 	Type    string `json:"type"`

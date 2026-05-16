@@ -140,6 +140,41 @@ func TestStatePathJSON(t *testing.T) {
 	}
 }
 
+func TestStatePathSagaResultJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"state", "path", "saga",
+		"--format", "json",
+		"--trace-id", "tr_saga_path",
+		"--saga", "saga_01JABC",
+		"--doc", "result",
+		"--step", "shift-traffic",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	var got struct {
+		OK      bool              `json:"ok"`
+		TraceID string            `json:"trace_id"`
+		Path    string            `json:"path"`
+		Inputs  map[string]string `json:"inputs"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("state path output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_saga_path" {
+		t.Fatalf("unexpected envelope: %+v", got)
+	}
+	wantPath := "sagas/saga_01JABC/artifacts/results/shift-traffic.json"
+	if got.Path != wantPath || got.Inputs["step"] != "shift-traffic" {
+		t.Fatalf("unexpected path output: %+v", got)
+	}
+}
+
 func TestStatePathJSONValidationError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := Run("skiff", []string{

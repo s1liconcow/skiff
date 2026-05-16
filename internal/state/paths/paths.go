@@ -161,6 +161,26 @@ func SagaEventsPrefix(saga string) (string, error) {
 	return "sagas/" + saga + "/events/", nil
 }
 
+func SagaArtifact(saga, artifact string) (string, error) {
+	if err := validateID("saga", saga); err != nil {
+		return "", err
+	}
+	if err := validateArtifactPath("artifact", artifact); err != nil {
+		return "", err
+	}
+	return "sagas/" + saga + "/artifacts/" + strings.Trim(artifact, "/"), nil
+}
+
+func SagaStepResult(saga, step string) (string, error) {
+	if err := validateID("saga", saga); err != nil {
+		return "", err
+	}
+	if err := validateID("step", step); err != nil {
+		return "", err
+	}
+	return "sagas/" + saga + "/artifacts/results/" + step + ".json", nil
+}
+
 func LogicalResource(kind, name string) (string, error) {
 	if err := validateName("kind", kind); err != nil {
 		return "", err
@@ -293,6 +313,19 @@ func validateID(field, value string) error {
 			continue
 		}
 		return InputError{Field: field, Value: value, Code: "INVALID_ID", Message: "must not contain path separators, whitespace, or control characters"}
+	}
+	return nil
+}
+
+func validateArtifactPath(field, value string) error {
+	value = strings.Trim(value, "/")
+	if value == "" {
+		return InputError{Field: field, Code: "REQUIRED", Message: "is required"}
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if err := validateID(field, segment); err != nil {
+			return err
+		}
 	}
 	return nil
 }
