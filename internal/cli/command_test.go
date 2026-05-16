@@ -175,6 +175,91 @@ func TestStatePathJSONValidationError(t *testing.T) {
 	}
 }
 
+func TestBootstrapAWSDryRunJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"bootstrap", "aws",
+		"--env", "prod",
+		"--region", "us-west-2",
+		"--bucket", "skiff-state-prod",
+		"--dry-run",
+		"--format", "json",
+		"--trace-id", "tr_bootstrap",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	var got struct {
+		OK      bool   `json:"ok"`
+		TraceID string `json:"trace_id"`
+		DryRun  bool   `json:"dry_run"`
+		Plan    struct {
+			Provider       string `json:"provider"`
+			StateBucketURI string `json:"state_bucket_uri"`
+			KMSAlias       string `json:"kms_alias"`
+			RootObjectKey  string `json:"root_object_key"`
+			Resources      []struct {
+				Kind   string `json:"kind"`
+				Action string `json:"action"`
+			} `json:"resources"`
+			BucketPolicy struct {
+				Statement []struct {
+					Sid string `json:"Sid"`
+				} `json:"Statement"`
+			} `json:"bucket_policy"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("bootstrap output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_bootstrap" || !got.DryRun {
+		t.Fatalf("unexpected envelope: %+v", got)
+	}
+	if got.Plan.Provider != "aws" || got.Plan.StateBucketURI != "s3://skiff-state-prod" || got.Plan.KMSAlias == "" {
+		t.Fatalf("unexpected plan: %+v", got.Plan)
+	}
+	if got.Plan.RootObjectKey != "envs/prod/root.json" {
+		t.Fatalf("root object key = %q", got.Plan.RootObjectKey)
+	}
+	if len(got.Plan.Resources) != 7 {
+		t.Fatalf("resource count = %d, want 7", len(got.Plan.Resources))
+	}
+	if len(got.Plan.BucketPolicy.Statement) != 2 {
+		t.Fatalf("bucket policy statements = %d, want 2", len(got.Plan.BucketPolicy.Statement))
+	}
+}
+
+func TestBootstrapAWSEmitTerraform(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"bootstrap", "aws",
+		"--env", "prod",
+		"--region", "us-west-2",
+		"--state-bucket", "s3://skiff-state-prod",
+		"--emit", "terraform",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	for _, want := range []string{
+		`resource "aws_s3_bucket" "skiff_state"`,
+		`resource "aws_kms_key" "skiff_state"`,
+		`DenyUnconditionalStateWrites`,
+		`skiff-prod-runner`,
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("terraform output missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
 func TestValidateJSONServiceExample(t *testing.T) {
 	examplePath := filepath.Join("..", "..", "examples", "service", "skiff.yaml")
 	var stdout, stderr bytes.Buffer

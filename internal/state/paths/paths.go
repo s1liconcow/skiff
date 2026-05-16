@@ -29,6 +29,13 @@ func ValidateID(field, value string) error {
 	return validateID(field, value)
 }
 
+func EnvironmentRoot(env string) (string, error) {
+	if err := validateName("env", env); err != nil {
+		return "", err
+	}
+	return "envs/" + env + "/root.json", nil
+}
+
 func ServiceControl(service string) (string, error) {
 	if err := validateName("service", service); err != nil {
 		return "", err

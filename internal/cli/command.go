@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/s1liconcow/skiff/internal/bootstrap"
 	"github.com/s1liconcow/skiff/internal/buildinfo"
 	"github.com/s1liconcow/skiff/internal/compiler"
 	"github.com/s1liconcow/skiff/internal/config"
@@ -46,6 +47,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 	}
 
 	switch args[0] {
+	case "bootstrap":
+		return runBootstrap(binary, args[1:], stdout, stderr)
 	case "compile":
 		return runCompile(binary, args[1:], stdout, stderr)
 	case "config":
@@ -120,6 +123,7 @@ func runVersion(binary string, args []string, stdout io.Writer) error {
 func printUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s <command> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  bootstrap  Bootstrap initial cloud state substrate")
 	fmt.Fprintln(w, "  compile    Compile a Skiff spec to provider-neutral IR")
 	fmt.Fprintln(w, "  config     Inspect effective configuration")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
@@ -204,6 +208,14 @@ type compileOutput struct {
 	TraceID string    `json:"trace_id,omitempty"`
 	Out     string    `json:"out,omitempty"`
 	Graph   *ir.Graph `json:"graph,omitempty"`
+}
+
+type bootstrapAWSOutput struct {
+	OK        bool               `json:"ok"`
+	TraceID   string             `json:"trace_id,omitempty"`
+	DryRun    bool               `json:"dry_run"`
+	Terraform string             `json:"terraform,omitempty"`
+	Plan      *bootstrap.AWSPlan `json:"plan"`
 }
 
 type specErrorOutput struct {
@@ -366,6 +378,156 @@ func writeConfigError(binary, format, traceID string, err error, sources map[str
 
 	fmt.Fprintf(stderr, "%s config show: %v\n", binary, err)
 	return ExitUserError
+}
+
+func runBootstrap(binary string, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		printBootstrapUsage(stderr, binary)
+		return ExitUserError
+	}
+	switch args[0] {
+	case "aws":
+		return runBootstrapAWS(binary, args[1:], stdout, stderr)
+	case "help", "-h", "--help":
+		printBootstrapUsage(stdout, binary)
+		return ExitSuccess
+	default:
+		fmt.Fprintf(stderr, "%s bootstrap: unknown command %q\n", binary, args[0])
+		printBootstrapUsage(stderr, binary)
+		return ExitUserError
+	}
+}
+
+func runBootstrapAWS(binary string, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" bootstrap aws", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	format := fs.String("format", "human", "output format: human or json")
+	noColor := fs.Bool("no-color", false, "disable ANSI color output")
+	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
+	yes := fs.Bool("yes", false, "apply bootstrap changes without prompting")
+	dryRun := fs.Bool("dry-run", false, "print the bootstrap plan without mutating cloud resources")
+	emitTerraform := fs.String("emit", "", "emit generated artifacts; supported value: terraform")
+	env := fs.String("env", "", "Skiff environment name")
+	region := fs.String("region", "", "AWS region")
+	bucket := fs.String("bucket", "", "S3 state bucket name")
+	stateBucket := fs.String("state-bucket", "", "S3 state bucket URI or name")
+	kmsAlias := fs.String("kms-alias", "", "KMS alias for state bucket encryption")
+	deployerRole := fs.String("deployer-role", "", "IAM role name for deployers")
+	runnerRole := fs.String("runner-role", "", "IAM role name for runners")
+	skiffdRole := fs.String("skiffd-role", "", "IAM role name for skiffd")
+
+	if err := fs.Parse(args); err != nil {
+		return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+	}
+	if fs.NArg() != 0 {
+		return writeBootstrapError(binary, *format, *traceID, fmt.Errorf("unexpected argument %q", fs.Arg(0)), stdout, stderr)
+	}
+	_ = noColor
+
+	if *bucket == "" && *stateBucket != "" {
+		*bucket = bucketNameFromStateBucket(*stateBucket)
+	}
+	plan, err := bootstrap.PlanAWS(bootstrap.AWSOptions{
+		Env:          *env,
+		Region:       *region,
+		StateBucket:  *bucket,
+		KMSAlias:     *kmsAlias,
+		DeployerRole: *deployerRole,
+		RunnerRole:   *runnerRole,
+		SkiffdRole:   *skiffdRole,
+	})
+	if err != nil {
+		return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+	}
+
+	var terraform string
+	if *emitTerraform != "" {
+		if *emitTerraform != "terraform" {
+			return writeBootstrapError(binary, *format, *traceID, errors.New(`unsupported emit target; expected "terraform"`), stdout, stderr)
+		}
+		terraform, err = bootstrap.TerraformAWS(plan)
+		if err != nil {
+			return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+		}
+	}
+	if !*dryRun && *emitTerraform == "" {
+		if !*yes {
+			return writeBootstrapError(binary, *format, *traceID, errors.New("bootstrap apply requires --yes; use --dry-run to inspect the plan"), stdout, stderr)
+		}
+		return writeBootstrapError(binary, *format, *traceID, errors.New("bootstrap apply requires an AWS bootstrap client; use --dry-run or --emit terraform in this build"), stdout, stderr)
+	}
+
+	switch *format {
+	case "human", "text":
+		if terraform != "" {
+			fmt.Fprint(stdout, terraform)
+			return ExitSuccess
+		}
+		printBootstrapAWSPlan(stdout, plan)
+		return ExitSuccess
+	case "json":
+		enc := json.NewEncoder(stdout)
+		if err := enc.Encode(bootstrapAWSOutput{
+			OK:        true,
+			TraceID:   *traceID,
+			DryRun:    *dryRun,
+			Terraform: terraform,
+			Plan:      plan,
+		}); err != nil {
+			fmt.Fprintf(stderr, "%s bootstrap aws: %v\n", binary, err)
+			return ExitUserError
+		}
+		return ExitSuccess
+	default:
+		return writeBootstrapError(binary, *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+	}
+}
+
+func printBootstrapAWSPlan(w io.Writer, plan *bootstrap.AWSPlan) {
+	fmt.Fprintf(w, "AWS bootstrap plan for %s in %s\n", plan.Env, plan.Region)
+	fmt.Fprintf(w, "state_bucket: %s\n", plan.StateBucketURI)
+	fmt.Fprintf(w, "kms_alias: %s\n", plan.KMSAlias)
+	fmt.Fprintf(w, "root_object: %s\n", plan.RootObjectKey)
+	for _, resource := range plan.Resources {
+		fmt.Fprintf(w, "- %s %s: %s\n", resource.Kind, resource.Name, resource.Summary)
+	}
+}
+
+func writeBootstrapError(binary, format, traceID string, err error, stdout, stderr io.Writer) int {
+	if format == "json" {
+		enc := json.NewEncoder(stdout)
+		if encErr := enc.Encode(commandErrorOutput{
+			OK:      false,
+			Code:    "BOOTSTRAP_INVALID",
+			Summary: err.Error(),
+			TraceID: traceID,
+			RecommendedActions: []recommendedAction{
+				{
+					ID:       "dry_run",
+					Command:  binary + " bootstrap aws --env <env> --region <region> --bucket <bucket> --dry-run --format json",
+					Mutating: false,
+				},
+			},
+		}); encErr != nil {
+			fmt.Fprintf(stderr, "%s bootstrap aws: %v\n", binary, encErr)
+		}
+		return ExitUserError
+	}
+	fmt.Fprintf(stderr, "%s bootstrap aws: %v\n", binary, err)
+	return ExitUserError
+}
+
+func bucketNameFromStateBucket(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "s3://") {
+		withoutScheme := strings.TrimPrefix(value, "s3://")
+		if before, _, ok := strings.Cut(withoutScheme, "/"); ok {
+			return before
+		}
+		return withoutScheme
+	}
+	return value
 }
 
 func runCompile(binary string, args []string, stdout, stderr io.Writer) int {
@@ -608,6 +770,20 @@ func printConfigUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s config <command> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  show       Print effective configuration")
+}
+
+func printBootstrapUsage(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s bootstrap <provider> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  aws        Plan or emit AWS state substrate bootstrap")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "AWS flags:")
+	fmt.Fprintln(w, "  --env <env>")
+	fmt.Fprintln(w, "  --region <region>")
+	fmt.Fprintln(w, "  --bucket <bucket>")
+	fmt.Fprintln(w, "  --dry-run")
+	fmt.Fprintln(w, "  --emit terraform")
+	fmt.Fprintln(w, "  --format human|json")
 }
 
 func printValidateUsage(w io.Writer, binary string) {
@@ -935,6 +1111,8 @@ type statePathInputs struct {
 
 func statePathFor(kind string, in statePathInputs) (string, error) {
 	switch kind {
+	case "env":
+		return paths.EnvironmentRoot(in.name)
 	case "service":
 		return paths.ServiceControl(in.service)
 	case "release":

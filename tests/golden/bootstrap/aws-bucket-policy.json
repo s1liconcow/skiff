@@ -1,0 +1,51 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyInsecureTransport",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::skiff-state-prod",
+        "arn:aws:s3:::skiff-state-prod/*"
+      ],
+      "Condition": {
+        "Bool": {
+          "aws:SecureTransport": "false"
+        }
+      }
+    },
+    {
+      "Sid": "DenyUnconditionalStateWrites",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:PutObject",
+      "Resource": [
+        "arn:aws:s3:::skiff-state-prod/audit/*/*",
+        "arn:aws:s3:::skiff-state-prod/envs/*/root.json",
+        "arn:aws:s3:::skiff-state-prod/resources/by-logical/*/*",
+        "arn:aws:s3:::skiff-state-prod/resources/by-provider/*/*/*",
+        "arn:aws:s3:::skiff-state-prod/sagas/*/control.json",
+        "arn:aws:s3:::skiff-state-prod/sagas/*/events/*",
+        "arn:aws:s3:::skiff-state-prod/sagas/*/graph.json",
+        "arn:aws:s3:::skiff-state-prod/sagas/*/intent.json",
+        "arn:aws:s3:::skiff-state-prod/services/*/control.json",
+        "arn:aws:s3:::skiff-state-prod/services/*/operations/*/control.json",
+        "arn:aws:s3:::skiff-state-prod/services/*/operations/*/events/*",
+        "arn:aws:s3:::skiff-state-prod/services/*/operations/*/intent.json",
+        "arn:aws:s3:::skiff-state-prod/services/*/releases/*/release.json",
+        "arn:aws:s3:::skiff-state-prod/services/*/releases/*/runtime-manifest.json"
+      ],
+      "Condition": {
+        "Bool": {
+          "s3:ObjectCreationOperation": "true"
+        },
+        "Null": {
+          "s3:if-match": "true",
+          "s3:if-none-match": "true"
+        }
+      }
+    }
+  ]
+}
