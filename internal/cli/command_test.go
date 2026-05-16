@@ -243,6 +243,110 @@ func TestValidateYAMLShowsDefaults(t *testing.T) {
 	}
 }
 
+func TestCompileJSONServiceExample(t *testing.T) {
+	examplePath := filepath.Join("..", "..", "examples", "service", "skiff.yaml")
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"compile",
+		examplePath,
+		"--format", "json",
+		"--trace-id", "tr_compile",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	var got struct {
+		OK      bool   `json:"ok"`
+		TraceID string `json:"trace_id"`
+		Graph   struct {
+			SchemaVersion string `json:"schema_version"`
+			Service       string `json:"service"`
+			Env           string `json:"env"`
+			Resources     struct {
+				AutoscalingGroups []struct {
+					Meta struct {
+						Tags map[string]string `json:"tags"`
+					} `json:"meta"`
+					Min int `json:"min"`
+					Max int `json:"max"`
+				} `json:"autoscaling_groups"`
+				RuntimeManifests []struct {
+					HealthCheck struct {
+						Path string `json:"path"`
+					} `json:"health_check"`
+				} `json:"runtime_manifests"`
+			} `json:"resources"`
+		} `json:"graph"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("compile output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_compile" {
+		t.Fatalf("unexpected envelope: %+v", got)
+	}
+	if got.Graph.SchemaVersion != "skiff.ir/v1alpha1" || got.Graph.Service != "payments-api" || got.Graph.Env != "prod" {
+		t.Fatalf("unexpected graph identity: %+v", got.Graph)
+	}
+	if len(got.Graph.Resources.AutoscalingGroups) != 1 || got.Graph.Resources.AutoscalingGroups[0].Min != 3 || got.Graph.Resources.AutoscalingGroups[0].Max != 20 {
+		t.Fatalf("unexpected ASG lowering: %+v", got.Graph.Resources.AutoscalingGroups)
+	}
+	if got.Graph.Resources.AutoscalingGroups[0].Meta.Tags["skiff.dev/service"] != "payments-api" {
+		t.Fatalf("missing service tag: %+v", got.Graph.Resources.AutoscalingGroups[0].Meta.Tags)
+	}
+	if len(got.Graph.Resources.RuntimeManifests) != 1 || got.Graph.Resources.RuntimeManifests[0].HealthCheck.Path != "/healthz" {
+		t.Fatalf("unexpected runtime manifest lowering: %+v", got.Graph.Resources.RuntimeManifests)
+	}
+}
+
+func TestCompileOutWritesCanonicalIR(t *testing.T) {
+	examplePath := filepath.Join("..", "..", "examples", "service", "skiff.yaml")
+	outPath := filepath.Join(t.TempDir(), "ir.json")
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"compile",
+		examplePath,
+		"--format", "json",
+		"--trace-id", "tr_compile_out",
+		"--out", outPath,
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		TraceID string `json:"trace_id"`
+		Out     string `json:"out"`
+		Graph   any    `json:"graph"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("compile output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !envelope.OK || envelope.TraceID != "tr_compile_out" || envelope.Out != outPath || envelope.Graph != nil {
+		t.Fatalf("unexpected compile envelope: %+v", envelope)
+	}
+	body, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read IR output: %v", err)
+	}
+	var graph struct {
+		SchemaVersion string `json:"schema_version"`
+		Service       string `json:"service"`
+	}
+	if err := json.Unmarshal(body, &graph); err != nil {
+		t.Fatalf("IR output is not valid JSON: %v\n%s", err, string(body))
+	}
+	if graph.SchemaVersion != "skiff.ir/v1alpha1" || graph.Service != "payments-api" {
+		t.Fatalf("unexpected IR output: %+v", graph)
+	}
+}
+
 func TestValidateJSONDiagnostics(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "skiff.yaml")

@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/s1liconcow/skiff/internal/buildinfo"
+	"github.com/s1liconcow/skiff/internal/compiler"
 	"github.com/s1liconcow/skiff/internal/config"
+	"github.com/s1liconcow/skiff/internal/ir"
 	"github.com/s1liconcow/skiff/internal/release"
 	"github.com/s1liconcow/skiff/internal/security/signing"
 	"github.com/s1liconcow/skiff/internal/spec"
@@ -44,6 +46,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 	}
 
 	switch args[0] {
+	case "compile":
+		return runCompile(binary, args[1:], stdout, stderr)
 	case "config":
 		return runConfig(binary, args[1:], stdout, stderr)
 	case "object":
@@ -116,6 +120,7 @@ func runVersion(binary string, args []string, stdout io.Writer) error {
 func printUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s <command> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  compile    Compile a Skiff spec to provider-neutral IR")
 	fmt.Fprintln(w, "  config     Inspect effective configuration")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
 	fmt.Fprintln(w, "  release    Verify release manifests")
@@ -192,6 +197,13 @@ type specValidateOutput struct {
 	TraceID string         `json:"trace_id,omitempty"`
 	Result  spec.Result    `json:"result"`
 	Spec    *spec.Document `json:"spec,omitempty"`
+}
+
+type compileOutput struct {
+	OK      bool      `json:"ok"`
+	TraceID string    `json:"trace_id,omitempty"`
+	Out     string    `json:"out,omitempty"`
+	Graph   *ir.Graph `json:"graph,omitempty"`
 }
 
 type specErrorOutput struct {
@@ -356,6 +368,131 @@ func writeConfigError(binary, format, traceID string, err error, sources map[str
 	return ExitUserError
 }
 
+func runCompile(binary string, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		printCompileUsage(stderr, binary)
+		return ExitUserError
+	}
+	if args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
+		printCompileUsage(stdout, binary)
+		return ExitSuccess
+	}
+
+	fs := flag.NewFlagSet(binary+" compile", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	format := fs.String("format", "human", "output format: human or json")
+	noColor := fs.Bool("no-color", false, "disable ANSI color output")
+	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
+	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
+	filePath := fs.String("file", "", "Skiff YAML or JSON spec file")
+	outPath := fs.String("out", "", "write canonical IR JSON to path, or - for stdout")
+	allowUnknown := fs.Bool("allow-unknown-fields", false, "accept unknown fields for compatibility checks")
+
+	flagArgs, positionals, err := splitCompileArgs(args)
+	if err != nil {
+		return writeCompileError(binary, "SPEC_COMPILE_INVALID", *format, *traceID, err, nil, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeCompileError(binary, "SPEC_COMPILE_INVALID", *format, *traceID, err, nil, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeCompileError(binary, "SPEC_COMPILE_INVALID", *format, *traceID, fmt.Errorf("unexpected argument %q", positionals[1]), nil, stdout, stderr)
+	}
+	if *filePath == "" && len(positionals) == 1 {
+		*filePath = positionals[0]
+	}
+	if *filePath == "" {
+		return writeCompileError(binary, "SPEC_COMPILE_INVALID", *format, *traceID, errors.New("spec file is required"), nil, stdout, stderr)
+	}
+	if *format != "human" && *format != "text" && *format != "json" {
+		return writeCompileError(binary, "SPEC_COMPILE_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), nil, stdout, stderr)
+	}
+	_ = noColor
+	_ = yes
+
+	doc, err := spec.LoadFile(*filePath, spec.DecodeOptions{AllowUnknownFields: *allowUnknown})
+	if err != nil {
+		return writeCompileError(binary, "SPEC_DECODE_FAILED", *format, *traceID, err, nil, stdout, stderr)
+	}
+	graph, err := compiler.Compile(nilContext(), *doc, compiler.Options{})
+	if err != nil {
+		var validation spec.ValidationError
+		if errors.As(err, &validation) {
+			return writeCompileError(binary, "SPEC_INVALID", *format, *traceID, errors.New("spec validation failed"), validation.Diagnostics, stdout, stderr)
+		}
+		return writeCompileError(binary, "SPEC_COMPILE_FAILED", *format, *traceID, err, nil, stdout, stderr)
+	}
+
+	if *outPath == "-" {
+		body, err := canonical.Marshal(graph)
+		if err != nil {
+			return writeCompileError(binary, "SPEC_COMPILE_FAILED", *format, *traceID, err, nil, stdout, stderr)
+		}
+		fmt.Fprintln(stdout, string(body))
+		return ExitSuccess
+	}
+	if *outPath != "" {
+		body, err := canonical.Marshal(graph)
+		if err != nil {
+			return writeCompileError(binary, "SPEC_COMPILE_FAILED", *format, *traceID, err, nil, stdout, stderr)
+		}
+		if err := os.WriteFile(*outPath, append(body, '\n'), 0o644); err != nil {
+			return writeCompileError(binary, "SPEC_COMPILE_FAILED", *format, *traceID, err, nil, stdout, stderr)
+		}
+	}
+
+	switch *format {
+	case "human", "text":
+		fmt.Fprintf(stdout, "compiled Service %s/%s to IR", graph.Env, graph.Service)
+		if *outPath != "" {
+			fmt.Fprintf(stdout, " at %s", *outPath)
+		}
+		fmt.Fprintln(stdout)
+		return ExitSuccess
+	case "json":
+		out := compileOutput{OK: true, TraceID: *traceID, Out: *outPath}
+		if *outPath == "" {
+			out.Graph = graph
+		}
+		enc := json.NewEncoder(stdout)
+		if err := enc.Encode(out); err != nil {
+			fmt.Fprintf(stderr, "%s compile: %v\n", binary, err)
+			return ExitUserError
+		}
+		return ExitSuccess
+	}
+	return writeCompileError(binary, "SPEC_COMPILE_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), nil, stdout, stderr)
+}
+
+func writeCompileError(binary, code, format, traceID string, err error, fields []spec.Diagnostic, stdout, stderr io.Writer) int {
+	if format == "json" {
+		enc := json.NewEncoder(stdout)
+		if encErr := enc.Encode(specErrorOutput{
+			OK:      false,
+			Code:    code,
+			Summary: err.Error(),
+			TraceID: traceID,
+			Fields:  fields,
+			RecommendedActions: []recommendedAction{
+				{
+					ID:       "inspect_spec",
+					Command:  binary + " validate <skiff.yaml> --format json --show-defaulted",
+					Mutating: false,
+				},
+			},
+		}); encErr != nil {
+			fmt.Fprintf(stderr, "%s compile: %v\n", binary, encErr)
+		}
+		return ExitUserError
+	}
+	fmt.Fprintf(stderr, "%s compile: %v\n", binary, err)
+	for _, field := range fields {
+		fmt.Fprintf(stderr, "- %s %s: %s\n", field.Path, field.Code, field.Message)
+	}
+	return ExitUserError
+}
+
 func runValidate(binary string, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		printValidateUsage(stderr, binary)
@@ -478,6 +615,15 @@ func printValidateUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "Flags:")
 	fmt.Fprintln(w, "  --format human|json|yaml")
 	fmt.Fprintln(w, "  --show-defaulted")
+	fmt.Fprintln(w, "  --allow-unknown-fields")
+	fmt.Fprintln(w, "  --trace-id <id>")
+}
+
+func printCompileUsage(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s compile <skiff.yaml> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Flags:")
+	fmt.Fprintln(w, "  --format human|json")
+	fmt.Fprintln(w, "  --out <path>")
 	fmt.Fprintln(w, "  --allow-unknown-fields")
 	fmt.Fprintln(w, "  --trace-id <id>")
 }
@@ -897,6 +1043,16 @@ func splitValidateArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
 		"file":     true,
 		"format":   true,
+		"trace-id": true,
+	}
+	return splitArgs(args, valueFlags)
+}
+
+func splitCompileArgs(args []string) ([]string, []string, error) {
+	valueFlags := map[string]bool{
+		"file":     true,
+		"format":   true,
+		"out":      true,
 		"trace-id": true,
 	}
 	return splitArgs(args, valueFlags)
