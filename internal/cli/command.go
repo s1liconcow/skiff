@@ -77,6 +77,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runExplain(binary, root.Args, root, stdout, stderr)
 	case "object":
 		return runObject(binary, root.Args, stdout, stderr)
+	case "plan":
+		return runPlan(binary, root.Args, root, stdout, stderr)
 	case "policy":
 		return runPolicy(binary, root.Args, stdout, stderr)
 	case "release":
@@ -164,6 +166,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  events     List local service, operation, or saga events")
 	fmt.Fprintln(w, "  explain    Explain provider cloud primitives for a spec")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
+	fmt.Fprintln(w, "  plan       Dry-run provider resource changes for a spec")
 	fmt.Fprintln(w, "  policy     Explain generated state security policies")
 	fmt.Fprintln(w, "  release    Verify release manifests")
 	if binary == "skiffd" {

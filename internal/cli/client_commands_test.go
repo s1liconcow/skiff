@@ -259,6 +259,58 @@ func TestExplainAWSJSON(t *testing.T) {
 	}
 }
 
+func TestPlanAWSJSON(t *testing.T) {
+	specPath := filepath.Join("..", "..", "examples", "service", "skiff.yaml")
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"plan",
+		specPath,
+		"--format", "json",
+		"--trace-id", "tr_plan",
+		"--region", "us-west-2",
+		"--state", "s3://skiff-state-prod",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var got struct {
+		OK      bool   `json:"ok"`
+		TraceID string `json:"trace_id"`
+		Plan    struct {
+			Provider  string `json:"provider"`
+			Service   string `json:"service"`
+			Resources []struct {
+				Action      string          `json:"action"`
+				Kind        string          `json:"kind"`
+				Name        string          `json:"name"`
+				Fingerprint string          `json:"fingerprint"`
+				Desired     json.RawMessage `json:"desired"`
+			} `json:"resources"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("plan output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_plan" || got.Plan.Provider != "aws" || got.Plan.Service != "payments-api" {
+		t.Fatalf("unexpected plan envelope: %+v", got)
+	}
+	foundASG := false
+	for _, resource := range got.Plan.Resources {
+		if resource.Kind == "autoscaling-group" {
+			foundASG = true
+		}
+		if resource.Action != "create" || resource.Name == "" || resource.Fingerprint == "" || len(resource.Desired) == 0 {
+			t.Fatalf("invalid planned resource: %+v", resource)
+		}
+	}
+	if !foundASG {
+		t.Fatalf("plan missing Auto Scaling Group: %+v", got.Plan.Resources)
+	}
+}
+
 func writeStateObject(t *testing.T, root, key string, value any) {
 	t.Helper()
 	body, err := canonical.Marshal(value)

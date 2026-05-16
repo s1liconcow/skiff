@@ -9,6 +9,7 @@ import (
 	baseaws "github.com/s1liconcow/skiff/internal/aws"
 	"github.com/s1liconcow/skiff/internal/config"
 	"github.com/s1liconcow/skiff/internal/ir"
+	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/provider"
 )
 
@@ -25,8 +26,9 @@ type Config struct {
 type Option func(*Provider)
 
 type Provider struct {
-	cfg     Config
-	clients Clients
+	cfg        Config
+	clients    Clients
+	stateStore objstore.ObjectStore
 }
 
 func New(cfg Config, opts ...Option) (*Provider, error) {
@@ -75,6 +77,12 @@ func WithClients(clients Clients) Option {
 	}
 }
 
+func WithStateStore(store objstore.ObjectStore) Option {
+	return func(p *Provider) {
+		p.stateStore = store
+	}
+}
+
 func (p *Provider) Name() string {
 	return Name
 }
@@ -109,17 +117,30 @@ func (p *Provider) Plan(ctx context.Context, graph *ir.Graph) (*provider.Plan, e
 			Cause:    err,
 		}
 	}
-	planned := resources.PlannedResources()
-	changes := make([]provider.PlannedChange, 0, len(planned))
-	for _, resource := range planned {
-		changes = append(changes, provider.PlannedChange{
-			Action:    "ensure",
-			Kind:      resource.Kind,
-			LogicalID: resource.LogicalID,
-			Name:      resource.Name,
-			Tags:      cloneTags(resource.Tags),
-			Summary:   resource.Summary,
-		})
+	desired, err := desiredServiceResources(resources)
+	if err != nil {
+		return nil, &provider.Error{
+			Code:     provider.CodeValidation,
+			Provider: Name,
+			Op:       "plan",
+			Summary:  err.Error(),
+			Cause:    err,
+		}
+	}
+	changes := make([]provider.PlannedChange, 0, len(desired))
+	for _, resource := range desired {
+		var resourcePlan *ResourcePlan
+		if p.clients.ServiceResources != nil {
+			op := "plan_" + resource.Kind
+			if err := retryProviderCall(ctx, op, func() error {
+				var planErr error
+				resourcePlan, planErr = p.clients.ServiceResources.PlanResource(ctx, resource)
+				return planErr
+			}); err != nil {
+				return nil, err
+			}
+		}
+		changes = append(changes, plannedChangeFromDesired(resource, resourcePlan))
 	}
 	return &provider.Plan{
 		Provider:  Name,
@@ -133,7 +154,80 @@ func (p *Provider) Apply(ctx context.Context, plan *provider.Plan) (*provider.Ap
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return nil, provider.Unsupported(Name, "apply")
+	if p.clients.ServiceResources == nil {
+		return nil, provider.Unsupported(Name, "apply")
+	}
+	if err := validatePlanForApply(plan); err != nil {
+		return nil, err
+	}
+	result := &provider.ApplyResult{
+		Provider:  Name,
+		Service:   plan.Service,
+		Env:       plan.Env,
+		AppliedAt: time.Now().UTC(),
+	}
+	for _, change := range plan.Resources {
+		switch change.Action {
+		case provider.ActionDeleteNotSupported:
+			continue
+		case provider.ActionNoop:
+			if change.ProviderID == "" {
+				continue
+			}
+			applied := AppliedResource{
+				Kind:        change.Kind,
+				LogicalID:   change.LogicalID,
+				Name:        change.Name,
+				ProviderID:  change.ProviderID,
+				Status:      "unchanged",
+				Tags:        cloneTags(change.Tags),
+				Fingerprint: change.Fingerprint,
+			}
+			if err := p.recordAppliedResource(ctx, plan, change, applied); err != nil {
+				return nil, err
+			}
+			result.ResourceIDs = append(result.ResourceIDs, applied.ProviderID)
+			result.Resources = append(result.Resources, appliedInspection(change, applied))
+			continue
+		case provider.ActionCreate, provider.ActionUpdate:
+		default:
+			return nil, &provider.Error{
+				Code:     provider.CodeValidation,
+				Provider: Name,
+				Op:       "apply",
+				Resource: change.LogicalID,
+				Summary:  "unsupported planned action " + change.Action,
+			}
+		}
+		desired := desiredFromPlannedChange(change)
+		var applied *AppliedResource
+		op := "apply_" + change.Kind
+		if err := retryProviderCall(ctx, op, func() error {
+			var applyErr error
+			applied, applyErr = p.clients.ServiceResources.ApplyResource(ctx, desired)
+			return applyErr
+		}); err != nil {
+			return nil, err
+		}
+		if applied == nil {
+			return nil, &provider.Error{
+				Code:     provider.CodeProvider,
+				Provider: Name,
+				Op:       op,
+				Resource: change.LogicalID,
+				Summary:  "aws resource manager returned no applied resource",
+			}
+		}
+		if applied.ProviderID == "" {
+			applied.ProviderID = firstNonEmpty(applied.Name, change.Name)
+		}
+		if err := p.recordAppliedResource(ctx, plan, change, *applied); err != nil {
+			return nil, err
+		}
+		result.ResourceIDs = append(result.ResourceIDs, applied.ProviderID)
+		result.Resources = append(result.Resources, appliedInspection(change, *applied))
+	}
+	return result, nil
 }
 
 func (p *Provider) InspectService(ctx context.Context, ref provider.ServiceRef) (*provider.ServiceInspection, error) {

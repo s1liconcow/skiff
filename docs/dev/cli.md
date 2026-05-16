@@ -79,3 +79,12 @@ skiff completion fish
 skiff explain examples/service/skiff.yaml --provider aws --region us-west-2 --state s3://skiff-state-prod
 skiff explain examples/service/skiff.yaml --format json --trace-id tr_explain
 ```
+
+## Plan
+
+`skiff plan` renders the dry-run provider changes for a spec. JSON output includes the action, cloud kind, provider name, fingerprint, and desired payload for each resource so agents can inspect create/update/no-op decisions before any mutating deploy path runs.
+
+```bash
+skiff plan examples/service/skiff.yaml --provider aws --region us-west-2 --state s3://skiff-state-prod
+skiff plan examples/service/skiff.yaml --format json --trace-id tr_plan
+```

@@ -15,11 +15,12 @@ const (
 )
 
 type Clients struct {
-	AutoScaling AutoScalingClient
-	EC2         EC2Client
-	ELBV2       ELBV2Client
-	IAM         IAMClient
-	Logs        LogsClient
+	AutoScaling      AutoScalingClient
+	EC2              EC2Client
+	ELBV2            ELBV2Client
+	IAM              IAMClient
+	Logs             LogsClient
+	ServiceResources ServiceResourceManager
 }
 
 type AutoScalingClient interface {
@@ -110,7 +111,7 @@ func (p *Provider) DiscoverService(ctx context.Context, service, env string) ([]
 }
 
 func (c Clients) Empty() bool {
-	return c.AutoScaling == nil && c.EC2 == nil && c.ELBV2 == nil && c.IAM == nil && c.Logs == nil
+	return c.AutoScaling == nil && c.EC2 == nil && c.ELBV2 == nil && c.IAM == nil && c.Logs == nil && c.ServiceResources == nil
 }
 
 func appendKind(out []DiscoveredResource, kind string, resources []DiscoveredResource) []DiscoveredResource {

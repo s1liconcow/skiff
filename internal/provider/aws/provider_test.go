@@ -78,7 +78,7 @@ func TestPlanCompiledGraph(t *testing.T) {
 		t.Fatal("expected planned resources")
 	}
 	for _, resource := range plan.Resources {
-		if resource.Name == "" || resource.Action != "ensure" {
+		if resource.Name == "" || resource.Action != provider.ActionCreate || len(resource.Desired) == 0 || resource.Fingerprint == "" {
 			t.Fatalf("invalid planned resource: %#v", resource)
 		}
 	}

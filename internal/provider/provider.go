@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -30,18 +31,31 @@ type Plan struct {
 }
 
 type PlannedChange struct {
-	Action    string            `json:"action"`
-	Kind      string            `json:"kind"`
-	LogicalID string            `json:"logical_id"`
-	Name      string            `json:"name"`
-	Tags      map[string]string `json:"tags,omitempty"`
-	Summary   string            `json:"summary,omitempty"`
+	Action      string            `json:"action"`
+	Kind        string            `json:"kind"`
+	LogicalID   string            `json:"logical_id"`
+	Name        string            `json:"name"`
+	ProviderID  string            `json:"provider_id,omitempty"`
+	Tags        map[string]string `json:"tags,omitempty"`
+	Summary     string            `json:"summary,omitempty"`
+	Fingerprint string            `json:"fingerprint,omitempty"`
+	Desired     json.RawMessage   `json:"desired,omitempty"`
 }
 
+const (
+	ActionCreate             = "create"
+	ActionUpdate             = "update"
+	ActionNoop               = "no-op"
+	ActionDeleteNotSupported = "delete-not-supported"
+)
+
 type ApplyResult struct {
-	Provider    string    `json:"provider"`
-	AppliedAt   time.Time `json:"applied_at"`
-	ResourceIDs []string  `json:"resource_ids,omitempty"`
+	Provider    string               `json:"provider"`
+	Service     string               `json:"service,omitempty"`
+	Env         string               `json:"env,omitempty"`
+	AppliedAt   time.Time            `json:"applied_at"`
+	ResourceIDs []string             `json:"resource_ids,omitempty"`
+	Resources   []ResourceInspection `json:"resources,omitempty"`
 }
 
 type ServiceRef struct {
