@@ -228,8 +228,67 @@ func TestBootstrapAWSDryRunJSON(t *testing.T) {
 	if len(got.Plan.Resources) != 7 {
 		t.Fatalf("resource count = %d, want 7", len(got.Plan.Resources))
 	}
-	if len(got.Plan.BucketPolicy.Statement) != 2 {
-		t.Fatalf("bucket policy statements = %d, want 2", len(got.Plan.BucketPolicy.Statement))
+	if len(got.Plan.BucketPolicy.Statement) != 5 {
+		t.Fatalf("bucket policy statements = %d, want 5", len(got.Plan.BucketPolicy.Statement))
+	}
+}
+
+func TestPolicyExplainJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"policy", "explain",
+		"--role", "runner",
+		"--bucket", "skiff-state-prod",
+		"--kms-alias", "alias/skiff-prod-state",
+		"--format", "json",
+		"--trace-id", "tr_policy",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	var got struct {
+		OK           bool   `json:"ok"`
+		TraceID      string `json:"trace_id"`
+		Role         string `json:"role"`
+		Findings     []any  `json:"findings"`
+		Explanations []struct {
+			Sid     string   `json:"sid"`
+			Actions []string `json:"actions"`
+			Reason  string   `json:"reason"`
+			Safety  string   `json:"safety"`
+		} `json:"explanations"`
+		Policy struct {
+			Statement []struct {
+				Sid    string `json:"Sid"`
+				Action any    `json:"Action"`
+			} `json:"Statement"`
+		} `json:"policy"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("policy explain output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_policy" || got.Role != "runner" {
+		t.Fatalf("unexpected envelope: %+v", got)
+	}
+	if len(got.Findings) != 0 {
+		t.Fatalf("policy explain findings = %+v", got.Findings)
+	}
+	if len(got.Explanations) != len(got.Policy.Statement) || len(got.Explanations) == 0 {
+		t.Fatalf("explanations = %+v, statements = %+v", got.Explanations, got.Policy.Statement)
+	}
+	for _, explanation := range got.Explanations {
+		if explanation.Reason == "" || explanation.Safety == "" || len(explanation.Actions) == 0 {
+			t.Fatalf("incomplete explanation: %+v", explanation)
+		}
+	}
+	for _, statement := range got.Policy.Statement {
+		if hasJSONAction(statement.Action, "s3:PutObject") {
+			t.Fatalf("runner policy grants PutObject in %s: %+v", statement.Sid, statement)
+		}
 	}
 }
 
@@ -713,6 +772,20 @@ func hasPathCode(items []struct {
 	for _, item := range items {
 		if item.Path == path && item.Code == code {
 			return true
+		}
+	}
+	return false
+}
+
+func hasJSONAction(value any, want string) bool {
+	switch typed := value.(type) {
+	case string:
+		return typed == want
+	case []any:
+		for _, item := range typed {
+			if item == want {
+				return true
+			}
 		}
 	}
 	return false

@@ -17,6 +17,40 @@
       }
     },
     {
+      "Sid": "DenyMissingKMSEncryption",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::skiff-state-prod/*",
+      "Condition": {
+        "Null": {
+          "s3:x-amz-server-side-encryption": "true"
+        }
+      }
+    },
+    {
+      "Sid": "DenyNonKMSEncryption",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::skiff-state-prod/*",
+      "Condition": {
+        "StringNotEquals": {
+          "s3:x-amz-server-side-encryption": "aws:kms"
+        }
+      }
+    },
+    {
+      "Sid": "DenyStateDeletes",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": [
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion"
+      ],
+      "Resource": "arn:aws:s3:::skiff-state-prod/*"
+    },
+    {
       "Sid": "DenyUnconditionalStateWrites",
       "Effect": "Deny",
       "Principal": "*",
@@ -24,6 +58,7 @@
       "Resource": [
         "arn:aws:s3:::skiff-state-prod/audit/*/*",
         "arn:aws:s3:::skiff-state-prod/envs/*/root.json",
+        "arn:aws:s3:::skiff-state-prod/indexes/*.json",
         "arn:aws:s3:::skiff-state-prod/resources/by-logical/*/*",
         "arn:aws:s3:::skiff-state-prod/resources/by-provider/*/*/*",
         "arn:aws:s3:::skiff-state-prod/sagas/*/control.json",
@@ -38,9 +73,6 @@
         "arn:aws:s3:::skiff-state-prod/services/*/releases/*/runtime-manifest.json"
       ],
       "Condition": {
-        "Bool": {
-          "s3:ObjectCreationOperation": "true"
-        },
         "Null": {
           "s3:if-match": "true",
           "s3:if-none-match": "true"

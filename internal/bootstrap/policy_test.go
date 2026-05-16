@@ -27,19 +27,32 @@ func TestStateBucketPolicyGolden(t *testing.T) {
 	}
 }
 
-func TestRunnerPolicyIsReadMostly(t *testing.T) {
+func TestRunnerPolicyIsReadOnlyForState(t *testing.T) {
 	policy := RunnerPolicy("skiff-state-prod", "alias/skiff-prod-state")
 	var hasReadReleases bool
-	var hasWriteObservations bool
 	for _, statement := range policy.Statement {
 		switch statement.Sid {
 		case "ReadServiceControlAndReleases":
 			hasReadReleases = true
-		case "WriteRunnerObservationsAndEvents":
-			hasWriteObservations = true
+		}
+		for _, action := range actions(statement.Action) {
+			if action == "s3:PutObject" {
+				t.Fatalf("runner policy must not write state objects: %+v", statement)
+			}
 		}
 	}
-	if !hasReadReleases || !hasWriteObservations {
+	if !hasReadReleases {
 		t.Fatalf("runner policy missing expected statements: %#v", policy.Statement)
+	}
+}
+
+func actions(value any) []string {
+	switch typed := value.(type) {
+	case string:
+		return []string{typed}
+	case []string:
+		return typed
+	default:
+		return nil
 	}
 }

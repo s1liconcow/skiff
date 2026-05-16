@@ -3,128 +3,34 @@ package bootstrap
 import (
 	"bytes"
 	"fmt"
-	"sort"
 	"strings"
 	"text/template"
 
+	securitypolicy "github.com/s1liconcow/skiff/internal/security/policy"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
 )
 
-type PolicyDocument struct {
-	Version   string            `json:"Version"`
-	Statement []PolicyStatement `json:"Statement"`
-}
-
-type PolicyStatement struct {
-	Sid       string                       `json:"Sid"`
-	Effect    string                       `json:"Effect"`
-	Principal any                          `json:"Principal,omitempty"`
-	Action    any                          `json:"Action"`
-	Resource  any                          `json:"Resource"`
-	Condition map[string]map[string]string `json:"Condition,omitempty"`
-}
+type PolicyDocument = securitypolicy.Document
+type PolicyStatement = securitypolicy.Statement
 
 func StateBucketPolicy(bucket string) PolicyDocument {
-	bucketARN := "arn:aws:s3:::" + bucket
-	objectARN := bucketARN + "/*"
-	return PolicyDocument{
-		Version: "2012-10-17",
-		Statement: []PolicyStatement{
-			{
-				Sid:       "DenyInsecureTransport",
-				Effect:    "Deny",
-				Principal: "*",
-				Action:    "s3:*",
-				Resource:  []string{bucketARN, objectARN},
-				Condition: map[string]map[string]string{
-					"Bool": {"aws:SecureTransport": "false"},
-				},
-			},
-			{
-				Sid:       "DenyUnconditionalStateWrites",
-				Effect:    "Deny",
-				Principal: "*",
-				Action:    "s3:PutObject",
-				Resource:  conditionalWriteResources(bucket),
-				Condition: map[string]map[string]string{
-					"Null": {
-						"s3:if-match":      "true",
-						"s3:if-none-match": "true",
-					},
-					"Bool": {
-						"s3:ObjectCreationOperation": "true",
-					},
-				},
-			},
-		},
-	}
+	return securitypolicy.StateBucketPolicy(bucket)
 }
 
 func DeployerPolicy(bucket, kmsAlias string) PolicyDocument {
-	bucketARN := "arn:aws:s3:::" + bucket
-	return PolicyDocument{
-		Version: "2012-10-17",
-		Statement: []PolicyStatement{
-			{
-				Sid:      "ListSkiffState",
-				Effect:   "Allow",
-				Action:   []string{"s3:ListBucket", "s3:GetBucketLocation"},
-				Resource: bucketARN,
-			},
-			{
-				Sid:      "ReadWriteSkiffState",
-				Effect:   "Allow",
-				Action:   []string{"s3:GetObject", "s3:PutObject"},
-				Resource: bucketARN + "/*",
-			},
-			kmsPolicyStatement(kmsAlias, true),
-		},
-	}
+	return securitypolicy.DeployerPolicy(bucket, kmsAlias)
 }
 
 func RunnerPolicy(bucket, kmsAlias string) PolicyDocument {
-	bucketARN := "arn:aws:s3:::" + bucket
-	return PolicyDocument{
-		Version: "2012-10-17",
-		Statement: []PolicyStatement{
-			{
-				Sid:      "ListServiceState",
-				Effect:   "Allow",
-				Action:   []string{"s3:ListBucket", "s3:GetBucketLocation"},
-				Resource: bucketARN,
-				Condition: map[string]map[string]string{
-					"StringLike": {"s3:prefix": "services/*"},
-				},
-			},
-			{
-				Sid:    "ReadServiceControlAndReleases",
-				Effect: "Allow",
-				Action: []string{"s3:GetObject"},
-				Resource: []string{
-					bucketARN + "/envs/*/root.json",
-					bucketARN + "/services/*/control.json",
-					bucketARN + "/services/*/releases/*/release.json",
-					bucketARN + "/services/*/releases/*/runtime-manifest.json",
-				},
-			},
-			{
-				Sid:    "WriteRunnerObservationsAndEvents",
-				Effect: "Allow",
-				Action: []string{"s3:PutObject"},
-				Resource: []string{
-					bucketARN + "/observations/services/*/*",
-					bucketARN + "/services/*/operations/*/events/*",
-				},
-			},
-			kmsPolicyStatement(kmsAlias, false),
-		},
-	}
+	return securitypolicy.RunnerPolicy(bucket, kmsAlias)
 }
 
 func SkiffdPolicy(bucket, kmsAlias string) PolicyDocument {
-	policy := DeployerPolicy(bucket, kmsAlias)
-	policy.Statement[1].Sid = "ReadWriteSkiffStateForSkiffd"
-	return policy
+	return securitypolicy.SkiffdPolicy(bucket, kmsAlias)
+}
+
+func BreakGlassPolicy(bucket, kmsAlias string) PolicyDocument {
+	return securitypolicy.BreakGlassPolicy(bucket, kmsAlias)
 }
 
 func PolicyJSON(policy PolicyDocument) (string, error) {
@@ -171,47 +77,6 @@ func TerraformAWS(plan *AWSPlan) (string, error) {
 type terraformPolicy struct {
 	Name string
 	JSON string
-}
-
-func conditionalWriteResources(bucket string) []string {
-	bucketARN := "arn:aws:s3:::" + bucket
-	resources := []string{
-		bucketARN + "/envs/*/root.json",
-		bucketARN + "/services/*/control.json",
-		bucketARN + "/services/*/releases/*/release.json",
-		bucketARN + "/services/*/releases/*/runtime-manifest.json",
-		bucketARN + "/services/*/operations/*/intent.json",
-		bucketARN + "/services/*/operations/*/control.json",
-		bucketARN + "/services/*/operations/*/events/*",
-		bucketARN + "/sagas/*/intent.json",
-		bucketARN + "/sagas/*/graph.json",
-		bucketARN + "/sagas/*/control.json",
-		bucketARN + "/sagas/*/events/*",
-		bucketARN + "/audit/*/*",
-		bucketARN + "/resources/by-logical/*/*",
-		bucketARN + "/resources/by-provider/*/*/*",
-	}
-	sort.Strings(resources)
-	return resources
-}
-
-func kmsPolicyStatement(kmsAlias string, write bool) PolicyStatement {
-	actions := []string{"kms:Decrypt", "kms:DescribeKey"}
-	if write {
-		actions = append(actions, "kms:Encrypt", "kms:GenerateDataKey")
-	} else {
-		actions = append(actions, "kms:Encrypt", "kms:GenerateDataKey")
-	}
-	sort.Strings(actions)
-	return PolicyStatement{
-		Sid:      "UseStateKMSKey",
-		Effect:   "Allow",
-		Action:   actions,
-		Resource: "*",
-		Condition: map[string]map[string]string{
-			"ForAnyValue:StringEquals": {"kms:ResourceAliases": kmsAlias},
-		},
-	}
 }
 
 const terraformTemplate = `

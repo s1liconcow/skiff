@@ -22,6 +22,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/events"
 	"github.com/s1liconcow/skiff/internal/ir"
 	"github.com/s1liconcow/skiff/internal/release"
+	securitypolicy "github.com/s1liconcow/skiff/internal/security/policy"
 	"github.com/s1liconcow/skiff/internal/security/signing"
 	"github.com/s1liconcow/skiff/internal/spec"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
@@ -60,6 +61,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runEvents(binary, args[1:], stdout, stderr)
 	case "object":
 		return runObject(binary, args[1:], stdout, stderr)
+	case "policy":
+		return runPolicy(binary, args[1:], stdout, stderr)
 	case "release":
 		return runRelease(binary, args[1:], stdout, stderr)
 	case "state":
@@ -133,6 +136,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  config     Inspect effective configuration")
 	fmt.Fprintln(w, "  events     List local service, operation, or saga events")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
+	fmt.Fprintln(w, "  policy     Explain generated state security policies")
 	fmt.Fprintln(w, "  release    Verify release manifests")
 	if binary == "skiffd" {
 		fmt.Fprintln(w, "  serve      Start the stateless skiffd API server")
@@ -222,6 +226,16 @@ type bootstrapAWSOutput struct {
 	DryRun    bool               `json:"dry_run"`
 	Terraform string             `json:"terraform,omitempty"`
 	Plan      *bootstrap.AWSPlan `json:"plan"`
+}
+
+type policyExplainOutput struct {
+	OK           bool                         `json:"ok"`
+	TraceID      string                       `json:"trace_id,omitempty"`
+	Role         securitypolicy.Role          `json:"role"`
+	Bucket       string                       `json:"bucket"`
+	Policy       securitypolicy.Document      `json:"policy"`
+	Explanations []securitypolicy.Explanation `json:"explanations"`
+	Findings     []securitypolicy.Finding     `json:"findings,omitempty"`
 }
 
 type eventsListOutput struct {
@@ -541,6 +555,123 @@ func bucketNameFromStateBucket(value string) string {
 		return withoutScheme
 	}
 	return value
+}
+
+func runPolicy(binary string, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		printPolicyUsage(stderr, binary)
+		return ExitUserError
+	}
+	switch args[0] {
+	case "explain":
+		return runPolicyExplain(binary, args[1:], stdout, stderr)
+	case "help", "-h", "--help":
+		printPolicyUsage(stdout, binary)
+		return ExitSuccess
+	default:
+		fmt.Fprintf(stderr, "%s policy: unknown command %q\n", binary, args[0])
+		printPolicyUsage(stderr, binary)
+		return ExitUserError
+	}
+}
+
+func runPolicyExplain(binary string, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" policy explain", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	format := fs.String("format", "human", "output format: human or json")
+	noColor := fs.Bool("no-color", false, "disable ANSI color output")
+	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
+	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
+	role := fs.String("role", "", "policy role: state-bucket, runner, deployer, skiffd, or break-glass")
+	bucket := fs.String("bucket", "", "S3 state bucket name")
+	stateBucket := fs.String("state-bucket", "", "S3 state bucket URI or name")
+	kmsAlias := fs.String("kms-alias", "alias/skiff-state", "KMS alias used by IAM role policies")
+
+	if err := fs.Parse(args); err != nil {
+		return writePolicyError(binary, *format, *traceID, err, stdout, stderr)
+	}
+	if fs.NArg() != 0 {
+		return writePolicyError(binary, *format, *traceID, fmt.Errorf("unexpected argument %q", fs.Arg(0)), stdout, stderr)
+	}
+	_ = noColor
+	_ = yes
+
+	if *bucket == "" && *stateBucket != "" {
+		*bucket = bucketNameFromStateBucket(*stateBucket)
+	}
+	if strings.TrimSpace(*bucket) == "" {
+		return writePolicyError(binary, *format, *traceID, errors.New("policy explain requires --bucket or --state-bucket"), stdout, stderr)
+	}
+	if strings.TrimSpace(*role) == "" {
+		return writePolicyError(binary, *format, *traceID, errors.New("policy explain requires --role"), stdout, stderr)
+	}
+
+	policyRole := securitypolicy.Role(*role)
+	document, err := securitypolicy.PolicyForRole(policyRole, *bucket, *kmsAlias)
+	if err != nil {
+		return writePolicyError(binary, *format, *traceID, err, stdout, stderr)
+	}
+	explanations := securitypolicy.Explain(policyRole, document)
+	findings := securitypolicy.Lint(document, securitypolicy.LintOptions{Role: policyRole})
+
+	switch *format {
+	case "human", "text":
+		fmt.Fprintf(stdout, "Policy %s for bucket %s\n", policyRole, *bucket)
+		for _, explanation := range explanations {
+			fmt.Fprintf(stdout, "- %s: %s\n", explanation.Sid, explanation.Reason)
+			fmt.Fprintf(stdout, "  safety: %s\n", explanation.Safety)
+			fmt.Fprintf(stdout, "  actions: %s\n", strings.Join(explanation.Actions, ", "))
+		}
+		if len(findings) > 0 {
+			fmt.Fprintln(stdout, "findings:")
+			for _, finding := range findings {
+				fmt.Fprintf(stdout, "- %s: %s\n", finding.Code, finding.Summary)
+			}
+		}
+		return ExitSuccess
+	case "json":
+		enc := json.NewEncoder(stdout)
+		if err := enc.Encode(policyExplainOutput{
+			OK:           true,
+			TraceID:      *traceID,
+			Role:         policyRole,
+			Bucket:       *bucket,
+			Policy:       document,
+			Explanations: explanations,
+			Findings:     findings,
+		}); err != nil {
+			fmt.Fprintf(stderr, "%s policy explain: %v\n", binary, err)
+			return ExitUserError
+		}
+		return ExitSuccess
+	default:
+		return writePolicyError(binary, *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+	}
+}
+
+func writePolicyError(binary, format, traceID string, err error, stdout, stderr io.Writer) int {
+	if format == "json" {
+		enc := json.NewEncoder(stdout)
+		if encErr := enc.Encode(commandErrorOutput{
+			OK:      false,
+			Code:    "POLICY_INVALID",
+			Summary: err.Error(),
+			TraceID: traceID,
+			RecommendedActions: []recommendedAction{
+				{
+					ID:       "explain_runner_policy",
+					Command:  binary + " policy explain --role runner --bucket <bucket> --format json",
+					Mutating: false,
+				},
+			},
+		}); encErr != nil {
+			fmt.Fprintf(stderr, "%s policy explain: %v\n", binary, encErr)
+		}
+		return ExitUserError
+	}
+	fmt.Fprintf(stderr, "%s policy explain: %v\n", binary, err)
+	return ExitUserError
 }
 
 func runEvents(binary string, args []string, stdout, stderr io.Writer) int {
@@ -928,6 +1059,18 @@ func printBootstrapUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  --bucket <bucket>")
 	fmt.Fprintln(w, "  --dry-run")
 	fmt.Fprintln(w, "  --emit terraform")
+	fmt.Fprintln(w, "  --format human|json")
+}
+
+func printPolicyUsage(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s policy <command> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  explain    Explain a generated state bucket or IAM policy")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Explain flags:")
+	fmt.Fprintln(w, "  --role state-bucket|runner|deployer|skiffd|break-glass")
+	fmt.Fprintln(w, "  --bucket <bucket>")
+	fmt.Fprintln(w, "  --kms-alias <alias/name>")
 	fmt.Fprintln(w, "  --format human|json")
 }
 
