@@ -116,6 +116,9 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  config     Inspect effective configuration")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
 	fmt.Fprintln(w, "  release    Verify release manifests")
+	if binary == "skiffd" {
+		fmt.Fprintln(w, "  serve      Start the stateless skiffd API server")
+	}
 	fmt.Fprintln(w, "  state      Inspect object-state paths and developer helpers")
 	fmt.Fprintln(w, "  version    Print version, commit, and build date")
 }
