@@ -503,6 +503,402 @@
       cursor: pointer;
     }
 
+    .deploy-motion-shell {
+      margin-top: 20px;
+      min-height: 550px;
+      border-radius: var(--radius-xl);
+      border: 1px solid rgba(255,255,255,0.15);
+      background:
+        linear-gradient(135deg, rgba(125,227,255,0.13), rgba(154,240,194,0.07) 42%, rgba(255,210,125,0.06)),
+        rgba(4, 14, 24, 0.78);
+      box-shadow: var(--shadow), inset 0 1px 0 rgba(255,255,255,0.08);
+      overflow: hidden;
+      position: relative;
+    }
+    .deploy-motion-shell::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+      background-size: 44px 44px;
+      opacity: .32;
+      pointer-events: none;
+    }
+    .deploy-motion-app {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      gap: 18px;
+      padding: clamp(18px, 3vw, 28px);
+    }
+    .deploy-topline {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .deploy-command {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 38px;
+      padding: 0 13px;
+      border-radius: 999px;
+      border: 1px solid rgba(125,227,255,0.22);
+      background: rgba(3, 12, 20, 0.64);
+      color: #dff7ff;
+      font-family: var(--mono);
+      font-size: .86rem;
+      white-space: nowrap;
+    }
+    .deploy-command span:first-child { color: var(--brand-2); }
+    .deploy-status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(154,240,194,0.24);
+      background: rgba(154,240,194,0.08);
+      color: #ddfff0;
+      font-size: .82rem;
+      font-weight: 800;
+    }
+    .deploy-status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--ok);
+      box-shadow: 0 0 0 7px rgba(154,240,194,0.12);
+    }
+    .deploy-cuj {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(190px, .78fr) minmax(300px, 1.18fr) minmax(220px, .92fr);
+      gap: 14px;
+      align-items: stretch;
+    }
+    .deploy-cuj::before {
+      content: "";
+      position: absolute;
+      left: 13%;
+      right: 13%;
+      top: 49%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(125,227,255,.34), rgba(154,240,194,.34), transparent);
+      z-index: 0;
+    }
+    .deploy-column {
+      position: relative;
+      z-index: 1;
+      min-height: 360px;
+      padding: 16px;
+      border-radius: 22px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(4, 15, 25, 0.72);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+      overflow: hidden;
+    }
+    .deploy-column-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .deploy-column-title b { font-size: .98rem; }
+    .deploy-column-title span {
+      color: var(--muted-2);
+      font-family: var(--mono);
+      font-size: .74rem;
+    }
+    .deploy-source-card {
+      display: grid;
+      gap: 12px;
+      align-content: start;
+      min-height: 270px;
+      padding: 14px;
+      border-radius: 18px;
+      border: 1px solid rgba(125,227,255,0.16);
+      background: rgba(125,227,255,0.075);
+    }
+    .deploy-source-card h3 {
+      font-size: 1.05rem;
+      letter-spacing: 0;
+    }
+    .deploy-source-card p {
+      font-size: .88rem;
+      color: #b9d0e2;
+    }
+    .deploy-mini-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .deploy-mini-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 9px 10px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.055);
+      color: #e6f4ff;
+      font-family: var(--mono);
+      font-size: .76rem;
+    }
+    .deploy-mini-item span:last-child {
+      color: var(--brand-2);
+      font-weight: 900;
+    }
+    .deploy-bucket {
+      display: grid;
+      gap: 12px;
+    }
+    .bucket-core {
+      position: relative;
+      min-height: 148px;
+      display: grid;
+      place-items: center;
+      border-radius: 22px;
+      border: 1px solid rgba(154,240,194,0.22);
+      background:
+        linear-gradient(180deg, rgba(154,240,194,0.13), rgba(125,227,255,0.08)),
+        rgba(2, 12, 19, 0.7);
+      overflow: hidden;
+    }
+    .bucket-core::before,
+    .bucket-core::after {
+      content: "";
+      position: absolute;
+      inset: 20px;
+      border-radius: 999px;
+      border: 1px solid rgba(154,240,194,0.22);
+    }
+    .bucket-core::after {
+      inset: 40px;
+      border-color: rgba(125,227,255,0.22);
+    }
+    .bucket-label {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      gap: 4px;
+      text-align: center;
+    }
+    .bucket-label strong {
+      font-size: 1.12rem;
+      letter-spacing: -0.01em;
+    }
+    .bucket-label span {
+      color: #bcddf0;
+      font-family: var(--mono);
+      font-size: .74rem;
+    }
+    .ledger-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 9px;
+    }
+    .ledger-object {
+      min-height: 66px;
+      padding: 10px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.055);
+    }
+    .ledger-object b {
+      display: block;
+      font-size: .82rem;
+      margin-bottom: 4px;
+    }
+    .ledger-object span {
+      color: var(--muted-2);
+      font-family: var(--mono);
+      font-size: .68rem;
+    }
+    .ledger-object.active {
+      border-color: rgba(154,240,194,0.38);
+      background: rgba(154,240,194,0.10);
+      box-shadow: 0 0 0 1px rgba(154,240,194,0.05), 0 10px 28px rgba(154,240,194,0.08);
+    }
+    .cas-panel {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 10px;
+      align-items: center;
+      padding: 12px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,210,125,0.25);
+      background: rgba(255,210,125,0.075);
+    }
+    .cas-lock {
+      width: 38px;
+      height: 38px;
+      border-radius: 13px;
+      display: grid;
+      place-items: center;
+      background: rgba(255,210,125,0.18);
+      color: var(--warn);
+      font-family: var(--mono);
+      font-weight: 900;
+    }
+    .cas-panel b { display: block; font-size: .9rem; }
+    .cas-panel span {
+      color: #d6c8a5;
+      font-family: var(--mono);
+      font-size: .72rem;
+    }
+    .deploy-cloud {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+    .cloud-resource-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 9px;
+    }
+    .cloud-resource {
+      min-height: 82px;
+      padding: 10px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.11);
+      background: rgba(255,255,255,0.055);
+    }
+    .cloud-resource strong {
+      display: block;
+      font-size: .83rem;
+      margin-bottom: 5px;
+    }
+    .cloud-resource span {
+      color: var(--muted-2);
+      font-family: var(--mono);
+      font-size: .68rem;
+    }
+    .vm-lane {
+      display: grid;
+      gap: 7px;
+      padding: 10px;
+      border-radius: 15px;
+      background: rgba(0,0,0,0.14);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .vm-row {
+      display: grid;
+      grid-template-columns: 20px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      color: #d9ecf8;
+      font-family: var(--mono);
+      font-size: .72rem;
+    }
+    .vm-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 7px;
+      background: rgba(125,227,255,0.16);
+      border: 1px solid rgba(125,227,255,0.26);
+    }
+    .vm-row.ready .vm-dot {
+      background: rgba(154,240,194,0.22);
+      border-color: rgba(154,240,194,0.45);
+    }
+    .traffic-meter {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+      border-radius: 16px;
+      border: 1px solid rgba(154,240,194,0.20);
+      background: rgba(154,240,194,0.065);
+    }
+    .traffic-meter-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: #e9fff5;
+      font-weight: 800;
+      font-size: .84rem;
+    }
+    .traffic-bar {
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      overflow: hidden;
+    }
+    .traffic-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--brand), var(--brand-2), var(--warn));
+    }
+    .deploy-packet {
+      position: absolute;
+      z-index: 3;
+      width: 15px;
+      height: 15px;
+      border-radius: 999px;
+      background: #fff8c9;
+      box-shadow: 0 0 0 7px rgba(255,210,125,0.12), 0 0 24px rgba(255,210,125,0.72);
+      pointer-events: none;
+    }
+    .deploy-live-note {
+      min-height: 82px;
+      padding: 14px;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.11);
+      background: rgba(5, 17, 28, 0.64);
+    }
+    .deploy-live-note b {
+      display: block;
+      margin-bottom: 5px;
+      color: #f4fbff;
+    }
+    .deploy-live-note span {
+      color: var(--muted);
+      font-size: .9rem;
+    }
+    .deploy-timeline {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .deploy-step {
+      min-height: 96px;
+      padding: 10px;
+      border-radius: 15px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(5, 17, 28, 0.58);
+      display: grid;
+      align-content: start;
+      gap: 6px;
+    }
+    .deploy-step.active {
+      border-color: rgba(125,227,255,0.35);
+      background: rgba(125,227,255,0.105);
+    }
+    .deploy-step.done {
+      border-color: rgba(154,240,194,0.24);
+      background: rgba(154,240,194,0.075);
+    }
+    .deploy-step small {
+      color: var(--muted-2);
+      font-family: var(--mono);
+      font-size: .68rem;
+    }
+    .deploy-step b {
+      font-size: .82rem;
+      line-height: 1.2;
+    }
+    .deploy-step span {
+      color: var(--muted);
+      font-size: .73rem;
+      line-height: 1.3;
+    }
+
     .recipe-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
@@ -579,6 +975,11 @@
       .grid-3, .compare { grid-template-columns: 1fr; }
       .security-grid { grid-template-columns: repeat(2, 1fr); }
       .saga-graph { grid-template-columns: 1fr 1fr; }
+      .deploy-cuj { grid-template-columns: 1fr; }
+      .deploy-cuj::before { left: 50%; right: auto; top: 11%; bottom: 11%; width: 2px; height: auto; }
+      .deploy-column { min-height: auto; }
+      .deploy-timeline { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .deploy-packet { display: none; }
       .saga-node:nth-child(2)::after { display: none; }
       .tui-body { grid-template-columns: 1fr; }
       .tui-sidebar { border-right: none; border-bottom: 1px solid rgba(255,255,255,0.08); }
@@ -594,6 +995,10 @@
       .security-grid, .saga-graph { grid-template-columns: 1fr; }
       .saga-node::after { content: "↓"; top: auto; right: 50%; bottom: -19px; transform: translateX(50%); }
       .saga-node:nth-child(2)::after { display: block; }
+      .deploy-topline { align-items: stretch; }
+      .deploy-command, .deploy-status-pill { width: 100%; justify-content: center; white-space: normal; text-align: center; }
+      .ledger-grid, .cloud-resource-grid { grid-template-columns: 1fr; }
+      .deploy-timeline { grid-template-columns: 1fr; }
       .hero-actions .btn { width: 100%; }
       pre { font-size: .78rem; }
     }
@@ -782,47 +1187,59 @@
             <p>Service lists, recent events, active sagas, and TUI summaries are rebuildable from the state bucket and kept hot in skiffd memory.</p>
           </div>
         </div>
-        <div class="code-grid" style="margin-top:18px;">
-          <div class="terminal code-card">
-            <button class="copy" data-copy="state-layout">Copy</button>
-            <div class="term-top"><span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span><span class="term-name">state bucket</span></div>
-            <pre id="state-layout">s3://skiff-state-prod/
-  services/payments-api/control.json
-  services/payments-api/releases/2026.05.16.1/
-    release.json
-    runtime-manifest.json
-    ir.json
-    plan.json
-  services/payments-api/operations/op_01J.../
-    intent.json
-    events/*.json
-    result.json
-  sagas/saga_01J.../
-    intent.json
-    graph.json
-    control.json
-    events/*.json
-  indexes/services.json</pre>
-          </div>
-          <div class="terminal code-card">
-            <button class="copy" data-copy="control-doc">Copy</button>
-            <div class="term-top"><span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span><span class="term-name">control.json</span></div>
-            <pre id="control-doc">{
-  "service": "payments-api",
-  "desired_release": "2026.05.16.1",
-  "stable_release": "2026.05.15.3",
-  "operation": {
-    "kind": "deploy",
-    "state": "canary",
-    "step": "metrics_gate_10"
-  },
-  "lease": {
-    "owner": "skiffd/i-abc123",
-    "generation": 42,
-    "expires_at": "2026-05-16T20:05:00Z"
-  },
-  "version": 18
-}</pre>
+        <div id="deployment-motion-root" class="deploy-motion-shell" aria-label="Animated service deployment through Skiff state">
+          <div class="deploy-motion-app deploy-motion-fallback">
+            <div class="deploy-topline">
+              <div class="deploy-command"><span>$</span><span>skiff deploy payments-api --env prod</span></div>
+              <div class="deploy-status-pill"><span class="deploy-status-dot"></span>Durable write first, memory after</div>
+            </div>
+            <div class="deploy-cuj">
+              <div class="deploy-column">
+                <div class="deploy-column-title"><b>Operator intent</b><span>CLI or skiffd</span></div>
+                <div class="deploy-source-card">
+                  <h3>Deploy payments-api</h3>
+                  <p>A normal service deploy becomes a typed, auditable operation with traceable release evidence.</p>
+                  <div class="deploy-mini-list">
+                    <div class="deploy-mini-item"><span>spec</span><span>validated</span></div>
+                    <div class="deploy-mini-item"><span>policy</span><span>passed</span></div>
+                    <div class="deploy-mini-item"><span>trace</span><span>tr_01J</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="deploy-column deploy-bucket">
+                <div class="deploy-column-title"><b>Object storage ledger</b><span>source of truth</span></div>
+                <div class="bucket-core">
+                  <div class="bucket-label"><strong>State bucket</strong><span>immutable history plus CAS control</span></div>
+                </div>
+                <div class="ledger-grid">
+                  <div class="ledger-object active"><b>Signed release</b><span>create-only</span></div>
+                  <div class="ledger-object active"><b>Operation intent</b><span>create-only</span></div>
+                  <div class="ledger-object"><b>Service control</b><span>CAS update</span></div>
+                  <div class="ledger-object"><b>Recent events</b><span>append-only</span></div>
+                </div>
+              </div>
+              <div class="deploy-column deploy-cloud">
+                <div class="deploy-column-title"><b>Cloud rollout</b><span>visible primitives</span></div>
+                <div class="cloud-resource-grid">
+                  <div class="cloud-resource"><strong>ASG refresh</strong><span>0 of 6 new</span></div>
+                  <div class="cloud-resource"><strong>Target group</strong><span>traffic held</span></div>
+                  <div class="cloud-resource"><strong>IAM role</strong><span>scoped runner</span></div>
+                  <div class="cloud-resource"><strong>Logs</strong><span>CloudWatch</span></div>
+                </div>
+                <div class="traffic-meter">
+                  <div class="traffic-meter-top"><span>new release traffic</span><span>0%</span></div>
+                  <div class="traffic-bar"><div class="traffic-fill" style="width:0%"></div></div>
+                </div>
+              </div>
+            </div>
+            <div class="deploy-timeline">
+              <div class="deploy-step active"><small>01</small><b>Compile</b><span>Spec becomes typed IR and a provider plan.</span></div>
+              <div class="deploy-step"><small>02</small><b>Publish</b><span>Release evidence is written once.</span></div>
+              <div class="deploy-step"><small>03</small><b>CAS lease</b><span>Control document fences the operation.</span></div>
+              <div class="deploy-step"><small>04</small><b>Roll</b><span>Cloud primitives start the refresh.</span></div>
+              <div class="deploy-step"><small>05</small><b>Verify</b><span>Runner checks signatures before start.</span></div>
+              <div class="deploy-step"><small>06</small><b>Promote</b><span>Traffic shifts only after health gates.</span></div>
+            </div>
           </div>
         </div>
       </div>
@@ -1095,6 +1512,271 @@
     </div>
   </footer>
 
+  <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/framer-motion@10.18.0/dist/framer-motion.js"></script>
+  <script>
+    (() => {
+      const root = document.getElementById('deployment-motion-root');
+      const MotionLib = window.Motion || window.FramerMotion || window.framerMotion;
+      if (!root || !window.React || !window.ReactDOM || !MotionLib) return;
+
+      const { useEffect, useState } = React;
+      const { AnimatePresence, motion } = MotionLib;
+      const h = React.createElement;
+
+      const steps = [
+        {
+          key: 'compile',
+          num: '01',
+          short: 'Compile',
+          title: 'Compile the service spec',
+          detail: 'Strict spec parsing produces typed IR, a provider plan, and policy findings before anything changes.',
+          status: 'preflight',
+          traffic: 0,
+          asg: 'plan ready',
+          targets: 'traffic held',
+          runner: 'not touched',
+          logs: 'log group planned',
+          note: 'No hidden controller starts working. The deploy begins as an explicit operation with a trace ID.'
+        },
+        {
+          key: 'publish',
+          num: '02',
+          short: 'Publish',
+          title: 'Publish immutable release evidence',
+          detail: 'Release manifest, runtime manifest, provenance, and operation intent are written create-only.',
+          status: 'durable history',
+          traffic: 0,
+          asg: 'unchanged',
+          targets: 'stable release',
+          runner: 'waiting',
+          logs: 'audit appended',
+          note: 'The bucket now has enough evidence to resume or diagnose the deploy even if skiffd disappears.'
+        },
+        {
+          key: 'cas',
+          num: '03',
+          short: 'CAS lease',
+          title: 'Fence the control document',
+          detail: 'Skiff updates service control with compare-and-swap, storing the operation owner and target release.',
+          status: 'etag fenced',
+          traffic: 0,
+          asg: 'release selected',
+          targets: 'stable release',
+          runner: 'waiting',
+          logs: 'lease event',
+          note: 'The control document is also the lock. There is no separate lock object to lose or forget.'
+        },
+        {
+          key: 'roll',
+          num: '04',
+          short: 'Roll',
+          title: 'Start cloud-native rollout',
+          detail: 'Provider APIs make the visible cloud primitives move: launch template, ASG refresh, and target group health.',
+          status: 'canary 10%',
+          traffic: 10,
+          asg: '1 of 6 new',
+          targets: '10% canary',
+          runner: 'booting VM',
+          logs: 'events streaming',
+          note: 'Skiff does not hide AWS shape. Operators can see the ASG, target group, IAM role, and provider IDs.'
+        },
+        {
+          key: 'verify',
+          num: '05',
+          short: 'Verify',
+          title: 'Runner verifies before serving',
+          detail: 'Each VM reads state directly, verifies signatures and digests, prepares the artifact, and reports health.',
+          status: 'health gate',
+          traffic: 50,
+          asg: '4 of 6 new',
+          targets: '4 healthy',
+          runner: 'verified',
+          logs: 'health events',
+          note: 'The runner does not depend on skiffd. It can recover from the same durable state the CLI uses.'
+        },
+        {
+          key: 'promote',
+          num: '06',
+          short: 'Promote',
+          title: 'Promote and refresh views',
+          detail: 'After health and metrics pass, Skiff records events, updates control by CAS, and rebuilds hot indexes.',
+          status: 'stable',
+          traffic: 100,
+          asg: '6 of 6 new',
+          targets: 'all healthy',
+          runner: 'serving',
+          logs: 'audit complete',
+          note: 'Object storage remains the durable truth. skiffd memory is just a fast, rebuildable view.'
+        }
+      ];
+
+      const ledgerObjects = [
+        { label: 'Signed release', meta: 'create-only', readyAt: 1 },
+        { label: 'Operation intent', meta: 'create-only', readyAt: 1 },
+        { label: 'Service control', meta: 'CAS etag fence', readyAt: 2 },
+        { label: 'Rollout events', meta: 'append-only', readyAt: 3 }
+      ];
+
+      function stateClass(index, active) {
+        if (index < active) return 'done';
+        if (index === active) return 'active';
+        return '';
+      }
+
+      function DeploymentMotionApp() {
+        const [active, setActive] = useState(0);
+        const step = steps[active];
+
+        useEffect(() => {
+          const id = window.setInterval(() => {
+            setActive((value) => (value + 1) % steps.length);
+          }, 1900);
+          return () => window.clearInterval(id);
+        }, []);
+
+        return h('div', { className: 'deploy-motion-app' }, [
+          h('div', { className: 'deploy-topline', key: 'topline' }, [
+            h(motion.div, {
+              className: 'deploy-command',
+              key: 'command',
+              initial: { opacity: 0, y: -8 },
+              animate: { opacity: 1, y: 0 },
+              transition: { duration: .45 }
+            }, [h('span', { key: 'prompt' }, '$'), h('span', { key: 'cmd' }, 'skiff deploy payments-api --env prod')]),
+            h(AnimatePresence, { mode: 'wait', key: 'status-presence' },
+              h(motion.div, {
+                className: 'deploy-status-pill',
+                key: step.key,
+                initial: { opacity: .86, y: -4 },
+                animate: { opacity: 1, y: 0 },
+                exit: { opacity: .86, y: 4 },
+                transition: { duration: .25 }
+              }, [h('span', { className: 'deploy-status-dot', key: 'dot' }), step.status])
+            )
+          ]),
+          h('div', { className: 'deploy-cuj', key: 'cuj' }, [
+            h(motion.div, {
+              className: 'deploy-packet',
+              key: `packet-${step.key}`,
+              initial: { left: '13%', top: '48%', opacity: 0, scale: .7 },
+              animate: { left: ['13%', '50%', '84%'], top: ['48%', '28%', '48%'], opacity: [0, 1, 0], scale: [.7, 1.25, .8] },
+              transition: { duration: 1.35, ease: 'easeInOut' }
+            }),
+            h('div', { className: 'deploy-column', key: 'intent' }, [
+              h('div', { className: 'deploy-column-title', key: 'title' }, [h('b', { key: 'b' }, 'Operator intent'), h('span', { key: 's' }, 'CLI or skiffd')]),
+              h(motion.div, {
+                className: 'deploy-source-card',
+                key: 'source',
+                animate: { borderColor: active === 0 ? 'rgba(125,227,255,0.48)' : 'rgba(125,227,255,0.16)' },
+                transition: { duration: .35 }
+              }, [
+                h(AnimatePresence, { mode: 'wait', key: 'source-presence' },
+                  h(motion.div, {
+                    key: step.key,
+                    initial: { opacity: .86, x: -8 },
+                    animate: { opacity: 1, x: 0 },
+                    exit: { opacity: .86, x: 8 },
+                    transition: { duration: .28 }
+                  }, [
+                    h('h3', { key: 'h' }, step.title),
+                    h('p', { key: 'p' }, step.detail)
+                  ])
+                ),
+                h('div', { className: 'deploy-mini-list', key: 'mini' }, [
+                  h('div', { className: 'deploy-mini-item', key: 'svc' }, [h('span', { key: 'l' }, 'service'), h('span', { key: 'v' }, 'payments-api')]),
+                  h('div', { className: 'deploy-mini-item', key: 'rel' }, [h('span', { key: 'l' }, 'release'), h('span', { key: 'v' }, '2026.05.16.1')]),
+                  h('div', { className: 'deploy-mini-item', key: 'trace' }, [h('span', { key: 'l' }, 'trace'), h('span', { key: 'v' }, 'tr_01J')])
+                ])
+              ])
+            ]),
+            h('div', { className: 'deploy-column deploy-bucket', key: 'bucket' }, [
+              h('div', { className: 'deploy-column-title', key: 'title' }, [h('b', { key: 'b' }, 'Object storage ledger'), h('span', { key: 's' }, 'source of truth')]),
+              h(motion.div, {
+                className: 'bucket-core',
+                key: 'core',
+                animate: { boxShadow: active >= 1 ? '0 0 34px rgba(154,240,194,0.13)' : '0 0 0 rgba(154,240,194,0)' },
+                transition: { duration: .35 }
+              }, h('div', { className: 'bucket-label' }, [h('strong', { key: 'b' }, 'State bucket'), h('span', { key: 's' }, 'write durable objects before memory')])
+              ),
+              h('div', { className: 'ledger-grid', key: 'ledger' },
+                ledgerObjects.map((object) =>
+                  h(motion.div, {
+                    className: `ledger-object ${active >= object.readyAt ? 'active' : ''}`,
+                    key: object.label,
+                    initial: { opacity: .72 },
+                    animate: { opacity: active >= object.readyAt ? 1 : .58, y: active === object.readyAt ? [-2, 0] : 0 },
+                    transition: { duration: .25 }
+                  }, [h('b', { key: 'b' }, object.label), h('span', { key: 's' }, object.meta)])
+                )
+              ),
+              h(motion.div, {
+                className: 'cas-panel',
+                key: 'cas',
+                animate: { opacity: active >= 2 ? 1 : .58, borderColor: active === 2 ? 'rgba(255,210,125,0.48)' : 'rgba(255,210,125,0.25)' },
+                transition: { duration: .3 }
+              }, [
+                h('div', { className: 'cas-lock', key: 'lock' }, 'CAS'),
+                h('div', { key: 'text' }, [h('b', { key: 'b' }, 'service control is the lock'), h('span', { key: 's' }, active >= 2 ? 'etag generation 42 accepted' : 'waiting for durable intent')])
+              ])
+            ]),
+            h('div', { className: 'deploy-column deploy-cloud', key: 'cloud' }, [
+              h('div', { className: 'deploy-column-title', key: 'title' }, [h('b', { key: 'b' }, 'Cloud rollout'), h('span', { key: 's' }, 'visible primitives')]),
+              h('div', { className: 'cloud-resource-grid', key: 'resources' }, [
+                h('div', { className: 'cloud-resource', key: 'asg' }, [h('strong', { key: 'b' }, 'ASG refresh'), h('span', { key: 's' }, step.asg)]),
+                h('div', { className: 'cloud-resource', key: 'tg' }, [h('strong', { key: 'b' }, 'Target group'), h('span', { key: 's' }, step.targets)]),
+                h('div', { className: 'cloud-resource', key: 'iam' }, [h('strong', { key: 'b' }, 'Runner IAM'), h('span', { key: 's' }, step.runner)]),
+                h('div', { className: 'cloud-resource', key: 'logs' }, [h('strong', { key: 'b' }, 'Events and logs'), h('span', { key: 's' }, step.logs)])
+              ]),
+              h('div', { className: 'vm-lane', key: 'vms' }, [
+                h('div', { className: `vm-row ${active >= 3 ? 'ready' : ''}`, key: 'vm1' }, [h('span', { className: 'vm-dot', key: 'dot' }), h('span', { key: 'name' }, 'vm-payments-01'), h('span', { key: 'state' }, active >= 3 ? 'new' : 'stable')]),
+                h('div', { className: `vm-row ${active >= 4 ? 'ready' : ''}`, key: 'vm2' }, [h('span', { className: 'vm-dot', key: 'dot' }), h('span', { key: 'name' }, 'vm-payments-02'), h('span', { key: 'state' }, active >= 4 ? 'healthy' : 'pending')]),
+                h('div', { className: `vm-row ${active >= 5 ? 'ready' : ''}`, key: 'vm3' }, [h('span', { className: 'vm-dot', key: 'dot' }), h('span', { key: 'name' }, 'vm-payments-06'), h('span', { key: 'state' }, active >= 5 ? 'serving' : 'queued')])
+              ]),
+              h('div', { className: 'traffic-meter', key: 'traffic' }, [
+                h('div', { className: 'traffic-meter-top', key: 'top' }, [h('span', { key: 'label' }, 'new release traffic'), h('span', { key: 'value' }, `${step.traffic}%`)]),
+                h('div', { className: 'traffic-bar', key: 'bar' }, h(motion.div, {
+                  className: 'traffic-fill',
+                  animate: { width: `${step.traffic}%` },
+                  transition: { type: 'spring', stiffness: 90, damping: 18 }
+                }))
+              ])
+            ])
+          ]),
+          h(AnimatePresence, { mode: 'wait', key: 'note-presence' },
+            h(motion.div, {
+              className: 'deploy-live-note',
+              key: `note-${step.key}`,
+              initial: { opacity: .86, y: 6 },
+              animate: { opacity: 1, y: 0 },
+              exit: { opacity: .86, y: -6 },
+              transition: { duration: .25 }
+            }, [h('b', { key: 'b' }, step.title), h('span', { key: 's' }, step.note)])
+          ),
+          h('div', { className: 'deploy-timeline', key: 'timeline' },
+            steps.map((item, index) =>
+              h(motion.div, {
+                className: `deploy-step ${stateClass(index, active)}`,
+                key: item.key,
+                layout: true,
+                animate: { y: index === active ? -3 : 0 },
+                transition: { duration: .22 }
+              }, [h('small', { key: 'num' }, item.num), h('b', { key: 'short' }, item.short), h('span', { key: 'detail' }, item.detail)])
+            )
+          )
+        ]);
+      }
+
+      try {
+        const app = h(DeploymentMotionApp);
+        if (ReactDOM.createRoot) ReactDOM.createRoot(root).render(app);
+        else ReactDOM.render(app, root);
+      } catch (error) {
+        console.warn('Skiff deployment animation fallback is active.', error);
+      }
+    })();
+  </script>
   <script>
     document.querySelectorAll('.copy').forEach((button) => {
       button.addEventListener('click', async () => {
