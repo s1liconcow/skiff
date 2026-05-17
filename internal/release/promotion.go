@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/s1liconcow/skiff/internal/auth"
+	"github.com/s1liconcow/skiff/internal/authz"
 	"github.com/s1liconcow/skiff/internal/events"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/state"
@@ -117,6 +119,27 @@ func (m Manager) Promote(ctx context.Context, req PromotionRequest) (*PromotionR
 	if !result.OK || req.DryRun {
 		return result, nil
 	}
+	if _, err := m.authorize(ctx, authz.Request{
+		Actor:      req.Actor,
+		Action:     authz.ActionDeploy,
+		Target:     schema.Target{Kind: "service", Name: req.Service},
+		Env:        req.ToEnv,
+		Service:    req.Service,
+		Risk:       promotionRisk(req.ToEnv),
+		ApprovalID: req.ApprovalID,
+		TraceID:    req.TraceID,
+	}); err != nil {
+		result.OK = false
+		result.Requirements = append(result.Requirements, PromotionRequirement{
+			ID:      "authorization",
+			OK:      false,
+			Code:    "AUTHORIZATION_DENIED",
+			Summary: "authorization policy allows promotion execution",
+			Detail:  err.Error(),
+		})
+		result.PlanMarkdown = promotionMarkdown(*result)
+		return result, nil
+	}
 
 	intent := schema.NewOperationIntent(req.OperationID, req.Service, req.ToEnv, "release.promote", schema.Target{Kind: "service", Name: req.Service}, req.Actor, req.TraceID, canonical.Time(now))
 	intent.Risk = promotionRisk(req.ToEnv)
@@ -200,6 +223,9 @@ func (m Manager) createPromotionOperation(ctx context.Context, req PromotionRequ
 	}
 	audit := events.NewAuditRecord(req.Actor, schema.Target{Kind: "service", Name: req.Service}, "release.promote", intent.Summary, req.TraceID, m.now(), req.OperationID+"audit")
 	audit.Risk = intent.Risk
+	audit.ApprovalID = req.ApprovalID
+	audit.BeforeSummary = "candidate in " + req.FromEnv
+	audit.AfterSummary = "promotion intent for " + req.ToEnv
 	audit.Data = rawJSON(map[string]string{
 		"operation_id":    req.OperationID,
 		"candidate_id":    req.CandidateID,
@@ -223,7 +249,7 @@ func (m Manager) evaluatePromotionRequirements(ctx context.Context, req Promotio
 		status := checks[name]
 		requirements = append(requirements, requirement("check_"+name, status == "passed", "check "+name+" passed", "PROMOTION_EVIDENCE_MISSING", fmt.Sprintf("check %q status is %q, expected passed", name, firstNonEmpty(status, "<missing>"))))
 	}
-	if isProductionEnv(req.ToEnv) {
+	if isProductionEnv(req.ToEnv) && !auth.IsBreakGlass(req.Actor) {
 		requirements = append(requirements, requirement("approval", req.ApprovalID != "", "approval context is present for production promotion", "APPROVAL_REQUIRED", "production promotions require --approval-id"))
 	}
 	if req.MinStableDuration > 0 {

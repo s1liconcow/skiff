@@ -64,6 +64,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 	}
 
 	switch root.Command {
+	case "authz":
+		return runAuthz(binary, root.Args, root, stdout, stderr)
 	case "bootstrap":
 		return runBootstrap(binary, root.Args, stdout, stderr)
 	case "compile":
@@ -186,6 +188,7 @@ func runVersion(binary string, args []string, root rootOptions, stdout, stderr i
 func printUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s <command> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  authz      Explain authorization and approval decisions")
 	fmt.Fprintln(w, "  bootstrap  Bootstrap initial cloud state substrate")
 	fmt.Fprintln(w, "  compile    Compile a Skiff spec to provider-neutral IR")
 	fmt.Fprintln(w, "  config     Inspect effective configuration")

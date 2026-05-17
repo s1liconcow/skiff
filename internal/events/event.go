@@ -59,7 +59,10 @@ type AuditRecord struct {
 	Action        string          `json:"action"`
 	Target        schema.Target   `json:"target"`
 	Risk          schema.Risk     `json:"risk,omitempty"`
+	ApprovalID    string          `json:"approval_id,omitempty"`
 	Summary       string          `json:"summary"`
+	BeforeSummary string          `json:"before_summary,omitempty"`
+	AfterSummary  string          `json:"after_summary,omitempty"`
 	Data          json.RawMessage `json:"data,omitempty"`
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/s1liconcow/skiff/internal/authz"
 	"github.com/s1liconcow/skiff/internal/events"
 	"github.com/s1liconcow/skiff/internal/ir"
 	"github.com/s1liconcow/skiff/internal/objstore"
@@ -20,10 +21,11 @@ import (
 )
 
 type Deployer struct {
-	Store    objstore.ObjectStore
-	Provider provider.Provider
-	Signer   signing.Signer
-	Clock    func() time.Time
+	Store      objstore.ObjectStore
+	Provider   provider.Provider
+	Signer     signing.Signer
+	Clock      func() time.Time
+	Authorizer authz.Authorizer
 }
 
 type Request struct {
@@ -31,6 +33,7 @@ type Request struct {
 	TraceID       string        `json:"trace_id,omitempty"`
 	ReleaseID     string        `json:"release_id,omitempty"`
 	OperationID   string        `json:"operation_id,omitempty"`
+	ApprovalID    string        `json:"approval_id,omitempty"`
 	DryRun        bool          `json:"dry_run,omitempty"`
 	PlanOnly      bool          `json:"plan_only,omitempty"`
 	LeaseDuration time.Duration `json:"lease_duration,omitempty"`
@@ -95,6 +98,19 @@ func (d Deployer) Deploy(ctx context.Context, graph *ir.Graph, req Request) (*Re
 	}
 	if req.DryRun || req.PlanOnly {
 		return result, nil
+	}
+	if _, err := d.authorize(ctx, authz.Request{
+		Actor:      req.Actor,
+		Action:     authz.ActionDeploy,
+		Target:     schema.Target{Kind: "service", Name: graph.Service},
+		Env:        graph.Env,
+		Service:    graph.Service,
+		Risk:       schema.RiskMedium,
+		ApprovalID: req.ApprovalID,
+		TraceID:    req.TraceID,
+	}); err != nil {
+		result.OK = false
+		return result, err
 	}
 	if d.Signer == nil {
 		return nil, fmt.Errorf("signer is required for deploy")
@@ -190,6 +206,8 @@ func (d Deployer) Deploy(ctx context.Context, graph *ir.Graph, req Request) (*Re
 	appendEvent("deploy.succeeded", "deploy operation completed")
 	audit := events.NewAuditRecord(req.Actor, schema.Target{Kind: "service", Name: graph.Service}, "deploy", "updated desired release to "+req.ReleaseID, req.TraceID, d.now(), req.OperationID)
 	audit.Risk = schema.RiskMedium
+	audit.ApprovalID = req.ApprovalID
+	audit.AfterSummary = "desired release " + req.ReleaseID
 	audit.Data = rawJSON(map[string]string{"operation_id": req.OperationID, "release_id": req.ReleaseID})
 	_, _ = log.AppendAudit(ctx, audit)
 
@@ -215,6 +233,18 @@ func (d Deployer) PublishRelease(ctx context.Context, graph *ir.Graph, req Reque
 	}
 	now := d.now()
 	req = normalizeRequest(req, graph, now)
+	if _, err := d.authorize(ctx, authz.Request{
+		Actor:      req.Actor,
+		Action:     authz.ActionDeploy,
+		Target:     schema.Target{Kind: "service", Name: graph.Service},
+		Env:        graph.Env,
+		Service:    graph.Service,
+		Risk:       schema.RiskLow,
+		ApprovalID: req.ApprovalID,
+		TraceID:    req.TraceID,
+	}); err != nil {
+		return nil, err
+	}
 	runtimeManifest, releaseManifest, err := d.publishRelease(ctx, graph, req, now)
 	if err != nil {
 		return nil, err
@@ -240,6 +270,8 @@ func (d Deployer) PublishRelease(ctx context.Context, graph *ir.Graph, req Reque
 	}
 	audit := events.NewAuditRecord(req.Actor, schema.Target{Kind: "service", Name: graph.Service}, "publish_release", "published signed release "+req.ReleaseID, req.TraceID, d.now(), req.OperationID+"publish-release")
 	audit.Risk = schema.RiskLow
+	audit.ApprovalID = req.ApprovalID
+	audit.AfterSummary = "release " + req.ReleaseID + " published"
 	audit.Data = rawJSON(map[string]string{"operation_id": req.OperationID, "release_id": req.ReleaseID})
 	_, _ = log.AppendAudit(ctx, audit)
 	return result, nil

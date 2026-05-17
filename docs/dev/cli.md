@@ -63,6 +63,21 @@ JSON error envelope:
 }
 ```
 
+## Authorization
+
+`skiff authz explain` explains the default authorization and approval decision
+for a proposed operation without mutating object state.
+
+```bash
+skiff authz explain --action restore --service payments-api --env prod --risk high --actor-type agent --actor-id agent-one --format json
+skiff authz explain --action restore --service payments-api --env prod --risk high --approval-id approval_01J... --format json
+```
+
+High-risk production operations such as restore, failover, debug, rotation, and
+garbage collection require approval context unless the actor is explicit
+break-glass. Agents can request plans, but execution is denied until approval
+context is present.
+
 Completion scripts are generated with:
 
 ```bash

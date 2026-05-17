@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/s1liconcow/skiff/internal/authz"
 	"github.com/s1liconcow/skiff/internal/events"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/provider"
@@ -29,6 +30,7 @@ type RollbackRequest struct {
 	TargetRelease        string        `json:"target_release,omitempty"`
 	OperationID          string        `json:"operation_id,omitempty"`
 	SagaID               string        `json:"saga_id,omitempty"`
+	ApprovalID           string        `json:"approval_id,omitempty"`
 	LeaseDuration        time.Duration `json:"lease_duration,omitempty"`
 	NoWatch              bool          `json:"no_watch,omitempty"`
 	MinHealthyPercentage int           `json:"min_healthy_percentage,omitempty"`
@@ -103,6 +105,19 @@ func (d Deployer) Rollback(ctx context.Context, req RollbackRequest) (*RollbackR
 		return result, err
 	}
 	if _, err := d.readReleaseManifest(ctx, req.Service, req.Env, toRelease); err != nil {
+		return result, err
+	}
+	if _, err := d.authorize(ctx, authz.Request{
+		Actor:      req.Actor,
+		Action:     authz.ActionRollback,
+		Target:     schema.Target{Kind: "service", Name: req.Service},
+		Env:        req.Env,
+		Service:    req.Service,
+		Risk:       schema.RiskMedium,
+		ApprovalID: req.ApprovalID,
+		TraceID:    req.TraceID,
+	}); err != nil {
+		result.OK = false
 		return result, err
 	}
 
@@ -276,6 +291,9 @@ func (d Deployer) Rollback(ctx context.Context, req RollbackRequest) (*RollbackR
 		appendEvent("rollback.succeeded", "rollback operation completed", schema.Fact{Type: "release", Message: toRelease})
 		audit := events.NewAuditRecord(req.Actor, schema.Target{Kind: "service", Name: req.Service}, "rollback", "rolled back "+req.Service+" to "+toRelease, req.TraceID, d.now(), req.OperationID)
 		audit.Risk = schema.RiskMedium
+		audit.ApprovalID = req.ApprovalID
+		audit.BeforeSummary = "desired release " + result.FromRelease
+		audit.AfterSummary = "stable release " + toRelease
 		audit.Data = rawJSON(map[string]string{"operation_id": req.OperationID, "saga_id": req.SagaID, "from_release": result.FromRelease, "to_release": toRelease})
 		_, _ = log.AppendAudit(ctx, audit)
 	case schema.OperationFailed, schema.OperationCanceled:

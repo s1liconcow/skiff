@@ -46,6 +46,7 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 	planOnly := fs.Bool("plan-only", false, "render deploy plan without writing object state")
 	releaseID := fs.String("release-id", "", "release ID to publish")
 	operationID := fs.String("operation-id", "", "operation ID to use")
+	approvalID := fs.String("approval-id", "", "approval ID for policy-gated production operations")
 	keyID := fs.String("key-id", "local-deploy", "signing key ID")
 	signingSeed := fs.String("signing-seed-base64", "", "base64 Ed25519 seed for release signing")
 	canary := fs.Bool("canary", false, "create and run a staged canary deployment saga")
@@ -183,6 +184,7 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 		TraceID:     *flags.traceID,
 		ReleaseID:   *releaseID,
 		OperationID: *operationID,
+		ApprovalID:  *approvalID,
 		DryRun:      *dryRun,
 		PlanOnly:    *planOnly,
 	})
@@ -216,6 +218,7 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 func splitDeployArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
 		"api-url":             true,
+		"approval-id":         true,
 		"canary-bake":         true,
 		"canary-comparator":   true,
 		"canary-metric":       true,

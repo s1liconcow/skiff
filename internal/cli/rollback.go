@@ -50,6 +50,7 @@ func runRollback(binary string, args []string, root rootOptions, stdout, stderr 
 	target := fs.String("to", deploy.RollbackPreviousStable, "release ID to roll back to, or previous-stable")
 	operationID := fs.String("operation-id", "", "operation ID to use")
 	sagaID := fs.String("saga-id", "", "saga ID to use")
+	approvalID := fs.String("approval-id", "", "approval ID for policy-gated production operations")
 	watch := fs.Bool("watch", true, "watch rollout once after starting rollback")
 	minHealthy := fs.Int("min-healthy-percentage", 0, "minimum healthy percentage for ASG instance refresh")
 	instanceWarmup := fs.Int("instance-warmup", 0, "instance warmup seconds for ASG instance refresh")
@@ -96,6 +97,7 @@ func runRollback(binary string, args []string, root rootOptions, stdout, stderr 
 		TargetRelease:        *target,
 		OperationID:          *operationID,
 		SagaID:               *sagaID,
+		ApprovalID:           *approvalID,
 		NoWatch:              !*watch,
 		MinHealthyPercentage: *minHealthy,
 		InstanceWarmup:       *instanceWarmup,
@@ -133,6 +135,7 @@ func runRollback(binary string, args []string, root rootOptions, stdout, stderr 
 func splitRollbackArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
 		"api-url":                true,
+		"approval-id":            true,
 		"config":                 true,
 		"env":                    true,
 		"format":                 true,

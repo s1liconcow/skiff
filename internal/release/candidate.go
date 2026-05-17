@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/s1liconcow/skiff/internal/authz"
 	"github.com/s1liconcow/skiff/internal/events"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
@@ -17,8 +18,9 @@ import (
 )
 
 type Manager struct {
-	Store objstore.ObjectStore
-	Clock func() time.Time
+	Store      objstore.ObjectStore
+	Clock      func() time.Time
+	Authorizer authz.Authorizer
 }
 
 type CandidateCreateRequest struct {
