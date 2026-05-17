@@ -15,6 +15,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/deploy"
 	"github.com/s1liconcow/skiff/internal/events"
 	"github.com/s1liconcow/skiff/internal/objstore"
+	"github.com/s1liconcow/skiff/internal/provider"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
 	"github.com/s1liconcow/skiff/internal/saga/templates"
 	"github.com/s1liconcow/skiff/internal/security/signing"
@@ -26,6 +27,14 @@ type deployOutput struct {
 	OK      bool          `json:"ok"`
 	TraceID string        `json:"trace_id,omitempty"`
 	Result  deploy.Result `json:"result"`
+}
+
+var newDeployProvider = func(cfg config.Config, store objstore.ObjectStore) (provider.Provider, error) {
+	opts := []aws.Option{}
+	if store != nil {
+		opts = append(opts, aws.WithStateStore(store))
+	}
+	return aws.NewFromConfig(cfg, opts...)
 }
 
 func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
@@ -145,7 +154,6 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 		return writeCanarySagaResult(binary, "deploy --canary", *flags.format, *flags.traceID, *result, stdout, stderr)
 	}
 
-	var storeOpts []aws.Option
 	var storeNeeded = !*dryRun && !*planOnly
 	var storeErr error
 	var store objstore.ObjectStore
@@ -154,9 +162,8 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 		if storeErr != nil {
 			return writeClientError(binary, "deploy", *flags.format, *flags.traceID, storeErr, stdout, stderr)
 		}
-		storeOpts = append(storeOpts, aws.WithStateStore(store))
 	}
-	awsProvider, err := aws.NewFromConfig(loaded.Config, storeOpts...)
+	cloud, err := newDeployProvider(loaded.Config, store)
 	if err != nil {
 		return writeSpecError(binary, "DEPLOY_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 	}
@@ -169,7 +176,7 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 	}
 	result, err := deploy.Deployer{
 		Store:    store,
-		Provider: awsProvider,
+		Provider: cloud,
 		Signer:   signer,
 	}.Deploy(nilContext(), graph, deploy.Request{
 		Actor:       schema.Actor{ID: "skiff-cli", Type: "user"},

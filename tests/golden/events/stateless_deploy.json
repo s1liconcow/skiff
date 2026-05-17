@@ -1,0 +1,16 @@
+{
+  "event_types": [
+    "deploy.started",
+    "deploy.release_published",
+    "deploy.infrastructure_applied",
+    "deploy.desired_release_updated",
+    "deploy.succeeded",
+    "rollout.started",
+    "rollout.succeeded",
+    "rollback.started",
+    "rollback.desired_release_updated",
+    "rollout.started",
+    "rollout.succeeded",
+    "rollback.succeeded"
+  ]
+}

@@ -275,7 +275,7 @@ func deriveHealth(service Service) string {
 	switch {
 	case strings.Contains(state, "failed"):
 		return "degraded"
-	case service.OperationID != "":
+	case service.OperationID != "" && state != "succeeded" && state != "canceled" && state != "cancelled":
 		return "updating"
 	case service.DesiredRelease == "":
 		return "unknown"

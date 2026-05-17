@@ -58,6 +58,7 @@ func TestWatchRolloutResumesStoredProviderIDAndCompletesOperation(t *testing.T) 
 	ctx := context.Background()
 	store := memory.New()
 	createOperationControl(t, store, "payments-api", "prod", "op_rollout")
+	createRolloutServiceControl(t, store, "payments-api", "prod", "rel_new", "rel_old", "op_rollout")
 	control := readOperationControl(t, store, "payments-api", "op_rollout")
 	control.ProviderOperations = []schema.ProviderOperationRef{{
 		Provider: aws.Name,
@@ -85,6 +86,10 @@ func TestWatchRolloutResumesStoredProviderIDAndCompletesOperation(t *testing.T) 
 	if control.Status != schema.OperationSucceeded {
 		t.Fatalf("operation status = %s, want succeeded", control.Status)
 	}
+	service := readServiceControl(t, store, "payments-api")
+	if service.StableRelease != "rel_new" || service.DesiredRelease != "rel_new" {
+		t.Fatalf("service control was not marked stable after rollout: %+v", service)
+	}
 }
 
 func createOperationControl(t *testing.T, store *memory.Store, service, env, operationID string) {
@@ -108,6 +113,42 @@ func createOperationControl(t *testing.T, store *memory.Store, service, env, ope
 	if _, err := store.Create(context.Background(), key, body, objstore.PutOptions{ContentType: canonical.ContentType}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func createRolloutServiceControl(t *testing.T, store *memory.Store, service, env, desired, stable, operationID string) {
+	t.Helper()
+	control := schema.NewServiceControl(service, env, canonical.Time(rolloutTestNow()), schema.Actor{ID: "agent-one", Type: "agent"})
+	control.DesiredRelease = desired
+	control.StableRelease = stable
+	control.Operation = &schema.ActiveOperation{ID: operationID, Kind: "deploy", State: string(schema.OperationRunning)}
+	body, err := canonical.Marshal(control)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := paths.ServiceControl(service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(context.Background(), key, body, objstore.PutOptions{ContentType: canonical.ContentType}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readServiceControl(t *testing.T, store *memory.Store, service string) schema.ServiceControl {
+	t.Helper()
+	key, err := paths.ServiceControl(service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	obj, err := store.Get(context.Background(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var control schema.ServiceControl
+	if err := canonical.UnmarshalStrict(obj.Body, &control); err != nil {
+		t.Fatal(err)
+	}
+	return control
 }
 
 func readOperationControl(t *testing.T, store *memory.Store, service, operationID string) schema.OperationControl {

@@ -2,12 +2,15 @@ package deploy
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/s1liconcow/skiff/internal/events"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/provider"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
+	"github.com/s1liconcow/skiff/internal/state"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
 	"github.com/s1liconcow/skiff/internal/state/paths"
 	"github.com/s1liconcow/skiff/internal/state/schema"
@@ -85,6 +88,11 @@ func (d Deployer) WatchRollout(ctx context.Context, req WatchRolloutRequest) (*p
 	}
 	_ = d.appendRolloutEvent(ctx, req.Service, req.OperationID, req.TraceID, req.Actor, "rollout."+status.Status, "rollout status "+status.Status, schema.Fact{Type: "provider_id", Message: status.ProviderID})
 	if terminal := operationStatusForRollout(status.Status); terminal != "" && terminal != schema.OperationRunning {
+		if terminal == schema.OperationSucceeded {
+			if err := d.markStableAfterRollout(ctx, req); err != nil {
+				return nil, err
+			}
+		}
 		_ = d.setOperationStatus(ctx, req.Service, req.OperationID, terminal)
 	}
 	return status, nil
@@ -140,6 +148,65 @@ func (d Deployer) setOperationStatus(ctx context.Context, service, operationID s
 	control.Status = status
 	control.UpdatedAt = canonical.Time(d.now())
 	return d.putOperationControlCAS(ctx, service, operationID, etag, control)
+}
+
+func (d Deployer) markStableAfterRollout(ctx context.Context, req WatchRolloutRequest) error {
+	stateClient := state.NewClient(d.Store, state.WithClock(clockFunc(d.now)))
+	current, err := stateClient.GetServiceControl(ctx, req.Service)
+	if err != nil {
+		if errors.Is(err, objstore.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if current.Control.DesiredRelease == "" || current.Control.StableRelease == current.Control.DesiredRelease {
+		return nil
+	}
+	handle, _, err := stateClient.AcquireLease(ctx, req.Service, state.LeaseOptions{
+		Owner:    firstNonEmpty(req.Actor.ID, "rollout-watch"),
+		Duration: 5 * time.Minute,
+		Actor:    req.Actor,
+		TraceID:  req.TraceID,
+	})
+	if err != nil {
+		if errors.Is(err, state.ErrLeaseHeld) {
+			return nil
+		}
+		return err
+	}
+	leaseHeld := true
+	defer func() {
+		if leaseHeld {
+			_, _ = stateClient.ReleaseLease(context.Background(), *handle)
+		}
+	}()
+	nextHandle, updated, err := stateClient.UpdateServiceControlWithLeaseCAS(ctx, *handle, func(control *schema.ServiceControl) error {
+		control.StableRelease = control.DesiredRelease
+		if control.Operation != nil && (control.Operation.ID == "" || control.Operation.ID == req.OperationID) {
+			control.Operation.State = string(schema.OperationSucceeded)
+			control.Operation.Step = "rollout-succeeded"
+		}
+		control.UpdatedBy = req.Actor
+		control.TraceID = req.TraceID
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	handle = nextHandle
+	log, err := events.NewLog(events.Options{Store: d.Store, Clock: d.now})
+	if err != nil {
+		return err
+	}
+	audit := events.NewAuditRecord(req.Actor, schema.Target{Kind: "service", Name: req.Service}, "mark_stable", "marked "+updated.Control.StableRelease+" stable after rollout", req.TraceID, d.now(), req.OperationID+"mark-stable")
+	audit.Risk = schema.RiskLow
+	audit.Data = rawJSON(map[string]string{"operation_id": req.OperationID, "release_id": updated.Control.StableRelease})
+	_, _ = log.AppendAudit(ctx, audit)
+	if _, err := stateClient.ReleaseLease(ctx, *handle); err != nil {
+		return err
+	}
+	leaseHeld = false
+	return nil
 }
 
 func (d Deployer) getOperationControl(ctx context.Context, service, operationID string) (schema.OperationControl, string, error) {

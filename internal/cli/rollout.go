@@ -10,6 +10,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/client"
 	"github.com/s1liconcow/skiff/internal/config"
 	"github.com/s1liconcow/skiff/internal/deploy"
+	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/provider"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
 	"github.com/s1liconcow/skiff/internal/state/schema"
@@ -19,6 +20,14 @@ type rolloutWatchOutput struct {
 	OK      bool                   `json:"ok"`
 	TraceID string                 `json:"trace_id,omitempty"`
 	Status  provider.RolloutStatus `json:"status"`
+}
+
+var newRolloutProvider = func(cfg config.Config, store objstore.ObjectStore) (provider.Provider, error) {
+	opts := []aws.Option{}
+	if store != nil {
+		opts = append(opts, aws.WithStateStore(store))
+	}
+	return aws.NewFromConfig(cfg, opts...)
 }
 
 func runRollout(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
@@ -68,11 +77,11 @@ func runRolloutWatch(binary string, args []string, root rootOptions, stdout, std
 	if err != nil {
 		return writeClientError(binary, "rollout", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	awsProvider, err := aws.NewFromConfig(loaded.Config)
+	cloud, err := newRolloutProvider(loaded.Config, store)
 	if err != nil {
 		return writeSpecError(binary, "ROLLOUT_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 	}
-	status, err := deploy.Deployer{Store: store, Provider: awsProvider}.WatchRollout(nilContext(), deploy.WatchRolloutRequest{
+	status, err := deploy.Deployer{Store: store, Provider: cloud}.WatchRollout(nilContext(), deploy.WatchRolloutRequest{
 		Service:     *service,
 		Env:         loaded.Config.Env,
 		OperationID: *operationID,

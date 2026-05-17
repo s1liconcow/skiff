@@ -1,0 +1,28 @@
+apiVersion: skiff.dev/v1alpha1
+kind: Service
+metadata:
+  name: http-hello
+  env: prod
+artifact:
+  type: oci
+  ref: registry.example.com/skiff/http-hello@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+runtime:
+  port: 8080
+  command:
+    - ./http-hello
+  health:
+    path: /healthz
+  logs:
+    enabled: true
+    format: json
+  metrics:
+    enabled: true
+    path: /metrics
+machine:
+  size: small
+scale:
+  min: 2
+  max: 2
+network:
+  ingress:
+    type: private
