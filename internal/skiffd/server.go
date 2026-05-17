@@ -18,6 +18,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/buildinfo"
 	"github.com/s1liconcow/skiff/internal/config"
 	servicedoctor "github.com/s1liconcow/skiff/internal/doctor"
+	eventstream "github.com/s1liconcow/skiff/internal/events"
 	stateindex "github.com/s1liconcow/skiff/internal/index"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/state/schema"
@@ -43,6 +44,11 @@ type Verifier interface {
 
 type EventBus interface {
 	Publish(ctx context.Context, event schema.Event) error
+}
+
+type EventStream interface {
+	EventBus
+	Subscribe(ctx context.Context, filter eventstream.Filter, opts eventstream.SubscribeOptions) (*eventstream.Subscription, error)
 }
 
 type Authenticator interface {
@@ -77,6 +83,7 @@ type Server struct {
 	signer        Signer
 	verifier      Verifier
 	eventBus      EventBus
+	eventStream   EventStream
 	authenticator Authenticator
 	info          buildinfo.Info
 	logger        *slog.Logger
@@ -103,6 +110,13 @@ func New(opts Options) (*Server, error) {
 	if opts.Clock == nil {
 		opts.Clock = func() time.Time { return time.Now().UTC() }
 	}
+	eventBus := opts.EventBus
+	eventStream, _ := eventBus.(EventStream)
+	if eventBus == nil {
+		bus := eventstream.NewBus()
+		eventBus = bus
+		eventStream = bus
+	}
 
 	return &Server{
 		cfg:           opts.Config,
@@ -111,7 +125,8 @@ func New(opts Options) (*Server, error) {
 		provider:      opts.Provider,
 		signer:        opts.Signer,
 		verifier:      opts.Verifier,
-		eventBus:      opts.EventBus,
+		eventBus:      eventBus,
+		eventStream:   eventStream,
 		authenticator: opts.Authenticator,
 		info:          opts.BuildInfo,
 		logger:        opts.Logger,
@@ -130,6 +145,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/services", s.handleServices)
 	mux.HandleFunc("/v1/sagas", s.handleSagas)
 	mux.HandleFunc("/v1/events/recent", s.handleRecentEvents)
+	mux.HandleFunc("/v1/events/stream", s.handleEventsStream)
 	mux.HandleFunc("/v1/admin/index", s.handleAdminIndex)
 	mux.HandleFunc("/", s.handleNotFound)
 	return s.withMiddleware(mux)
@@ -764,6 +780,12 @@ type responseRecorder struct {
 func (r *responseRecorder) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *responseRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 func redactURI(value string) string {

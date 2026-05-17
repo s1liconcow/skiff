@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/s1liconcow/skiff/internal/config"
 	"github.com/s1liconcow/skiff/internal/objstore"
@@ -162,6 +164,105 @@ func TestEventsDirectModeReadsFileObjectStateJSON(t *testing.T) {
 	}
 	if len(got.Result.Events) != 1 || got.Result.Events[0].ID != "01JROOT" || got.Result.Events[0].Summary != "service control updated" {
 		t.Fatalf("unexpected events: %+v", got.Result.Events)
+	}
+}
+
+func TestEventsWatchDirectModeEmitsJSONAndStopsOnContext(t *testing.T) {
+	root := t.TempDir()
+	writeStateObject(t, root, "services/payments-api/events/01JWATCH.json", schema.Event{
+		SchemaVersion: schema.Version,
+		ID:            "01JWATCH",
+		Time:          "2026-05-16T20:02:00Z",
+		TraceID:       "tr_watch_event",
+		Subject:       schema.Target{Kind: "service", Name: "payments-api"},
+		Type:          "service.updated",
+		Severity:      "info",
+		Summary:       "service control updated",
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	oldContext := eventsWatchContext
+	oldInterval := eventsWatchPollInterval
+	eventsWatchContext = func() context.Context { return ctx }
+	eventsWatchPollInterval = time.Hour
+	t.Cleanup(func() {
+		eventsWatchContext = oldContext
+		eventsWatchPollInterval = oldInterval
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"events",
+		"--direct",
+		"--state", "file://" + root,
+		"--env", "prod",
+		"--provider", "aws",
+		"--region", "us-west-2",
+		"--scope", "service",
+		"--service", "payments-api",
+		"--watch",
+		"--format", "json",
+		"--trace-id", "tr_events_watch",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var got eventWatchOutput
+	if err := json.Unmarshal(bytes.Split(stdout.Bytes(), []byte("\n"))[0], &got); err != nil {
+		t.Fatalf("watch output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_events_watch" || got.Event == nil || got.Event.ID != "01JWATCH" || got.LastEventID != "01JWATCH" {
+		t.Fatalf("unexpected watch output: %+v", got)
+	}
+}
+
+func TestOpsWatchDirectModeEmitsOperationEvents(t *testing.T) {
+	root := t.TempDir()
+	writeStateObject(t, root, "services/payments-api/operations/op_01/events/01JOP.json", schema.Event{
+		SchemaVersion: schema.Version,
+		ID:            "01JOP",
+		Time:          "2026-05-16T20:04:00Z",
+		TraceID:       "tr_op_event",
+		Subject:       schema.Target{Kind: "service", Name: "payments-api"},
+		Type:          "operation.step",
+		Severity:      "info",
+		Summary:       "operation step completed",
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	oldContext := eventsWatchContext
+	oldInterval := eventsWatchPollInterval
+	eventsWatchContext = func() context.Context { return ctx }
+	eventsWatchPollInterval = time.Hour
+	t.Cleanup(func() {
+		eventsWatchContext = oldContext
+		eventsWatchPollInterval = oldInterval
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"ops", "watch", "op_01",
+		"--service", "payments-api",
+		"--direct",
+		"--state", "file://" + root,
+		"--env", "prod",
+		"--provider", "aws",
+		"--region", "us-west-2",
+		"--format", "json",
+		"--trace-id", "tr_ops_watch",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	var got eventWatchOutput
+	if err := json.Unmarshal(bytes.Split(stdout.Bytes(), []byte("\n"))[0], &got); err != nil {
+		t.Fatalf("ops watch output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.Event == nil || got.Event.ID != "01JOP" || got.LastEventID != "01JOP" {
+		t.Fatalf("unexpected ops watch output: %+v", got)
 	}
 }
 

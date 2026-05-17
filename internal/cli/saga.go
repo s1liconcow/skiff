@@ -90,7 +90,9 @@ func runSaga(binary string, args []string, root rootOptions, stdout, stderr io.W
 		return runSagaStart(binary, args[1:], root, stdout, stderr)
 	case "resume":
 		return runSagaResume(binary, args[1:], root, stdout, stderr)
-	case "watch", "cancel", "compensate":
+	case "watch":
+		return runSagaWatch(binary, args[1:], root, stdout, stderr)
+	case "cancel", "compensate":
 		return runSagaSkeleton(binary, args[0], args[1:], root, stdout, stderr)
 	case "help", "-h", "--help":
 		printSagaUsage(stdout, binary)
@@ -98,6 +100,53 @@ func runSaga(binary string, args []string, root rootOptions, stdout, stderr io.W
 	default:
 		return writeClientCommandError(binary, "saga", root.Format, root.TraceID, fmt.Errorf("unknown saga command %q", args[0]), stdout, stderr)
 	}
+}
+
+func runSagaWatch(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" saga watch", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := addClientFlags(fs, root)
+	sagaID := fs.String("saga", "", "saga ID")
+	limit := fs.Int("limit", 0, "maximum replay events before watching")
+	afterID := fs.String("after", "", "resume after event ID")
+
+	flagArgs, positionals, err := splitSagaWatchArgs(args)
+	if err != nil {
+		return writeClientCommandError(binary, "saga", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	if len(positionals) == 1 && *sagaID == "" {
+		*sagaID = positionals[0]
+	}
+	if *sagaID == "" {
+		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, errors.New("saga ID is required"), stdout, stderr)
+	}
+	_ = flags.noColor
+	_ = flags.yes
+
+	loaded, err := flags.load(binary, root, fs)
+	if err != nil {
+		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+	}
+	skiffClient, err := client.New(loaded.Config, client.Options{})
+	if err != nil {
+		return writeClientError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	return runEventsWatch(eventsWatchContext(), binary, skiffClient, client.EventWatchOptions{
+		EventOptions: client.EventOptions{
+			Scope:   "saga",
+			Saga:    *sagaID,
+			Limit:   *limit,
+			TraceID: *flags.traceID,
+		},
+		AfterID:      *afterID,
+		PollInterval: eventsWatchPollInterval,
+	}, *flags.format, *flags.traceID, stdout, stderr)
 }
 
 func runSagaStart(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
@@ -543,6 +592,25 @@ func splitSagaInspectArgs(args []string) ([]string, []string, error) {
 		"config":       true,
 		"env":          true,
 		"format":       true,
+		"mode":         true,
+		"provider":     true,
+		"region":       true,
+		"saga":         true,
+		"state":        true,
+		"state-bucket": true,
+		"trace-id":     true,
+	}
+	return splitArgs(args, valueFlags)
+}
+
+func splitSagaWatchArgs(args []string) ([]string, []string, error) {
+	valueFlags := map[string]bool{
+		"after":        true,
+		"api-url":      true,
+		"config":       true,
+		"env":          true,
+		"format":       true,
+		"limit":        true,
 		"mode":         true,
 		"provider":     true,
 		"region":       true,

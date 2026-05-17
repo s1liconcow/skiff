@@ -88,6 +88,23 @@ type EventList struct {
 	Source    string         `json:"source"`
 }
 
+type EventWatcher interface {
+	WatchEvents(ctx context.Context, opts EventWatchOptions) (<-chan EventDelivery, error)
+}
+
+type EventWatchOptions struct {
+	EventOptions
+	AfterID      string
+	PollInterval time.Duration
+	Buffer       int
+}
+
+type EventDelivery struct {
+	Event          schema.Event `json:"event,omitempty"`
+	ResyncRequired bool         `json:"resync_required,omitempty"`
+	LastEventID    string       `json:"last_event_id,omitempty"`
+}
+
 type Error struct {
 	Code     string
 	Summary  string
@@ -277,6 +294,60 @@ func (c *Direct) Events(ctx context.Context, opts EventOptions) (*EventList, err
 		Findings:  findings,
 		Source:    "direct",
 	}, nil
+}
+
+func (c *Direct) WatchEvents(ctx context.Context, opts EventWatchOptions) (<-chan EventDelivery, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	buffer := opts.Buffer
+	if buffer <= 0 {
+		buffer = 16
+	}
+	interval := opts.PollInterval
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	out := make(chan EventDelivery, buffer)
+	go func() {
+		defer close(out)
+		afterID := opts.AfterID
+		seen := make(map[string]struct{})
+		for {
+			events, _, err := scanEvents(ctx, c.store, opts.EventOptions)
+			if err == nil {
+				for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
+					events[i], events[j] = events[j], events[i]
+				}
+				for _, event := range events {
+					if event.ID == "" {
+						continue
+					}
+					if afterID != "" && event.ID <= afterID {
+						continue
+					}
+					if _, ok := seen[event.ID]; ok {
+						continue
+					}
+					seen[event.ID] = struct{}{}
+					afterID = event.ID
+					select {
+					case out <- EventDelivery{Event: event, LastEventID: event.ID}:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+			timer := time.NewTimer(interval)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+		}
+	}()
+	return out, nil
 }
 
 func OpenObjectStore(cfg config.Config) (objstore.ObjectStore, error) {

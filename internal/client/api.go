@@ -1,9 +1,11 @@
 package client
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -146,6 +148,138 @@ func (c *API) Events(ctx context.Context, opts EventOptions) (*EventList, error)
 		Findings:  body.Freshness.Findings,
 		Source:    "api",
 	}, nil
+}
+
+func (c *API) WatchEvents(ctx context.Context, opts EventWatchOptions) (<-chan EventDelivery, error) {
+	query := url.Values{}
+	if opts.Scope != "" {
+		query.Set("scope", opts.Scope)
+	}
+	if opts.Service != "" {
+		query.Set("service", opts.Service)
+	}
+	if opts.Operation != "" {
+		query.Set("operation", opts.Operation)
+	}
+	if opts.Saga != "" {
+		query.Set("saga", opts.Saga)
+	}
+	if opts.Limit > 0 {
+		query.Set("limit", strconv.Itoa(opts.Limit))
+	}
+	if opts.AfterID != "" {
+		query.Set("after", opts.AfterID)
+	}
+	u := c.baseURL.ResolveReference(&url.URL{Path: "/v1/events/stream"})
+	values := u.Query()
+	for key, entries := range query {
+		for _, entry := range entries {
+			values.Add(key, entry)
+		}
+	}
+	u.RawQuery = values.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, Fail("API_REQUEST_INVALID", "build event stream request", ExitUserError, err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	if opts.TraceID != "" {
+		req.Header.Set("X-Skiff-Trace-Id", opts.TraceID)
+	}
+	if opts.AfterID != "" {
+		req.Header.Set("Last-Event-ID", opts.AfterID)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, Fail("API_REQUEST_FAILED", "open skiffd event stream", ExitProviderError, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeAPIError(resp, fmt.Sprintf("skiffd API returned HTTP %d", resp.StatusCode))
+	}
+	buffer := opts.Buffer
+	if buffer <= 0 {
+		buffer = 16
+	}
+	out := make(chan EventDelivery, buffer)
+	go func() {
+		defer close(out)
+		defer resp.Body.Close()
+		readSSE(ctx, resp.Body, out)
+	}()
+	return out, nil
+}
+
+func readSSE(ctx context.Context, body io.Reader, out chan<- EventDelivery) {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var eventType, eventID string
+	var data strings.Builder
+	flush := func() bool {
+		if data.Len() == 0 {
+			eventType = ""
+			eventID = ""
+			return true
+		}
+		payload := strings.TrimSpace(data.String())
+		delivery := EventDelivery{LastEventID: eventID}
+		if eventType == "resync_required" {
+			delivery.ResyncRequired = true
+			var body struct {
+				LastEventID string `json:"last_event_id"`
+				After       string `json:"after"`
+			}
+			_ = json.Unmarshal([]byte(payload), &body)
+			delivery.LastEventID = defaultString(defaultString(body.LastEventID, body.After), eventID)
+		} else {
+			var event schema.Event
+			if err := json.Unmarshal([]byte(payload), &event); err == nil {
+				delivery.Event = event
+				delivery.LastEventID = defaultString(event.ID, eventID)
+			}
+		}
+		eventType = ""
+		eventID = ""
+		data.Reset()
+		if delivery.Event.ID == "" && !delivery.ResyncRequired {
+			return true
+		}
+		select {
+		case out <- delivery:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			if !flush() {
+				return
+			}
+			continue
+		}
+		if strings.HasPrefix(line, ":") {
+			continue
+		}
+		name, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		value = strings.TrimPrefix(value, " ")
+		switch name {
+		case "event":
+			eventType = value
+		case "id":
+			eventID = value
+		case "data":
+			if data.Len() > 0 {
+				data.WriteByte('\n')
+			}
+			data.WriteString(value)
+		}
+	}
+	_ = flush()
 }
 
 func (c *API) getJSON(ctx context.Context, path string, traceID string, query url.Values, out any) error {

@@ -92,6 +92,38 @@ func TestDirectDoctorReadsObjectState(t *testing.T) {
 	}
 }
 
+func TestDirectWatchEventsPollsObjectState(t *testing.T) {
+	store := memory.New()
+	createJSON(t, store, "sagas/saga_01JABC/events/01JEVT.json", schema.Event{
+		SchemaVersion: schema.Version,
+		ID:            "01JEVT",
+		Time:          "2026-05-16T21:00:00Z",
+		Subject:       schema.Target{Kind: "saga", Name: "saga_01JABC"},
+		Type:          "approval.required",
+		Summary:       "approval required",
+	})
+	direct, err := NewDirect(config.Config{
+		Mode:        config.ModeDirect,
+		StateBucket: "memory://test",
+	}, DirectOptions{Store: store})
+	if err != nil {
+		t.Fatalf("new direct client: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, err := direct.WatchEvents(ctx, EventWatchOptions{
+		EventOptions: EventOptions{Scope: "saga", Saga: "saga_01JABC"},
+		PollInterval: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("watch events: %v", err)
+	}
+	got := <-ch
+	if got.Event.ID != "01JEVT" || got.Event.Type != "approval.required" || got.LastEventID != "01JEVT" {
+		t.Fatalf("unexpected watched event: %+v", got)
+	}
+}
+
 func createJSON(t *testing.T, store objstore.ObjectStore, key string, value any) {
 	t.Helper()
 	body, err := canonical.Marshal(value)

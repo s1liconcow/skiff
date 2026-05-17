@@ -85,6 +85,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runMetrics(binary, root.Args, root, stdout, stderr)
 	case "object":
 		return runObject(binary, root.Args, stdout, stderr)
+	case "ops":
+		return runOps(binary, root.Args, root, stdout, stderr)
 	case "plan":
 		return runPlan(binary, root.Args, root, stdout, stderr)
 	case "policy":
@@ -186,6 +188,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  logs       Query service logs through the cloud provider")
 	fmt.Fprintln(w, "  metrics    Query service metrics through the cloud provider")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
+	fmt.Fprintln(w, "  ops        Watch operation event streams")
 	fmt.Fprintln(w, "  plan       Dry-run provider resource changes for a spec")
 	fmt.Fprintln(w, "  policy     Explain generated state security policies")
 	fmt.Fprintln(w, "  release    Verify release manifests")
@@ -304,6 +307,21 @@ type eventsListOutput struct {
 	Scope   events.Scope   `json:"scope"`
 	Events  []events.Event `json:"events"`
 }
+
+type eventWatchOutput struct {
+	OK             bool          `json:"ok"`
+	TraceID        string        `json:"trace_id,omitempty"`
+	Event          *schema.Event `json:"event,omitempty"`
+	ResyncRequired bool          `json:"resync_required,omitempty"`
+	LastEventID    string        `json:"last_event_id,omitempty"`
+	Code           string        `json:"code,omitempty"`
+	Summary        string        `json:"summary,omitempty"`
+}
+
+var (
+	eventsWatchContext      = nilContext
+	eventsWatchPollInterval = 2 * time.Second
+)
 
 type specErrorOutput struct {
 	OK                 bool                `json:"ok"`
@@ -762,6 +780,8 @@ func runEvents(binary string, args []string, root rootOptions, stdout, stderr io
 	saga := fs.String("saga", "", "saga ID")
 	limit := fs.Int("limit", 0, "maximum events to list")
 	fresh := fs.Bool("fresh", false, "bypass cached API views where supported")
+	watch := fs.Bool("watch", false, "watch event stream until interrupted")
+	afterID := fs.String("after", "", "resume after event ID")
 
 	if err := fs.Parse(args); err != nil {
 		return writeEventsError(binary, *flags.format, *flags.traceID, err, stdout, stderr)
@@ -804,6 +824,21 @@ func runEvents(binary string, args []string, root rootOptions, stdout, stderr io
 	if err != nil {
 		return writeClientError(binary, "events", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
+	if *watch {
+		return runEventsWatch(eventsWatchContext(), binary, skiffClient, client.EventWatchOptions{
+			EventOptions: client.EventOptions{
+				Scope:     *scopeKind,
+				Service:   *service,
+				Operation: *operation,
+				Saga:      *saga,
+				Limit:     *limit,
+				Fresh:     *fresh,
+				TraceID:   *flags.traceID,
+			},
+			AfterID:      *afterID,
+			PollInterval: eventsWatchPollInterval,
+		}, *flags.format, *flags.traceID, stdout, stderr)
+	}
 	listed, err := skiffClient.Events(nilContext(), client.EventOptions{
 		Scope:     *scopeKind,
 		Service:   *service,
@@ -833,6 +868,48 @@ func runEvents(binary string, args []string, root rootOptions, stdout, stderr io
 	default:
 		return writeEventsError(binary, *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
 	}
+}
+
+func runEventsWatch(ctx context.Context, binary string, skiffClient client.Interface, opts client.EventWatchOptions, format, traceID string, stdout, stderr io.Writer) int {
+	watcher, ok := skiffClient.(client.EventWatcher)
+	if !ok {
+		return writeClientCommandError(binary, "events", format, traceID, errors.New("client mode does not support event watch"), stdout, stderr)
+	}
+	stream, err := watcher.WatchEvents(ctx, opts)
+	if err != nil {
+		return writeClientError(binary, "events", format, traceID, err, stdout, stderr)
+	}
+	for delivery := range stream {
+		switch format {
+		case "human", "text":
+			if delivery.ResyncRequired {
+				fmt.Fprintf(stdout, "resync required after %s\n", delivery.LastEventID)
+				continue
+			}
+			event := delivery.Event
+			fmt.Fprintf(stdout, "%s %s %s %s\n", event.Time, event.ID, event.Type, event.Summary)
+		case "json":
+			out := eventWatchOutput{OK: true, TraceID: traceID}
+			if delivery.ResyncRequired {
+				out.OK = false
+				out.ResyncRequired = true
+				out.LastEventID = delivery.LastEventID
+				out.Code = "RESYNC_REQUIRED"
+				out.Summary = "event stream subscriber fell behind; reconnect with --after " + delivery.LastEventID
+			} else {
+				event := delivery.Event
+				out.Event = &event
+				out.LastEventID = delivery.LastEventID
+			}
+			if err := json.NewEncoder(stdout).Encode(out); err != nil {
+				fmt.Fprintf(stderr, "%s events watch: %v\n", binary, err)
+				return ExitInternalError
+			}
+		default:
+			return writeEventsError(binary, format, traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		}
+	}
+	return ExitSuccess
 }
 
 func readEventsFromStateDir(root string, scope events.Scope, limit int) ([]events.Event, error) {

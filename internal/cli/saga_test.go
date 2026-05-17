@@ -101,7 +101,7 @@ func TestSagaSkeletonCommandsReturnJSON(t *testing.T) {
 	clearSkiffEnv(t)
 	var stdout, stderr bytes.Buffer
 	code := Run("skiff", []string{
-		"saga", "watch", "saga_01JABC",
+		"saga", "cancel", "saga_01JABC",
 		"--format", "json",
 		"--trace-id", "tr_saga_skeleton",
 	}, &stdout, &stderr)
@@ -115,8 +115,64 @@ func TestSagaSkeletonCommandsReturnJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("saga skeleton output is not valid JSON: %v\n%s", err, stdout.String())
 	}
-	if !got.OK || got.TraceID != "tr_saga_skeleton" || got.Command != "watch" || got.Saga != "saga_01JABC" || got.Implemented {
+	if !got.OK || got.TraceID != "tr_saga_skeleton" || got.Command != "cancel" || got.Saga != "saga_01JABC" || got.Implemented {
 		t.Fatalf("unexpected skeleton output: %+v", got)
+	}
+}
+
+func TestSagaWatchDirectModeStreamsSagaEvents(t *testing.T) {
+	clearSkiffEnv(t)
+	dir := t.TempDir()
+	store, err := file.New(dir)
+	if err != nil {
+		t.Fatalf("new file store: %v", err)
+	}
+	body, err := canonical.Marshal(schema.Event{
+		SchemaVersion: schema.Version,
+		ID:            "01JSAGA",
+		Time:          "2026-05-16T20:03:00Z",
+		TraceID:       "tr_saga_event",
+		Subject:       schema.Target{Kind: "saga", Name: "saga_01JABC"},
+		Type:          "approval.required",
+		Summary:       "approval required",
+	})
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	if _, err := store.Create(context.Background(), "sagas/saga_01JABC/events/01JSAGA.json", body, objstore.PutOptions{ContentType: canonical.ContentType}); err != nil {
+		t.Fatalf("create event: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	oldContext := eventsWatchContext
+	oldInterval := eventsWatchPollInterval
+	eventsWatchContext = func() context.Context { return ctx }
+	eventsWatchPollInterval = time.Hour
+	t.Cleanup(func() {
+		eventsWatchContext = oldContext
+		eventsWatchPollInterval = oldInterval
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"saga", "watch", "saga_01JABC",
+		"--direct",
+		"--state", "file://" + dir,
+		"--env", "prod",
+		"--provider", "aws",
+		"--region", "us-west-2",
+		"--format", "json",
+		"--trace-id", "tr_saga_watch",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	var got eventWatchOutput
+	if err := json.Unmarshal(bytes.Split(stdout.Bytes(), []byte("\n"))[0], &got); err != nil {
+		t.Fatalf("saga watch output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_saga_watch" || got.Event == nil || got.Event.ID != "01JSAGA" {
+		t.Fatalf("unexpected saga watch output: %+v", got)
 	}
 }
 

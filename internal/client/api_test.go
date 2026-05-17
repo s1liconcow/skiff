@@ -91,6 +91,45 @@ func TestAPIDoctorUsesSkiffdJSONEndpoint(t *testing.T) {
 	}
 }
 
+func TestAPIWatchEventsParsesSSEStream(t *testing.T) {
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/v1/events/stream" {
+			t.Fatalf("unexpected path %s", req.URL.Path)
+		}
+		if req.URL.Query().Get("scope") != "saga" || req.URL.Query().Get("saga") != "saga_01JABC" || req.URL.Query().Get("after") != "01JOLD" {
+			t.Fatalf("unexpected query %s", req.URL.RawQuery)
+		}
+		if req.Header.Get("Accept") != "text/event-stream" || req.Header.Get("Last-Event-ID") != "01JOLD" {
+			t.Fatalf("unexpected stream headers: %+v", req.Header)
+		}
+		body := "id: 01JNEW\n" +
+			"event: skiff.event\n" +
+			`data: {"schema_version":"skiff.state/v1","id":"01JNEW","time":"2026-05-16T19:00:00Z","subject":{"kind":"saga","name":"saga_01JABC"},"type":"approval.required","summary":"approval required"}` + "\n\n"
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})
+
+	api, err := NewAPI(config.Config{Mode: config.ModeAPI, APIURL: "http://skiffd.example.test"}, APIOptions{HTTPClient: &http.Client{Transport: transport}})
+	if err != nil {
+		t.Fatalf("new API client: %v", err)
+	}
+	ch, err := api.WatchEvents(context.Background(), EventWatchOptions{
+		EventOptions: EventOptions{Scope: "saga", Saga: "saga_01JABC", TraceID: "tr_watch"},
+		AfterID:      "01JOLD",
+	})
+	if err != nil {
+		t.Fatalf("watch events: %v", err)
+	}
+	got, ok := <-ch
+	if !ok || got.Event.ID != "01JNEW" || got.Event.Subject.Name != "saga_01JABC" || got.LastEventID != "01JNEW" {
+		t.Fatalf("unexpected stream delivery: %+v ok=%v", got, ok)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
