@@ -92,6 +92,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runOps(binary, root.Args, root, stdout, stderr)
 	case "plan":
 		return runPlan(binary, root.Args, root, stdout, stderr)
+	case "plugin":
+		return runPlugin(binary, root.Args, root, stdout, stderr)
 	case "policy":
 		return runPolicy(binary, root.Args, stdout, stderr)
 	case "release":
@@ -198,6 +200,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
 	fmt.Fprintln(w, "  ops        Inspect, resume, and watch operations")
 	fmt.Fprintln(w, "  plan       Dry-run provider resource changes for a spec")
+	fmt.Fprintln(w, "  plugin     Inspect, validate, and run trusted Skiff plugins")
 	fmt.Fprintln(w, "  policy     Explain generated state security policies")
 	fmt.Fprintln(w, "  promote    Validate and record release promotion intent")
 	fmt.Fprintln(w, "  release    Verify release manifests")

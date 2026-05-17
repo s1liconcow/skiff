@@ -9,15 +9,17 @@ import (
 
 	"github.com/s1liconcow/skiff/internal/compiler"
 	"github.com/s1liconcow/skiff/internal/explain"
+	"github.com/s1liconcow/skiff/internal/plugins"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
 	"github.com/s1liconcow/skiff/internal/spec"
 )
 
 type explainOutput struct {
-	OK      bool           `json:"ok"`
-	TraceID string         `json:"trace_id,omitempty"`
-	Result  explain.Result `json:"result"`
-	AWS     any            `json:"aws,omitempty"`
+	OK            bool                       `json:"ok"`
+	TraceID       string                     `json:"trace_id,omitempty"`
+	Result        explain.Result             `json:"result"`
+	AWS           any                        `json:"aws,omitempty"`
+	PluginPatches []plugins.PatchExplanation `json:"plugin_patches,omitempty"`
 }
 
 func runExplain(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
@@ -33,6 +35,8 @@ func runExplain(binary string, args []string, root rootOptions, stdout, stderr i
 	region := fs.String("region", root.Region, "cloud provider region")
 	stateBucket := fs.String("state", root.State, "object-state bucket URI")
 	releaseID := fs.String("release-id", "", "release ID to place in runner user-data")
+	var pluginPaths pluginPathsFlag
+	fs.Var(&pluginPaths, "plugin", "plugin manifest path or directory; may be repeated")
 
 	flagArgs, positionals, err := splitExplainArgs(args)
 	if err != nil {
@@ -65,6 +69,26 @@ func runExplain(binary string, args []string, root rootOptions, stdout, stderr i
 		}
 		return writeSpecError(binary, "SPEC_COMPILE_FAILED", *format, *traceID, err, nil, stdout, stderr)
 	}
+	var patchExplanations []plugins.PatchExplanation
+	if len(pluginPaths) > 0 {
+		registry, err := plugins.LoadRegistry(nilContext(), plugins.RegistryOptions{Paths: pluginPaths})
+		if err != nil {
+			return writeSpecError(binary, "PLUGIN_INVALID", *format, *traceID, err, nil, stdout, stderr)
+		}
+		specBody, err := json.Marshal(doc)
+		if err != nil {
+			return writeSpecError(binary, "PLUGIN_INVALID", *format, *traceID, err, nil, stdout, stderr)
+		}
+		host := plugins.NewHost(registry, nil)
+		sets, err := host.MutateIR(nilContext(), graph, specBody, *traceID)
+		if err != nil {
+			return writeSpecError(binary, "PLUGIN_DENIED", *format, *traceID, err, nil, stdout, stderr)
+		}
+		if err := plugins.ApplyIRPatches(graph, sets); err != nil {
+			return writeSpecError(binary, "PLUGIN_PATCH_FAILED", *format, *traceID, err, nil, stdout, stderr)
+		}
+		patchExplanations = plugins.ExplainPatchSets(sets)
+	}
 	if *providerName != "aws" {
 		return writeSpecError(binary, "EXPLAIN_INVALID", *format, *traceID, fmt.Errorf("unsupported provider %q; expected aws", *providerName), nil, stdout, stderr)
 	}
@@ -84,9 +108,12 @@ func runExplain(binary string, args []string, root rootOptions, stdout, stderr i
 		for _, resource := range result.Resources {
 			fmt.Fprintf(stdout, "- %s %s: %s\n", resource.CloudPrimitive, resource.Name, resource.Why)
 		}
+		for _, patch := range patchExplanations {
+			fmt.Fprintf(stdout, "- plugin %s added %s at %s: %s\n", patch.Plugin, patch.Kind, patch.Path, patch.Summary)
+		}
 		return ExitSuccess
 	case "json":
-		if err := json.NewEncoder(stdout).Encode(explainOutput{OK: true, TraceID: *traceID, Result: result, AWS: lowered}); err != nil {
+		if err := json.NewEncoder(stdout).Encode(explainOutput{OK: true, TraceID: *traceID, Result: result, AWS: lowered, PluginPatches: patchExplanations}); err != nil {
 			fmt.Fprintf(stderr, "%s explain: %v\n", binary, err)
 			return ExitInternalError
 		}
@@ -105,6 +132,7 @@ func splitExplainArgs(args []string) ([]string, []string, error) {
 		"release-id": true,
 		"state":      true,
 		"trace-id":   true,
+		"plugin":     true,
 	}
 	return splitArgs(args, valueFlags)
 }

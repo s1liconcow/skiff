@@ -78,6 +78,15 @@ skiff completion fish
 ```bash
 skiff explain examples/service/skiff.yaml --provider aws --region us-west-2 --state s3://skiff-state-prod
 skiff explain examples/service/skiff.yaml --format json --trace-id tr_explain
+skiff explain examples/service/skiff.yaml --plugin ./plugins/mtls --format json
+```
+
+`skiff plugin` validates trusted extension manifests, lists configured plugins, explains declared permissions and typed patches, and runs local command plugins during development.
+
+```bash
+skiff plugin validate ./plugins/mtls --format json
+skiff plugin explain ./plugins/mtls --spec examples/service/skiff.yaml --format json
+skiff plugin dev --plugin ./plugins/mtls --hook mutate_ir --request request.json --format json
 ```
 
 ## Plan

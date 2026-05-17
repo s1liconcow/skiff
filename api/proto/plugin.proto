@@ -1,0 +1,176 @@
+syntax = "proto3";
+
+package skiff.plugin.v1alpha1;
+
+option go_package = "github.com/s1liconcow/skiff/api/plugin/v1alpha1;pluginv1alpha1";
+
+// Plugin is the wire contract for trusted Skiff extensions. The host mediates
+// all durable state and cloud-provider access; plugin responses are typed data.
+service Plugin {
+  rpc Validate(ValidateRequest) returns (ValidateResponse);
+  rpc MutateIR(MutateIRRequest) returns (MutateIRResponse);
+  rpc RuntimeAddons(RuntimeAddonsRequest) returns (RuntimeAddonsResponse);
+  rpc DoctorChecks(DoctorChecksRequest) returns (DoctorChecksResponse);
+  rpc PlanSagaStep(SagaStepRequest) returns (SagaStepPlanResponse);
+  rpc RunSagaStep(SagaStepRequest) returns (SagaStepResultResponse);
+  rpc ResumeSagaStep(SagaStepRequest) returns (SagaStepResultResponse);
+  rpc CompensateSagaStep(SagaStepRequest) returns (SagaStepResultResponse);
+  rpc DoctorSagaStep(SagaStepRequest) returns (SagaStepDoctorResponse);
+}
+
+message Manifest {
+  string api_version = 1;
+  string kind = 2;
+  string name = 3;
+  string version = 4;
+  repeated string hooks = 5;
+  Permissions permissions = 6;
+  repeated Capability capabilities = 7;
+}
+
+message Permissions {
+  repeated string allowed_patch_kinds = 1;
+  bool runtime_addons = 2;
+  bool doctor_checks = 3;
+  repeated string saga_step_kinds = 4;
+}
+
+message Capability {
+  string kind = 1;
+  string name = 2;
+  repeated string patch_kinds = 3;
+  repeated string runtime_addons = 4;
+  repeated string doctor_checks = 5;
+  repeated string saga_step_kinds = 6;
+}
+
+message Diagnostic {
+  string code = 1;
+  string severity = 2;
+  string field = 3;
+  string summary = 4;
+}
+
+message IRPatch {
+  string op = 1;
+  string path = 2;
+  string kind = 3;
+  bytes value_json = 4;
+  string summary = 5;
+}
+
+message ValidateRequest {
+  Manifest manifest = 1;
+  bytes spec_json = 2;
+  string trace_id = 3;
+}
+
+message ValidateResponse {
+  repeated Diagnostic diagnostics = 1;
+}
+
+message MutateIRRequest {
+  Manifest manifest = 1;
+  bytes graph_json = 2;
+  bytes spec_json = 3;
+  string trace_id = 4;
+}
+
+message MutateIRResponse {
+  repeated IRPatch patches = 1;
+  repeated Diagnostic diagnostics = 2;
+}
+
+message RuntimeAddonsRequest {
+  Manifest manifest = 1;
+  bytes graph_json = 2;
+  string trace_id = 3;
+}
+
+message RuntimeAddonsResponse {
+  repeated RuntimeAddon addons = 1;
+  repeated Diagnostic diagnostics = 2;
+}
+
+message RuntimeAddon {
+  string kind = 1;
+  string name = 2;
+  string target = 3;
+  string summary = 4;
+  bytes config_json = 5;
+}
+
+message DoctorChecksRequest {
+  Manifest manifest = 1;
+  bytes status_json = 2;
+  bytes service_json = 3;
+  string trace_id = 4;
+}
+
+message DoctorChecksResponse {
+  repeated DoctorFinding findings = 1;
+  repeated Diagnostic diagnostics = 2;
+}
+
+message DoctorFinding {
+  string code = 1;
+  string severity = 2;
+  string service = 3;
+  string summary = 4;
+  double confidence = 5;
+  bytes evidence_json = 6;
+}
+
+message SagaStepRequest {
+  Manifest manifest = 1;
+  string phase = 2;
+  string kind = 3;
+  string saga_id = 4;
+  string step_id = 5;
+  bytes params_json = 6;
+  string trace_id = 7;
+  map<string, bytes> previous_results_json = 8;
+}
+
+message SagaStepPlanResponse {
+  string summary = 1;
+  string risk = 2;
+  string reversibility = 3;
+  repeated Diagnostic diagnostics = 4;
+}
+
+message SagaStepResultResponse {
+  string status = 1;
+  bytes result_json = 2;
+  StepFailure failure = 3;
+  repeated ProviderOperationRef provider_operations = 4;
+  string summary = 5;
+  repeated Diagnostic diagnostics = 6;
+}
+
+message SagaStepDoctorResponse {
+  repeated SagaStepFinding findings = 1;
+  repeated Diagnostic diagnostics = 2;
+}
+
+message SagaStepFinding {
+  string code = 1;
+  string severity = 2;
+  string summary = 3;
+}
+
+message StepFailure {
+  string code = 1;
+  string summary = 2;
+  string cause = 3;
+  bool retriable = 4;
+  string retry_after = 5;
+}
+
+message ProviderOperationRef {
+  string provider = 1;
+  string kind = 2;
+  string id = 3;
+  string observed_at = 4;
+  string description = 5;
+}

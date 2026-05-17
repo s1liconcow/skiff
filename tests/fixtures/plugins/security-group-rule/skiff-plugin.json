@@ -1,0 +1,21 @@
+{
+  "apiVersion": "skiff.dev/plugin/v1alpha1",
+  "kind": "Plugin",
+  "name": "security-group-rule",
+  "version": "0.1.0",
+  "description": "Fixture plugin that may add explicit security group rules through typed IR patches.",
+  "runtime": {
+    "kind": "manifest"
+  },
+  "hooks": ["mutate_ir"],
+  "permissions": {
+    "allowed_patch_kinds": ["SecurityGroupRule"]
+  },
+  "capabilities": [
+    {
+      "kind": "ir_patch",
+      "name": "security-group-rule",
+      "patch_kinds": ["SecurityGroupRule"]
+    }
+  ]
+}
