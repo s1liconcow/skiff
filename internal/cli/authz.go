@@ -40,7 +40,7 @@ func runAuthzExplain(binary string, args []string, root rootOptions, stdout, std
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier")
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
-	action := fs.String("action", "", "action: read, plan, deploy, rollback, approve, debug, rotate, restore, failover, or gc")
+	action := fs.String("action", "", "action: read, plan, deploy, backup, rollback, approve, debug, rotate, restore, failover, or gc")
 	service := fs.String("service", "", "service name")
 	env := fs.String("env", root.Env, "environment name")
 	risk := fs.String("risk", "", "risk: low, medium, high, or critical")

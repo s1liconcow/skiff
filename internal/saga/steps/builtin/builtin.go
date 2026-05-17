@@ -6,6 +6,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/saga/steps"
 	"github.com/s1liconcow/skiff/internal/saga/steps/approval"
 	"github.com/s1liconcow/skiff/internal/saga/steps/check"
+	"github.com/s1liconcow/skiff/internal/saga/steps/database"
 	"github.com/s1liconcow/skiff/internal/saga/steps/service"
 	sagatime "github.com/s1liconcow/skiff/internal/saga/steps/time"
 )
@@ -32,6 +33,9 @@ func New(opts Options) map[string]steps.Step {
 		service.Stage{Store: opts.Store, Provider: opts.Provider},
 		service.MarkStable{Store: opts.Store, Provider: opts.Provider},
 		sagatime.Sleep{},
+	}
+	if databaseProvider, ok := opts.Provider.(provider.DatabaseOperations); ok {
+		items = append(items, database.New(databaseProvider)...)
 	}
 	out := make(map[string]steps.Step, len(items))
 	for _, item := range items {

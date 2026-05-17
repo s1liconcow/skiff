@@ -78,6 +78,22 @@ garbage collection require approval context unless the actor is explicit
 break-glass. Agents can request plans, but execution is denied until approval
 context is present.
 
+## Database Backup And Restore
+
+Managed database operations are explicit sagas. Backup creates a snapshot and
+verifies it as a restore point. Restore defaults to `new-db-cutover`: Skiff
+restores into a new database, waits for availability, runs checks, then pauses
+at `approve-cutover` before updating any secret pointer.
+
+```bash
+skiff database backup orders-db --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+skiff database restore orders-db --to 2026-05-17T02:00:00Z --mode new-db-cutover --secret-ref secret://managed-database/orders-db/connection-url --service orders-api --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --approval-id approval_01J... --format json
+```
+
+`skiff database restore --dry-run --format json` returns the saga plan without
+writing object state. Use `skiff saga approve <saga> --step approve-cutover`
+only after the restored database and any shadow service test look correct.
+
 ## Drift And GC
 
 `skiff drift` compares Skiff resource records with provider inspection. It is

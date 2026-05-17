@@ -16,6 +16,7 @@ const (
 	ActionRead     Action = "read"
 	ActionPlan     Action = "plan"
 	ActionDeploy   Action = "deploy"
+	ActionBackup   Action = "backup"
 	ActionRollback Action = "rollback"
 	ActionApprove  Action = "approve"
 	ActionDebug    Action = "debug"
@@ -188,7 +189,7 @@ func normalizeRequest(req Request) Request {
 
 func knownAction(action Action) bool {
 	switch action {
-	case ActionRead, ActionPlan, ActionDeploy, ActionRollback, ActionApprove, ActionDebug, ActionRotate, ActionRestore, ActionFailover, ActionGC:
+	case ActionRead, ActionPlan, ActionDeploy, ActionBackup, ActionRollback, ActionApprove, ActionDebug, ActionRotate, ActionRestore, ActionFailover, ActionGC:
 		return true
 	default:
 		return false
@@ -197,7 +198,7 @@ func knownAction(action Action) bool {
 
 func isMutating(action Action) bool {
 	switch action {
-	case ActionDeploy, ActionRollback, ActionApprove, ActionDebug, ActionRotate, ActionRestore, ActionFailover, ActionGC:
+	case ActionDeploy, ActionBackup, ActionRollback, ActionApprove, ActionDebug, ActionRotate, ActionRestore, ActionFailover, ActionGC:
 		return true
 	default:
 		return false
@@ -208,7 +209,7 @@ func defaultRisk(action Action) schema.Risk {
 	switch action {
 	case ActionDebug, ActionRotate, ActionRestore, ActionFailover, ActionGC:
 		return schema.RiskHigh
-	case ActionDeploy, ActionRollback:
+	case ActionDeploy, ActionBackup, ActionRollback:
 		return schema.RiskMedium
 	default:
 		return schema.RiskLow

@@ -23,6 +23,18 @@ type Provider interface {
 	Rollback(ctx context.Context, req RollbackRequest) (*Rollout, error)
 }
 
+type DatabaseOperations interface {
+	SnapshotDatabase(ctx context.Context, req DatabaseSnapshotRequest) (*DatabaseSnapshot, error)
+	VerifyRestorePoint(ctx context.Context, req RestorePointRequest) (*RestorePoint, error)
+	RestoreDatabase(ctx context.Context, req DatabaseRestoreRequest) (*DatabaseRestore, error)
+	InspectDatabase(ctx context.Context, ref DatabaseRef) (*DatabaseInspection, error)
+	RunDatabaseSmokeQuery(ctx context.Context, req DatabaseSmokeQueryRequest) (*DatabaseSmokeQueryResult, error)
+	RunShadowServiceTest(ctx context.Context, req ShadowServiceTestRequest) (*ShadowServiceTestResult, error)
+	UpdateSecretPointer(ctx context.Context, req SecretPointerRequest) (*SecretPointerUpdate, error)
+	RestartService(ctx context.Context, req ServiceRestartRequest) (*Rollout, error)
+	RetireDatabase(ctx context.Context, req DatabaseRetireRequest) (*DatabaseRetireResult, error)
+}
+
 type Plan struct {
 	Provider  string          `json:"provider"`
 	Service   string          `json:"service"`
@@ -187,6 +199,148 @@ type RolloutStatus struct {
 	Status     string    `json:"status"`
 	ProviderID string    `json:"provider_id,omitempty"`
 	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type DatabaseRef struct {
+	Service    string `json:"service,omitempty"`
+	Env        string `json:"env,omitempty"`
+	Database   string `json:"database"`
+	ProviderID string `json:"provider_id,omitempty"`
+	ARN        string `json:"arn,omitempty"`
+}
+
+type DatabaseSnapshotRequest struct {
+	Ref         DatabaseRef `json:"ref"`
+	SnapshotID  string      `json:"snapshot_id,omitempty"`
+	OperationID string      `json:"operation_id,omitempty"`
+	SagaID      string      `json:"saga_id,omitempty"`
+	TraceID     string      `json:"trace_id,omitempty"`
+}
+
+type DatabaseSnapshot struct {
+	ID         string    `json:"id"`
+	Provider   string    `json:"provider"`
+	ProviderID string    `json:"provider_id,omitempty"`
+	Database   string    `json:"database"`
+	Status     string    `json:"status,omitempty"`
+	StartedAt  time.Time `json:"started_at"`
+}
+
+type RestorePointRequest struct {
+	Ref          DatabaseRef `json:"ref"`
+	RestorePoint string      `json:"restore_point,omitempty"`
+	RestoreTime  time.Time   `json:"restore_time,omitempty"`
+	SnapshotID   string      `json:"snapshot_id,omitempty"`
+}
+
+type RestorePoint struct {
+	ID         string    `json:"id"`
+	Provider   string    `json:"provider"`
+	ProviderID string    `json:"provider_id,omitempty"`
+	Database   string    `json:"database"`
+	Status     string    `json:"status,omitempty"`
+	CreatedAt  time.Time `json:"created_at,omitempty"`
+}
+
+type DatabaseRestoreRequest struct {
+	Source         DatabaseRef `json:"source"`
+	RestorePointID string      `json:"restore_point_id,omitempty"`
+	RestoreTime    time.Time   `json:"restore_time,omitempty"`
+	TargetDatabase string      `json:"target_database"`
+	OperationID    string      `json:"operation_id,omitempty"`
+	SagaID         string      `json:"saga_id,omitempty"`
+	TraceID        string      `json:"trace_id,omitempty"`
+}
+
+type DatabaseRestore struct {
+	ID         string    `json:"id"`
+	Provider   string    `json:"provider"`
+	ProviderID string    `json:"provider_id,omitempty"`
+	Database   string    `json:"database"`
+	Status     string    `json:"status,omitempty"`
+	StartedAt  time.Time `json:"started_at"`
+}
+
+type DatabaseInspection struct {
+	Ref        DatabaseRef `json:"ref"`
+	Provider   string      `json:"provider"`
+	Status     string      `json:"status,omitempty"`
+	Endpoint   string      `json:"endpoint,omitempty"`
+	ProviderID string      `json:"provider_id,omitempty"`
+	FreshAt    time.Time   `json:"fresh_at"`
+}
+
+type DatabaseSmokeQueryRequest struct {
+	Ref   DatabaseRef `json:"ref"`
+	Query string      `json:"query,omitempty"`
+}
+
+type DatabaseSmokeQueryResult struct {
+	OK        bool   `json:"ok"`
+	Summary   string `json:"summary,omitempty"`
+	Rows      int    `json:"rows,omitempty"`
+	LatencyMS int    `json:"latency_ms,omitempty"`
+}
+
+type ShadowServiceTestRequest struct {
+	Service  string      `json:"service"`
+	Env      string      `json:"env,omitempty"`
+	Database DatabaseRef `json:"database"`
+	Query    string      `json:"query,omitempty"`
+}
+
+type ShadowServiceTestResult struct {
+	OK      bool   `json:"ok"`
+	Summary string `json:"summary,omitempty"`
+}
+
+type SecretPointerRequest struct {
+	Service          string `json:"service,omitempty"`
+	Env              string `json:"env,omitempty"`
+	Database         string `json:"database,omitempty"`
+	SecretRef        string `json:"secret_ref"`
+	TargetDatabase   string `json:"target_database,omitempty"`
+	TargetProviderID string `json:"target_provider_id,omitempty"`
+	PreviousVersion  string `json:"previous_version,omitempty"`
+	OperationID      string `json:"operation_id,omitempty"`
+	SagaID           string `json:"saga_id,omitempty"`
+	TraceID          string `json:"trace_id,omitempty"`
+	Reason           string `json:"reason,omitempty"`
+}
+
+type SecretPointerUpdate struct {
+	SecretRef        string    `json:"secret_ref"`
+	PreviousVersion  string    `json:"previous_version,omitempty"`
+	NewVersion       string    `json:"new_version,omitempty"`
+	PreviousDatabase string    `json:"previous_database,omitempty"`
+	NewDatabase      string    `json:"new_database,omitempty"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type ServiceRestartRequest struct {
+	Service     string `json:"service"`
+	Env         string `json:"env,omitempty"`
+	ReleaseID   string `json:"release_id,omitempty"`
+	OperationID string `json:"operation_id,omitempty"`
+	SagaID      string `json:"saga_id,omitempty"`
+	TraceID     string `json:"trace_id,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+type DatabaseRetireRequest struct {
+	Ref         DatabaseRef `json:"ref"`
+	OperationID string      `json:"operation_id,omitempty"`
+	SagaID      string      `json:"saga_id,omitempty"`
+	TraceID     string      `json:"trace_id,omitempty"`
+	Reason      string      `json:"reason,omitempty"`
+}
+
+type DatabaseRetireResult struct {
+	Database   string    `json:"database"`
+	Provider   string    `json:"provider"`
+	ProviderID string    `json:"provider_id,omitempty"`
+	Status     string    `json:"status"`
+	RetiredAt  time.Time `json:"retired_at"`
 }
 
 type ErrorCode string
