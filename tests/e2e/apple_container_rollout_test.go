@@ -2,9 +2,13 @@ package e2e_test
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,10 +22,18 @@ import (
 	"github.com/s1liconcow/skiff/internal/artifact"
 	skiffaws "github.com/s1liconcow/skiff/internal/aws"
 	"github.com/s1liconcow/skiff/internal/config"
+	skiffevents "github.com/s1liconcow/skiff/internal/events"
+	stateindex "github.com/s1liconcow/skiff/internal/index"
+	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/objstore/s3"
+	"github.com/s1liconcow/skiff/internal/ops"
+	fakeprovider "github.com/s1liconcow/skiff/internal/provider/fake"
 	"github.com/s1liconcow/skiff/internal/runner"
 	"github.com/s1liconcow/skiff/internal/security/signing"
+	"github.com/s1liconcow/skiff/internal/skiffd"
 	"github.com/s1liconcow/skiff/internal/state"
+	"github.com/s1liconcow/skiff/internal/state/canonical"
+	"github.com/s1liconcow/skiff/internal/state/paths"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 )
 
@@ -52,24 +64,45 @@ func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 	rustfsPort := freePort(t)
 	caddyPort := freePort(t)
 	rustfs := startRustFSContainer(t, ctx, cli, runID, rustfsPort)
+	configureRustFSEnv(t, rustfs)
 
 	store := rustfsObjectStore(t, ctx, rustfs)
 	statePath := filepath.Join(t.TempDir(), "runner-state.json")
 	rootDir := filepath.Join(t.TempDir(), "workloads")
 	service := "caddy-web"
 	env := "prod"
+	stateURI := "s3://" + rustfs.bucket
 	traceID := "tr_apple_container_e2e"
+	firstOperationID := "op_apple_container_01"
+	secondOperationID := "op_apple_container_02"
+	canaryOperationID := "op_apple_container_canary"
 	releaseID := "rel_01JAPPLECADDY01"
 	nextReleaseID := "rel_01JAPPLECADDY02"
+	canaryReleaseID := "rel_01JAPPLECADDY03"
 	signer := testSigner(t)
 	verifier := verifierFor(t, signer)
+	actor := schema.Actor{ID: "e2e", Type: "agent"}
+	report := newE2EReport(t, "apple-container", service, env, traceID)
+	report.CleanupStatus = "Apple containers and RustFS volume registered with test cleanup"
+	defer writeE2EReport(t, report)
 
 	firstRuntime := caddyRuntimeManifest(service, env, releaseID, caddyPort, "2026-05-18T00:00:00Z")
 	firstArtifact := ociArtifact(t, firstImage)
 	publishSignedRelease(t, ctx, store, firstArtifact, firstRuntime)
 	controlKey := createDesiredServiceControl(t, ctx, store, service, env, releaseID)
+	report.addObjectPath(controlKey)
+	reportReleaseObjects(t, report, service, releaseID)
+	createAppleResourceRecords(t, ctx, store, report, service, env, runID)
+	createAppleOperation(t, ctx, store, report, service, env, firstOperationID, releaseID, schema.OperationRunning, traceID, runID+"-rollout-01")
+	setDesiredReleaseForOperation(t, ctx, store, service, releaseID, "", firstOperationID, schema.OperationRunning, traceID, actor)
 
 	events := &collectingRunnerSink{}
+	objectEvents := &objectStateRunnerSink{
+		store: store,
+		inner: events,
+		actor: actor,
+		seed:  runID,
+	}
 	preparer := &appleContainerPreparer{
 		inner: runner.WorkloadArtifactPreparer{
 			RootDir:   rootDir,
@@ -83,28 +116,65 @@ func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 		preparer:      preparer,
 	}
 	t.Cleanup(func() { systemd.cleanup(context.Background()) })
+	report.addProviderID(rustfs.name)
+	report.addProviderID(rustfs.volume)
+	report.addProviderID(systemd.containerName)
 
-	bootstrap := runBootstrap(t, ctx, store, verifier, statePath, service, env, controlKey, traceID)
+	bootstrap := runBootstrap(t, ctx, store, verifier, statePath, service, env, stateURI, controlKey, traceID, objectEvents)
 	if bootstrap.ReleaseID != releaseID {
 		t.Fatalf("bootstrap release = %q, want %q", bootstrap.ReleaseID, releaseID)
 	}
-	runCaddyLifecycle(t, ctx, firstRuntime, firstArtifact, statePath, events, systemd, preparer, traceID, &bootstrap.Identity)
+	runCaddyLifecycle(t, ctx, firstRuntime, firstArtifact, statePath, objectEvents, systemd, preparer, traceID, &bootstrap.Identity)
 	assertHTTPStatus(t, caddyPort, "/", http.StatusOK)
+	completeAppleOperation(t, ctx, store, firstOperationID, service, releaseID, traceID)
+	markStableRelease(t, ctx, store, service, releaseID, firstOperationID, traceID, actor)
+	assertRunnerStatus(t, runner.FileStateStore{Path: statePath}, releaseID)
+	assertRenderedUnit(t, systemd.unitBody, service, env, releaseID)
+	assertReleaseObjectsAreImmutable(t, ctx, store, service, releaseID)
 
 	secondRuntime := caddyRuntimeManifest(service, env, nextReleaseID, caddyPort, "2026-05-18T00:01:00Z")
 	secondArtifact := ociArtifact(t, secondImage)
 	publishSignedRelease(t, ctx, store, secondArtifact, secondRuntime)
-	rollDesiredRelease(t, ctx, store, service, nextReleaseID, releaseID, traceID)
+	reportReleaseObjects(t, report, service, nextReleaseID)
+	createAppleOperation(t, ctx, store, report, service, env, secondOperationID, nextReleaseID, schema.OperationRunning, traceID, runID+"-rollout-02")
+	setDesiredReleaseForOperation(t, ctx, store, service, nextReleaseID, releaseID, secondOperationID, schema.OperationRunning, traceID, actor)
 
-	nextBootstrap := runBootstrap(t, ctx, store, verifier, statePath, service, env, controlKey, traceID)
+	nextBootstrap := runBootstrap(t, ctx, store, verifier, statePath, service, env, stateURI, controlKey, traceID, objectEvents)
 	if nextBootstrap.ReleaseID != nextReleaseID {
 		t.Fatalf("next bootstrap release = %q, want %q", nextBootstrap.ReleaseID, nextReleaseID)
 	}
-	nextLifecycle := runCaddyLifecycle(t, ctx, secondRuntime, secondArtifact, statePath, events, systemd, preparer, traceID, &nextBootstrap.Identity)
+	nextLifecycle := runCaddyLifecycle(t, ctx, secondRuntime, secondArtifact, statePath, objectEvents, systemd, preparer, traceID, &nextBootstrap.Identity)
 	if nextLifecycle.Status.ReleaseID != nextReleaseID {
 		t.Fatalf("lifecycle release = %q, want %q", nextLifecycle.Status.ReleaseID, nextReleaseID)
 	}
 	assertHTTPStatus(t, caddyPort, "/", http.StatusOK)
+	completeAppleOperation(t, ctx, store, secondOperationID, service, nextReleaseID, traceID)
+	markStableRelease(t, ctx, store, service, nextReleaseID, secondOperationID, traceID, actor)
+	assertRunnerStatus(t, runner.FileStateStore{Path: statePath}, nextReleaseID)
+	assertRenderedUnit(t, systemd.unitBody, service, env, nextReleaseID)
+	assertReleaseObjectsAreImmutable(t, ctx, store, service, nextReleaseID)
+	assertStaleServiceControlCASRejected(t, ctx, store, service, traceID, actor)
+	appendAppleAuditRecord(t, ctx, store, report, service, secondOperationID, traceID, actor)
+	verifyReleaseViaCLI(t, ctx, store, report, service, env, nextReleaseID, signer, traceID)
+	assertDirectStatusViaRustFS(t, report, stateURI, service, env, nextReleaseID, secondOperationID, traceID)
+	assertDirectEventsViaRustFS(t, report, stateURI, service, env, traceID)
+	assertDirectDoctorViaRustFS(t, report, stateURI, service, env, traceID)
+	assertDirectOpsViaRustFS(t, report, stateURI, service, env, secondOperationID, traceID)
+
+	localSkiffd := startLocalSkiffd(t, ctx, store, stateURI, env, traceID)
+	assertSkiffdStatusViaAPI(t, report, localSkiffd.url, stateURI, service, env, nextReleaseID, secondOperationID, traceID)
+	canary := runRollingCanaryDeployViaDirectCLI(t, report, stateURI, service, env, secondImage, canaryReleaseID, canaryOperationID, traceID)
+	report.addOperationID(canary.Result.OperationID)
+	report.addSagaID(canary.Result.SagaID)
+	reportReleaseObjects(t, report, service, canaryReleaseID)
+	reportSagaObjects(t, report, canary.Result.SagaID)
+	assertSkiffdStatusViaAPI(t, report, localSkiffd.url, stateURI, service, env, canaryReleaseID, canaryOperationID, traceID)
+	assertSkiffdDoctorViaAPI(t, report, localSkiffd.url, stateURI, service, env, traceID)
+	assertSkiffdCanarySagaViaAPI(t, ctx, localSkiffd.url, canary.Result.SagaID, traceID)
+	assertSkiffdSagaEventStream(t, ctx, localSkiffd.url, canary.Result.SagaID, traceID)
+
+	assertRunnerEventCoverage(t, events.events, releaseID, nextReleaseID)
+	report.fact("apple_container_e2e", "validated RustFS S3 object state, signed OCI releases, runner bootstrap/lifecycle, CAS control updates, immutable release objects, direct status/events/doctor/ops, local skiffd API monitoring, rolling canary saga, audit object, and release verify")
 }
 
 func appleContainerE2EEnabled() bool {
@@ -195,6 +265,16 @@ func rustfsObjectStore(t *testing.T, ctx context.Context, rustfs rustFSHarness) 
 		t.Fatalf("create S3 store: %v", err)
 	}
 	return store
+}
+
+func configureRustFSEnv(t *testing.T, rustfs rustFSHarness) {
+	t.Helper()
+	t.Setenv("AWS_ACCESS_KEY_ID", rustfs.accessKey)
+	t.Setenv("AWS_SECRET_ACCESS_KEY", rustfs.secretKey)
+	t.Setenv("AWS_REGION", "us-east-1")
+	t.Setenv("AWS_DEFAULT_REGION", "us-east-1")
+	t.Setenv("SKIFF_AWS_ENDPOINT", rustfs.endpoint)
+	t.Setenv("SKIFF_AWS_S3_PATH_STYLE", "true")
 }
 
 func waitForRustFSBucket(t *testing.T, ctx context.Context, rustfs rustFSHarness, client *s3store.HTTPClient, bucket string) {
@@ -467,7 +547,136 @@ func isSHA256Digest(value string) bool {
 	return true
 }
 
-func rollDesiredRelease(t *testing.T, ctx context.Context, store *s3store.Store, service, releaseID, stableReleaseID, traceID string) {
+func reportReleaseObjects(t *testing.T, report *e2eReport, service, releaseID string) {
+	t.Helper()
+	releaseKey, err := paths.ReleaseManifest(service, releaseID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeKey, err := paths.RuntimeManifest(service, releaseID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report.addObjectPath(releaseKey)
+	report.addObjectPath(runtimeKey)
+}
+
+func reportSagaObjects(t *testing.T, report *e2eReport, sagaID string) {
+	t.Helper()
+	for _, keyFunc := range []func(string) (string, error){paths.SagaIntent, paths.SagaGraph, paths.SagaControl} {
+		key, err := keyFunc(sagaID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		report.addObjectPath(key)
+	}
+}
+
+func createAppleResourceRecords(t *testing.T, ctx context.Context, store objstore.ObjectStore, report *e2eReport, service, env, runID string) {
+	t.Helper()
+	resources := []struct {
+		kind string
+		name string
+		id   string
+	}{
+		{kind: "autoscaling-group", name: service + "-asg", id: runID + "-asg"},
+		{kind: "target-group", name: service + "-tg", id: runID + "-tg"},
+		{kind: "log-group", name: service + "-logs", id: runID + "-logs"},
+		{kind: "metric-config", name: service + "-metrics", id: runID + "-metrics"},
+	}
+	for _, resource := range resources {
+		key, err := paths.LogicalResource(resource.kind, resource.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record := schema.ResourceRecord{
+			SchemaVersion: schema.Version,
+			Logical:       schema.ResourceLogicalRef{Kind: resource.kind, Name: resource.name},
+			Provider:      schema.ResourceProviderRef{Provider: "apple-container", Kind: resource.kind, ID: resource.id},
+			Service:       service,
+			Env:           env,
+			Ownership:     &schema.ResourceOwnership{Mode: "managed", ManagedBy: "skiff-e2e"},
+			Tags: map[string]string{
+				"skiff.dev/service": service,
+				"skiff.dev/env":     env,
+				"skiff.dev/managed": "true",
+				"skiff.dev/graph":   "apple-container-e2e",
+			},
+			ObservedAt: canonical.Time(fixedNow()),
+		}
+		createJSON(t, ctx, store, key, record)
+		report.addObjectPath(key)
+		report.addProviderID(resource.id)
+	}
+}
+
+func createAppleOperation(t *testing.T, ctx context.Context, store objstore.ObjectStore, report *e2eReport, service, env, operationID, releaseID string, status schema.OperationStatus, traceID, providerID string) {
+	t.Helper()
+	params, err := json.Marshal(map[string]string{"release_id": releaseID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := schema.NewOperationIntent(operationID, service, env, "deploy", schema.Target{Kind: "service", Name: service}, schema.Actor{ID: "e2e", Type: "agent"}, traceID, canonical.Time(fixedNow()))
+	intent.Risk = schema.RiskLow
+	intent.Reversibility = schema.Reversible
+	intent.Summary = "apple container rollout to " + releaseID
+	intent.Params = params
+	intentKey, err := paths.OperationIntent(service, operationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createJSON(t, ctx, store, intentKey, intent)
+	report.addObjectPath(intentKey)
+
+	control := schema.OperationControl{
+		SchemaVersion: schema.Version,
+		OperationID:   operationID,
+		Service:       service,
+		Env:           env,
+		Status:        status,
+		ProviderOperations: []schema.ProviderOperationRef{{
+			Provider:    "apple-container",
+			Kind:        "container-rollout",
+			ID:          providerID,
+			ObservedAt:  canonical.Time(fixedNow()),
+			Description: "Apple container rollout for " + releaseID,
+		}},
+		UpdatedAt: canonical.Time(fixedNow()),
+		TraceID:   traceID,
+	}
+	controlKey, err := paths.OperationControl(service, operationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createJSON(t, ctx, store, controlKey, control)
+	report.addObjectPath(controlKey)
+	report.addOperationID(operationID)
+	report.addProviderID(providerID)
+	appendOperationEvent(t, ctx, store, service, operationID, "operation.started", "operation started for "+releaseID, traceID)
+}
+
+func appendOperationEvent(t *testing.T, ctx context.Context, store objstore.ObjectStore, service, operationID, eventType, summary, traceID string) {
+	t.Helper()
+	id := skiffevents.NewID(fixedNow(), operationID+eventType+summary)
+	key, err := paths.OperationEvent(service, operationID, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := schema.Event{
+		SchemaVersion: schema.Version,
+		ID:            id,
+		Time:          canonical.Time(fixedNow()),
+		TraceID:       traceID,
+		Subject:       schema.Target{Kind: "operation", Name: operationID},
+		Type:          eventType,
+		Severity:      "info",
+		Actor:         &schema.Actor{ID: "e2e", Type: "agent"},
+		Summary:       summary,
+	}
+	createJSON(t, ctx, store, key, event)
+}
+
+func setDesiredReleaseForOperation(t *testing.T, ctx context.Context, store objstore.ObjectStore, service, releaseID, stableReleaseID, operationID string, status schema.OperationStatus, traceID string, actor schema.Actor) {
 	t.Helper()
 	client := state.NewClient(store, state.WithClock(testClock{}))
 	current, err := client.GetServiceControl(ctx, service)
@@ -478,13 +687,132 @@ func rollDesiredRelease(t *testing.T, ctx context.Context, store *s3store.Store,
 	next.DesiredRelease = releaseID
 	next.StableRelease = stableReleaseID
 	next.TraceID = traceID
-	next.UpdatedBy = schema.Actor{ID: "e2e", Type: "agent"}
+	next.UpdatedBy = actor
+	next.Operation = &schema.ActiveOperation{ID: operationID, Kind: "deploy", State: string(status), Step: "rollout"}
 	if _, err := client.UpdateServiceControlCAS(ctx, current, next); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func runBootstrap(t *testing.T, ctx context.Context, store *s3store.Store, verifier *signing.LocalVerifier, statePath, service, env, controlKey, traceID string) *runner.BootstrapResult {
+func completeAppleOperation(t *testing.T, ctx context.Context, store objstore.ObjectStore, operationID, service, releaseID, traceID string) {
+	t.Helper()
+	opStore := ops.NewStore(store, ops.WithClock(fixedNow))
+	current, err := opStore.GetControl(ctx, service, operationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := json.Marshal(map[string]string{"release_id": releaseID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := current.Control
+	next.Status = schema.OperationSucceeded
+	next.TraceID = traceID
+	next.StepResults = append(next.StepResults, schema.StepResultRef{
+		StepID:      "runner-lifecycle",
+		Kind:        "runner.lifecycle",
+		Status:      "succeeded",
+		Result:      result,
+		CompletedAt: canonical.Time(fixedNow()),
+	})
+	if _, err := opStore.UpdateControlCAS(ctx, current, next); err != nil {
+		t.Fatal(err)
+	}
+	appendOperationEvent(t, ctx, store, service, operationID, "operation.completed", "operation completed for "+releaseID, traceID)
+}
+
+func markStableRelease(t *testing.T, ctx context.Context, store objstore.ObjectStore, service, releaseID, operationID, traceID string, actor schema.Actor) {
+	t.Helper()
+	setDesiredReleaseForOperation(t, ctx, store, service, releaseID, releaseID, operationID, schema.OperationSucceeded, traceID, actor)
+}
+
+func assertStaleServiceControlCASRejected(t *testing.T, ctx context.Context, store objstore.ObjectStore, service, traceID string, actor schema.Actor) {
+	t.Helper()
+	client := state.NewClient(store, state.WithClock(testClock{}))
+	current, err := client.GetServiceControl(ctx, service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := current.Control
+	next.TraceID = traceID + "_cas_probe"
+	next.UpdatedBy = actor
+	if _, err := client.UpdateServiceControlCAS(ctx, current, next); err != nil {
+		t.Fatalf("service control CAS probe: %v", err)
+	}
+	stale := next
+	stale.TraceID = traceID + "_stale"
+	_, err = client.UpdateServiceControlCAS(ctx, current, stale)
+	if !errors.Is(err, state.ErrPreconditionFailed) && !errors.Is(err, objstore.ErrPreconditionFailed) && !errors.Is(err, objstore.ErrConflict) {
+		t.Fatalf("stale service control CAS error = %v, want precondition failure", err)
+	}
+}
+
+func appendAppleAuditRecord(t *testing.T, ctx context.Context, store objstore.ObjectStore, report *e2eReport, service, operationID, traceID string, actor schema.Actor) {
+	t.Helper()
+	id := skiffevents.NewID(fixedNow(), traceID+operationID+"audit")
+	key, err := paths.AuditEventForTime(fixedNow(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := schema.AuditRecord{
+		SchemaVersion: schema.Version,
+		ID:            id,
+		Time:          canonical.Time(fixedNow()),
+		Actor:         actor,
+		TraceID:       traceID,
+		Target:        schema.Target{Kind: "service", Name: service},
+		OperationID:   operationID,
+		Risk:          schema.RiskLow,
+		Summary:       "apple container rollout completed for " + service,
+	}
+	createJSON(t, ctx, store, key, record)
+	report.addObjectPath(key)
+}
+
+func verifyReleaseViaCLI(t *testing.T, ctx context.Context, store objstore.ObjectStore, report *e2eReport, service, env, releaseID string, signer *signing.LocalSigner, traceID string) {
+	t.Helper()
+	releaseKey, err := paths.ReleaseManifest(service, releaseID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeKey, err := paths.RuntimeManifest(service, releaseID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseObj, err := store.Get(ctx, releaseKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeObj, err := store.Get(ctx, runtimeKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	releasePath := filepath.Join(dir, "release.json")
+	runtimePath := filepath.Join(dir, "runtime-manifest.json")
+	if err := os.WriteFile(releasePath, releaseObj.Body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(runtimePath, runtimeObj.Body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	publicKeyArg := signer.KeyID() + "=" + base64.StdEncoding.EncodeToString(signer.PublicKey())
+	var verified localVerifyOutput
+	decodeCLIJSON(t, runSkiffCLI(t, report,
+		"release", "verify", releasePath,
+		"--runtime-manifest", runtimePath,
+		"--public-key", publicKeyArg,
+		"--service", service,
+		"--env", env,
+		"--format", "json",
+		"--trace-id", traceID,
+	), &verified)
+	if !verified.OK || !verified.Result.OK {
+		t.Fatalf("unexpected release verify output: %+v", verified)
+	}
+}
+
+func runBootstrap(t *testing.T, ctx context.Context, store *s3store.Store, verifier *signing.LocalVerifier, statePath, service, env, stateURI, controlKey, traceID string, eventSink runner.EventSink) *runner.BootstrapResult {
 	t.Helper()
 	bootstrap, err := runner.Bootstrap(ctx, runner.BootstrapRequest{
 		Config: config.Config{
@@ -492,7 +820,7 @@ func runBootstrap(t *testing.T, ctx context.Context, store *s3store.Store, verif
 			Env:         env,
 			Provider:    "aws",
 			Region:      "us-west-2",
-			StateBucket: "s3://skiff-e2e-rustfs",
+			StateBucket: stateURI,
 			Service:     service,
 			ControlKey:  controlKey,
 		},
@@ -504,7 +832,7 @@ func runBootstrap(t *testing.T, ctx context.Context, store *s3store.Store, verif
 			InstanceID: "i-apple-container-e2e",
 		}},
 		StateStore: runner.FileStateStore{Path: statePath},
-		EventSink:  &collectingRunnerSink{},
+		EventSink:  eventSink,
 		TraceID:    traceID,
 		Now:        fixedNow,
 	})
@@ -517,13 +845,13 @@ func runBootstrap(t *testing.T, ctx context.Context, store *s3store.Store, verif
 	return bootstrap
 }
 
-func runCaddyLifecycle(t *testing.T, ctx context.Context, runtimeManifest schema.RuntimeManifest, artifactRef schema.ArtifactRef, statePath string, events *collectingRunnerSink, systemd *appleContainerSystemd, preparer *appleContainerPreparer, traceID string, identity *runner.Identity) *runner.LifecycleResult {
+func runCaddyLifecycle(t *testing.T, ctx context.Context, runtimeManifest schema.RuntimeManifest, artifactRef schema.ArtifactRef, statePath string, eventSink runner.EventSink, systemd *appleContainerSystemd, preparer *appleContainerPreparer, traceID string, identity *runner.Identity) *runner.LifecycleResult {
 	t.Helper()
 	lifecycle, err := runner.RunLifecycle(ctx, runner.LifecycleRequest{
 		RuntimeManifest:  runtimeManifest,
 		Artifact:         artifactRef,
 		StateStore:       runner.FileStateStore{Path: statePath},
-		EventSink:        events,
+		EventSink:        eventSink,
 		Systemd:          systemd,
 		ArtifactPreparer: preparer,
 		HealthChecker:    runner.ProbeHealthChecker{HTTPClient: &http.Client{Timeout: time.Second}},
@@ -557,11 +885,629 @@ func assertHTTPStatus(t *testing.T, port int, path string, want int) {
 	}
 }
 
+func assertRunnerStatus(t *testing.T, store runner.StateStore, releaseID string) {
+	t.Helper()
+	status := readStatus(t, store)
+	if !status.OK || status.State != runner.StateServing || status.Health != runner.HealthHealthy || status.ReleaseID != releaseID {
+		t.Fatalf("unexpected runner status: %+v", status)
+	}
+	if status.Identity == nil || status.Identity.InstanceID != "i-apple-container-e2e" {
+		t.Fatalf("runner identity not preserved in status: %+v", status.Identity)
+	}
+}
+
+func assertRenderedUnit(t *testing.T, unitBody, service, env, releaseID string) {
+	t.Helper()
+	for _, want := range []string{
+		"Description=Skiff workload " + env + "/" + service + " release " + releaseID,
+		"ExecStart=",
+		"NoNewPrivileges=yes",
+		"ProtectSystem=strict",
+		"CapabilityBoundingSet=",
+	} {
+		if !strings.Contains(unitBody, want) {
+			t.Fatalf("rendered unit missing %q:\n%s", want, unitBody)
+		}
+	}
+}
+
+func assertReleaseObjectsAreImmutable(t *testing.T, ctx context.Context, store objstore.ObjectStore, service, releaseID string) {
+	t.Helper()
+	for _, keyFunc := range []func(string, string) (string, error){paths.ReleaseManifest, paths.RuntimeManifest} {
+		key, err := keyFunc(service, releaseID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		obj, err := store.Get(ctx, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = store.Create(ctx, key, obj.Body, objstore.PutOptions{ContentType: canonical.ContentType})
+		if !errors.Is(err, objstore.ErrAlreadyExists) {
+			t.Fatalf("create-only object %s duplicate err = %v, want already exists", key, err)
+		}
+	}
+}
+
+func assertDirectStatusViaRustFS(t *testing.T, report *e2eReport, stateURI, service, env, releaseID, operationID, traceID string) {
+	t.Helper()
+	var status appleStatusOutput
+	decodeCLIJSON(t, runSkiffCLI(t, report,
+		"status", service,
+		"--direct",
+		"--state", stateURI,
+		"--env", env,
+		"--provider", "aws",
+		"--region", "us-east-1",
+		"--format", "json",
+		"--trace-id", traceID,
+	), &status)
+	if !status.OK || status.Status.Source != "direct" || status.Status.StateBucket != stateURI {
+		t.Fatalf("unexpected direct status metadata: %+v", status)
+	}
+	if len(status.Status.Services) != 1 {
+		t.Fatalf("status services = %d, want 1: %+v", len(status.Status.Services), status.Status.Services)
+	}
+	got := status.Status.Services[0]
+	if got.Service != service || got.DesiredRelease != releaseID || got.StableRelease != releaseID || got.OperationID != operationID || got.OperationState != string(schema.OperationSucceeded) || got.Health != "nominal" {
+		t.Fatalf("unexpected direct service status: %+v", got)
+	}
+	for _, kind := range []string{"autoscaling-group", "target-group", "log-group", "metric-config"} {
+		if !statusHasResource(got.Resources, kind) {
+			t.Fatalf("direct status missing resource kind %q: %+v", kind, got.Resources)
+		}
+	}
+}
+
+func assertDirectEventsViaRustFS(t *testing.T, report *e2eReport, stateURI, service, env, traceID string) {
+	t.Helper()
+	var listed appleEventsOutput
+	decodeCLIJSON(t, runSkiffCLI(t, report,
+		"events",
+		"--scope", "service",
+		"--service", service,
+		"--direct",
+		"--state", stateURI,
+		"--env", env,
+		"--provider", "aws",
+		"--region", "us-east-1",
+		"--format", "json",
+		"--trace-id", traceID,
+	), &listed)
+	if !listed.OK || listed.Result.Source != "direct" || len(listed.Result.Events) == 0 {
+		t.Fatalf("unexpected direct events output: %+v", listed)
+	}
+	if !hasSchemaEvent(listed.Result.Events, "workload.state", "Serving") {
+		t.Fatalf("direct events did not include a Serving workload state: %+v", listed.Result.Events)
+	}
+	if !hasSchemaEvent(listed.Result.Events, "operation.completed", "") {
+		t.Fatalf("direct events did not include operation completion: %+v", listed.Result.Events)
+	}
+}
+
+func assertDirectDoctorViaRustFS(t *testing.T, report *e2eReport, stateURI, service, env, traceID string) {
+	t.Helper()
+	var doctor appleDoctorOutput
+	decodeCLIJSON(t, runSkiffCLI(t, report,
+		"doctor", service,
+		"--direct",
+		"--state", stateURI,
+		"--env", env,
+		"--provider", "aws",
+		"--region", "us-east-1",
+		"--format", "json",
+		"--trace-id", traceID,
+	), &doctor)
+	if !doctor.OK || doctor.Doctor.Source != "direct" || doctor.Doctor.Service != service || doctor.Doctor.Health != "nominal" {
+		t.Fatalf("unexpected direct doctor output: %+v", doctor)
+	}
+	for _, finding := range doctor.Doctor.Findings {
+		if finding.Severity == "critical" {
+			t.Fatalf("doctor returned critical finding: %+v", doctor.Doctor.Findings)
+		}
+	}
+	if len(doctor.Doctor.Facts) == 0 || len(doctor.Doctor.RecommendedActions) != 0 {
+		t.Fatalf("unexpected doctor facts/actions: %+v", doctor.Doctor)
+	}
+}
+
+func assertDirectOpsViaRustFS(t *testing.T, report *e2eReport, stateURI, service, env, operationID, traceID string) {
+	t.Helper()
+	var list appleOpsListOutput
+	decodeCLIJSON(t, runSkiffCLI(t, report,
+		"ops", "list",
+		"--all",
+		"--service", service,
+		"--direct",
+		"--state", stateURI,
+		"--env", env,
+		"--provider", "aws",
+		"--region", "us-east-1",
+		"--format", "json",
+		"--trace-id", traceID,
+	), &list)
+	if !list.OK || !hasOperationSummary(list.Operations, operationID, string(schema.OperationSucceeded)) {
+		t.Fatalf("unexpected direct ops list output: %+v", list)
+	}
+
+	var inspect appleOpsInspectOutput
+	decodeCLIJSON(t, runSkiffCLI(t, report,
+		"ops", "inspect", operationID,
+		"--service", service,
+		"--direct",
+		"--state", stateURI,
+		"--env", env,
+		"--provider", "aws",
+		"--region", "us-east-1",
+		"--format", "json",
+		"--trace-id", traceID,
+	), &inspect)
+	if !inspect.OK || inspect.Result.OperationID != operationID || inspect.Result.Status != string(schema.OperationSucceeded) || inspect.Result.Risk != string(schema.RiskLow) || inspect.Result.Reversibility != string(schema.Reversible) || len(inspect.Result.ProviderOperations) == 0 || len(inspect.Result.StepResults) == 0 {
+		t.Fatalf("unexpected direct ops inspect output: %+v", inspect)
+	}
+}
+
+func startLocalSkiffd(t *testing.T, ctx context.Context, store objstore.ObjectStore, stateURI, env, traceID string) localSkiffdHarness {
+	t.Helper()
+	idx, err := stateindex.New(store, stateindex.Options{Clock: fixedNow})
+	if err != nil {
+		t.Fatalf("create skiffd index: %v", err)
+	}
+	if _, err := idx.Rebuild(ctx); err != nil {
+		t.Fatalf("initial skiffd index rebuild: %v", err)
+	}
+	server, err := skiffd.New(skiffd.Options{
+		Config: config.Config{
+			Mode:        config.ModeAPI,
+			Env:         env,
+			Provider:    fakeprovider.Name,
+			Region:      "local",
+			StateBucket: stateURI,
+		},
+		ObjectStore: store,
+		Index:       idx,
+		Provider:    fakeprovider.New(fakeprovider.WithStateStore(store)),
+		Clock:       fixedNow,
+	})
+	if err != nil {
+		t.Fatalf("create skiffd server: %v", err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for local skiffd: %v", err)
+	}
+	serverCtx, cancel := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() {
+		done <- server.Serve(serverCtx, listener)
+	}()
+	harness := localSkiffdHarness{
+		url:    "http://" + listener.Addr().String(),
+		cancel: cancel,
+		done:   done,
+	}
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("local skiffd stopped with error: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Errorf("local skiffd did not stop")
+		}
+	})
+	waitForSkiffdReady(t, ctx, harness.url, traceID)
+	return harness
+}
+
+func waitForSkiffdReady(t *testing.T, ctx context.Context, baseURL, traceID string) {
+	t.Helper()
+	client := &http.Client{Timeout: time.Second}
+	deadline := time.Now().Add(10 * time.Second)
+	var lastBody string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, skiffdEndpoint(t, baseURL, "/readyz", url.Values{"format": {"json"}, "trace_id": {traceID}}), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := client.Do(req)
+		if err == nil {
+			body, readErr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			lastBody = string(body)
+			if readErr != nil {
+				lastErr = readErr
+			} else if resp.StatusCode == http.StatusOK {
+				return
+			} else {
+				lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
+			}
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("wait for local skiffd readiness: %v", ctx.Err())
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	t.Fatalf("local skiffd did not become ready: %v\n%s", lastErr, lastBody)
+}
+
+func runRollingCanaryDeployViaDirectCLI(t *testing.T, report *e2eReport, stateURI, service, env, image, releaseID, operationID, traceID string) localCanaryOutput {
+	t.Helper()
+	specPath := writeAppleCanarySpec(t, service, env, image)
+	signingSeed := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("C", ed25519.SeedSize)))
+	var canary localCanaryOutput
+	body := runSkiffCLI(t, report,
+		"deploy", specPath,
+		"--canary",
+		"--canary-stages", "10,50,100",
+		"--canary-bake", "0s",
+		"--canary-metric", "request_count",
+		"--canary-threshold", "1",
+		"--direct",
+		"--state", stateURI,
+		"--env", env,
+		"--provider", fakeprovider.Name,
+		"--region", "local",
+		"--release-id", releaseID,
+		"--operation-id", operationID,
+		"--key-id", "apple-canary",
+		"--signing-seed-base64", signingSeed,
+		"--format", "json",
+		"--trace-id", traceID,
+	)
+	decodeCLIJSON(t, body, &canary)
+	if !canary.OK || canary.Result.SagaID == "" || canary.Result.OperationID != operationID || canary.Result.Status != string(schema.SagaSucceeded) {
+		t.Fatalf("unexpected canary output: %+v\n%s", canary, string(body))
+	}
+	return canary
+}
+
+func writeAppleCanarySpec(t *testing.T, service, env, image string) string {
+	t.Helper()
+	image = strings.TrimPrefix(strings.TrimSpace(image), "oci://")
+	if _, ok := digestFromImageRef(image); !ok {
+		t.Fatalf("canary image %q is not digest pinned", image)
+	}
+	spec := fmt.Sprintf(`apiVersion: skiff.dev/v1alpha1
+kind: Service
+metadata:
+  name: %s
+  env: %s
+artifact:
+  type: oci
+  ref: %s
+runtime:
+  port: 80
+  command:
+    - %s
+  health:
+    path: /
+  logs:
+    enabled: true
+    format: json
+  metrics:
+    enabled: true
+    path: /metrics
+machine:
+  size: small
+scale:
+  min: 2
+  max: 2
+network:
+  ingress:
+    type: private
+`, strconv.Quote(service), strconv.Quote(env), strconv.Quote(image), strconv.Quote(containerReadyCommand))
+	path := filepath.Join(t.TempDir(), "canary-skiff.yaml")
+	if err := os.WriteFile(path, []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func assertSkiffdStatusViaAPI(t *testing.T, report *e2eReport, apiURL, stateURI, service, env, releaseID, operationID, traceID string) {
+	t.Helper()
+	var status appleStatusOutput
+	decodeCLIJSON(t, runSkiffCLI(t, report,
+		"status", service,
+		"--api",
+		"--api-url", apiURL,
+		"--fresh",
+		"--state", stateURI,
+		"--env", env,
+		"--provider", fakeprovider.Name,
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", traceID,
+	), &status)
+	if !status.OK || status.Status.Source != "api" || status.Status.StateBucket != stateURI {
+		t.Fatalf("unexpected skiffd status metadata: %+v", status)
+	}
+	if len(status.Status.Services) != 1 {
+		t.Fatalf("skiffd status services = %d, want 1: %+v", len(status.Status.Services), status.Status.Services)
+	}
+	got := status.Status.Services[0]
+	if got.Service != service || got.DesiredRelease != releaseID || got.StableRelease != releaseID || got.OperationID != operationID || got.OperationState != string(schema.OperationSucceeded) || got.Health != "nominal" {
+		t.Fatalf("unexpected skiffd service status: %+v", got)
+	}
+}
+
+func assertSkiffdDoctorViaAPI(t *testing.T, report *e2eReport, apiURL, stateURI, service, env, traceID string) {
+	t.Helper()
+	var doctor appleDoctorOutput
+	decodeCLIJSON(t, runSkiffCLI(t, report,
+		"doctor", service,
+		"--api",
+		"--api-url", apiURL,
+		"--fresh",
+		"--state", stateURI,
+		"--env", env,
+		"--provider", fakeprovider.Name,
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", traceID,
+	), &doctor)
+	if !doctor.OK || doctor.Doctor.Source != "api" || doctor.Doctor.Service != service || doctor.Doctor.Health != "nominal" {
+		t.Fatalf("unexpected skiffd doctor output: %+v", doctor)
+	}
+	for _, finding := range doctor.Doctor.Findings {
+		if finding.Severity == "critical" {
+			t.Fatalf("skiffd doctor returned critical finding: %+v", doctor.Doctor.Findings)
+		}
+	}
+}
+
+func assertSkiffdCanarySagaViaAPI(t *testing.T, ctx context.Context, apiURL, sagaID, traceID string) {
+	t.Helper()
+	var body struct {
+		OK    bool `json:"ok"`
+		Sagas []struct {
+			SagaID string `json:"saga_id"`
+			Status string `json:"status"`
+		} `json:"sagas"`
+	}
+	getSkiffdJSON(t, ctx, apiURL, "/v1/sagas", traceID, url.Values{
+		"format": {"json"},
+		"fresh":  {"true"},
+		"saga":   {sagaID},
+	}, &body)
+	if !body.OK || len(body.Sagas) != 1 || body.Sagas[0].SagaID != sagaID || body.Sagas[0].Status != string(schema.SagaSucceeded) {
+		t.Fatalf("unexpected skiffd saga response: %+v", body)
+	}
+}
+
+func assertSkiffdSagaEventStream(t *testing.T, ctx context.Context, apiURL, sagaID, traceID string) {
+	t.Helper()
+	endpoint := skiffdEndpoint(t, apiURL, "/v1/events/stream", url.Values{
+		"scope": {"saga"},
+		"saga":  {sagaID},
+		"limit": {"50"},
+		"once":  {"true"},
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("X-Skiff-Trace-Id", traceID)
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatalf("read skiffd event stream: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read skiffd event stream body: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("skiffd event stream HTTP %d:\n%s", resp.StatusCode, body)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: skiff.event") || !strings.Contains(text, `"subject":{"kind":"saga","name":`+strconv.Quote(sagaID)) || !strings.Contains(text, `"type":"saga.step.succeeded"`) {
+		t.Fatalf("skiffd event stream did not replay canary saga events:\n%s", text)
+	}
+}
+
+func getSkiffdJSON(t *testing.T, ctx context.Context, apiURL, path, traceID string, query url.Values, out any) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, skiffdEndpoint(t, apiURL, path, query), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Skiff-Trace-Id", traceID)
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatalf("skiffd GET %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read skiffd GET %s: %v", path, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		t.Fatalf("skiffd GET %s returned HTTP %d:\n%s", path, resp.StatusCode, body)
+	}
+	if err := json.Unmarshal(body, out); err != nil {
+		t.Fatalf("decode skiffd GET %s: %v\n%s", path, err, body)
+	}
+}
+
+func skiffdEndpoint(t *testing.T, baseURL, path string, query url.Values) string {
+	t.Helper()
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := parsed.ResolveReference(&url.URL{Path: path})
+	values := endpoint.Query()
+	for key, entries := range query {
+		for _, entry := range entries {
+			values.Add(key, entry)
+		}
+	}
+	endpoint.RawQuery = values.Encode()
+	return endpoint.String()
+}
+
+func assertRunnerEventCoverage(t *testing.T, events []runner.StateEvent, releases ...string) {
+	t.Helper()
+	if countRunnerState(events, runner.StateBooting, "") < len(releases) {
+		t.Fatalf("runner events missing boot coverage: %+v", eventStates(events))
+	}
+	if countRunnerState(events, runner.StateFetchingManifest, "") < len(releases) {
+		t.Fatalf("runner events missing manifest fetch coverage: %+v", eventStates(events))
+	}
+	required := []runner.State{
+		runner.StateVerifyingRelease,
+		runner.StatePreparingArtifact,
+		runner.StateRenderingConfig,
+		runner.StateStartingWorkload,
+		runner.StateWaitingForHealth,
+		runner.StateServing,
+	}
+	for _, releaseID := range releases {
+		for _, state := range required {
+			if countRunnerState(events, state, releaseID) == 0 {
+				t.Fatalf("runner events missing state %s for release %s: %+v", state, releaseID, events)
+			}
+		}
+	}
+}
+
+func countRunnerState(events []runner.StateEvent, state runner.State, releaseID string) int {
+	count := 0
+	for _, event := range events {
+		if event.State != state {
+			continue
+		}
+		if releaseID != "" && event.ReleaseID != releaseID {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func statusHasResource(resources []appleStatusResource, kind string) bool {
+	for _, resource := range resources {
+		if resource.Kind == kind || resource.LogicalKind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSchemaEvent(events []schema.Event, eventType, text string) bool {
+	for _, event := range events {
+		if event.Type != eventType {
+			continue
+		}
+		if text == "" || strings.Contains(event.Summary, text) {
+			return true
+		}
+		for _, fact := range event.Facts {
+			if strings.Contains(fact.Message, text) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasOperationSummary(operations []appleOperationSummary, operationID, status string) bool {
+	for _, operation := range operations {
+		if operation.OperationID == operationID && operation.Status == status && len(operation.ProviderOperations) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func envDefault(name, fallback string) string {
 	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
 		return value
 	}
 	return fallback
+}
+
+type appleStatusOutput struct {
+	OK     bool `json:"ok"`
+	Status struct {
+		Source      string `json:"source"`
+		StateBucket string `json:"state_bucket"`
+		Services    []struct {
+			Service        string                `json:"service"`
+			DesiredRelease string                `json:"desired_release"`
+			StableRelease  string                `json:"stable_release"`
+			OperationID    string                `json:"operation_id"`
+			OperationState string                `json:"operation_state"`
+			Health         string                `json:"health"`
+			Resources      []appleStatusResource `json:"resources"`
+		} `json:"services"`
+	} `json:"status"`
+}
+
+type appleStatusResource struct {
+	Kind        string `json:"kind"`
+	LogicalKind string `json:"logical_kind"`
+	ProviderID  string `json:"provider_id"`
+}
+
+type appleEventsOutput struct {
+	OK     bool `json:"ok"`
+	Result struct {
+		Source string         `json:"source"`
+		Events []schema.Event `json:"events"`
+	} `json:"result"`
+}
+
+type appleDoctorOutput struct {
+	OK     bool `json:"ok"`
+	Doctor struct {
+		Service            string `json:"service"`
+		Source             string `json:"source"`
+		Health             string `json:"health"`
+		Facts              []any  `json:"facts"`
+		RecommendedActions []any  `json:"recommended_actions"`
+		Findings           []struct {
+			Severity string `json:"severity"`
+			Code     string `json:"code"`
+		} `json:"findings"`
+	} `json:"doctor"`
+}
+
+type appleOpsListOutput struct {
+	OK         bool                    `json:"ok"`
+	Operations []appleOperationSummary `json:"operations"`
+}
+
+type appleOperationSummary struct {
+	OperationID        string                        `json:"operation_id"`
+	Status             string                        `json:"status"`
+	ProviderOperations []schema.ProviderOperationRef `json:"provider_operations"`
+}
+
+type appleOpsInspectOutput struct {
+	OK     bool `json:"ok"`
+	Result struct {
+		OperationID        string                        `json:"operation_id"`
+		Status             string                        `json:"status"`
+		Risk               string                        `json:"risk"`
+		Reversibility      string                        `json:"reversibility"`
+		ProviderOperations []schema.ProviderOperationRef `json:"provider_operations"`
+		StepResults        []schema.StepResultRef        `json:"step_results"`
+	} `json:"result"`
+}
+
+type localSkiffdHarness struct {
+	url    string
+	cancel context.CancelFunc
+	done   chan error
 }
 
 type rustFSHarness struct {
@@ -589,6 +1535,67 @@ func (h rustFSHarness) logs(ctx context.Context) string {
 		return err.Error()
 	}
 	return strings.TrimSpace(string(output))
+}
+
+type objectStateRunnerSink struct {
+	store objstore.ObjectStore
+	inner runner.EventSink
+	actor schema.Actor
+	seed  string
+}
+
+func (s *objectStateRunnerSink) EmitRunnerEvent(ctx context.Context, event runner.StateEvent) error {
+	if s.inner != nil {
+		if err := s.inner.EmitRunnerEvent(ctx, event); err != nil {
+			return err
+		}
+	}
+	if s.store == nil || event.Service == "" {
+		return nil
+	}
+	observedAt := fixedNow()
+	if event.Time != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, event.Time); err == nil {
+			observedAt = parsed
+		}
+	}
+	id := skiffevents.NewID(observedAt, s.seed+event.Service+event.Env+event.ReleaseID+string(event.State)+event.Summary)
+	key, err := paths.ServiceEvent(event.Service, id)
+	if err != nil {
+		return err
+	}
+	summary := "workload state " + string(event.State)
+	if event.ReleaseID != "" {
+		summary += " for release " + event.ReleaseID
+	}
+	stateEvent := schema.Event{
+		SchemaVersion: schema.Version,
+		ID:            id,
+		Time:          canonical.Time(observedAt),
+		TraceID:       event.TraceID,
+		Subject:       schema.Target{Kind: "service", Name: event.Service},
+		Type:          "workload.state",
+		Severity:      "info",
+		Actor:         &s.actor,
+		Summary:       summary,
+		Facts: []schema.Fact{
+			{Type: "state", Message: string(event.State)},
+			{Type: "health", Message: string(event.Health)},
+			{Type: "unit", Message: event.UnitName},
+		},
+	}
+	if event.ReleaseID != "" {
+		stateEvent.Facts = append(stateEvent.Facts, schema.Fact{Type: "release_id", Message: event.ReleaseID})
+	}
+	if event.Identity != nil && event.Identity.InstanceID != "" {
+		stateEvent.Facts = append(stateEvent.Facts, schema.Fact{Type: "instance_id", Message: event.Identity.InstanceID})
+	}
+	body, err := canonical.Marshal(stateEvent)
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Create(ctx, key, body, objstore.PutOptions{ContentType: canonical.ContentType})
+	return err
 }
 
 type appleContainerPreparer struct {

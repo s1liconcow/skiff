@@ -7,7 +7,7 @@ COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X '$(MODULE)/internal/buildinfo.Version=$(VERSION)' -X '$(MODULE)/internal/buildinfo.Commit=$(COMMIT)' -X '$(MODULE)/internal/buildinfo.BuildDate=$(BUILD_DATE)'
 
-.PHONY: build test e2e-local e2e-apple-container e2e-aws vet fmt lint generate smoke clean
+.PHONY: build test e2e-local e2e-apple-container e2e-aws codex-apple-sandbox vet fmt lint generate smoke clean
 
 build:
 	mkdir -p bin
@@ -27,6 +27,9 @@ e2e-apple-container:
 
 e2e-aws:
 	SKIFF_AWS_E2E=1 $(GO_TEST_ENV) $(GO) test ./tests/e2e -run TestAWSE2E -count=1 -v
+
+codex-apple-sandbox:
+	./scripts/codex-apple-sandbox.sh
 
 vet:
 	$(GO) vet ./...

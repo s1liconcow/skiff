@@ -27,17 +27,17 @@ SKIFF_AWS_E2E=1 SKIFF_AWS_E2E_LIVE_APPLY=1 SKIFF_AWS_E2E_STATE=s3://skiff-e2e-st
 | compile | covered | not_applicable | not_applicable | `TestLocalCLIEndToEndCapabilityMatrix` runs `skiff compile`. |
 | plan | covered | not_applicable | gated | Local and AWS smoke use AWS lowering without credentials or mutation. |
 | explain | covered | not_applicable | gated | Local and AWS smoke explain visible AWS primitives. |
-| release signing and verification | covered | covered | gated | Local verifies release/runtime manifests; Apple publishes signed runtime manifests into RustFS. |
+| release signing and verification | covered | covered | gated | Local verifies release/runtime manifests; Apple publishes signed runtime manifests into RustFS and verifies the fetched release through the CLI. |
 | deploy | covered | optional | gated | Local deploys twice through the fake provider; Apple proves runner-side rollout. |
 | rollout watch | covered | optional | gated | Local starts and watches provider rollout IDs; Apple rolls to a second release. |
-| status | covered | not_applicable | gated | Local reads direct-mode status from object state. |
-| events | covered | optional | gated | Local reads service events and writes report object paths. |
+| status | covered | optional | gated | Local reads direct-mode status from object state; Apple reads direct status and local `skiffd` API status from RustFS-backed S3 state. |
+| events | covered | optional | gated | Local reads service events and writes report object paths; Apple writes runner, operation, and saga events into RustFS and replays canary saga events through local `skiffd`. |
 | logs | covered | not_applicable | gated | Local queries fake-provider logs through the same CLI provider factory used by direct mode. |
 | metrics | covered | not_applicable | gated | Local queries fake-provider metrics through the same CLI provider factory used by direct mode. |
-| doctor | covered | not_applicable | gated | Local runs direct-mode doctor and rejects critical findings. |
-| canary | covered | not_applicable | gated | Local runs a one-stage canary saga. |
+| doctor | covered | optional | gated | Local runs direct-mode doctor and rejects critical findings; Apple runs direct and local `skiffd` API doctor against RustFS-backed status, resource, and event objects. |
+| canary | covered | optional | gated | Local runs a one-stage canary saga; Apple starts a three-stage rolling canary in direct mode and monitors it through local `skiffd`. |
 | rollback | covered | not_applicable | gated | Local rolls back to the previous stable release and verifies service control. |
-| direct mode | covered | covered | gated | Local uses `--direct`; runner and Apple paths do not depend on `skiffd`. |
+| direct mode | covered | covered | gated | Local uses `--direct`; Apple uses direct mode against RustFS for runner recovery checks and to start the canary saga. |
 | drift | covered | not_applicable | gated | Local runs drift against persisted fake-provider resource records. |
 | debug collect | covered | not_implemented | gated | Local direct mode collects a redacted bundle through the fake provider and writes durable audit/event records. AWS remains gated behind a live SSM client adapter. |
 | cost advisor | covered | not_applicable | gated | Local runs `skiff cost explain` with supplied metrics. AWS remains gated until provider metrics and pricing adapters exist. |
@@ -56,7 +56,7 @@ Set `SKIFF_E2E_REPORT_DIR` to collect JSON reports. Reports include trace ID, op
 - `SKIFF_E2E_CADDY_NEXT_IMAGE` optionally rolls the second release to a different digest-pinned Caddy image.
 - `SKIFF_E2E_RUSTFS_IMAGE` defaults to `docker.io/rustfs/rustfs:latest`.
 
-The test creates unique Apple container names and RustFS buckets and registers cleanup handlers for containers and volumes.
+The test creates unique Apple container names and RustFS buckets and registers cleanup handlers for containers and volumes. It also writes operation, resource, event, saga, and audit objects into RustFS so direct-mode status, events, doctor, ops inspection, release verification, local `skiffd` API reads, and canary event-stream replay run against S3-compatible object state.
 
 ## AWS Environment
 

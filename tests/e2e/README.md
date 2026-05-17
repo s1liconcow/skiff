@@ -21,8 +21,13 @@ recommended next commands.
 The Apple container/RustFS/Caddy rollout test is optional because it starts
 local Linux VMs and pulls OCI images. It exercises RustFS as the S3-compatible
 object store, publishes signed release objects into that store, deploys Caddy
-from a digest-pinned OCI image through the runner lifecycle, then CAS-updates
-service control and rolls to a second release.
+from a digest-pinned OCI image through the runner lifecycle, writes operation,
+resource, event, and audit objects, validates create-only release objects and
+CAS-controlled service control, runs direct-mode status/events/doctor/ops
+against RustFS, verifies the fetched release through the CLI, rolls to a second
+release, starts a local `skiffd` backed by the same RustFS object state, then
+starts a three-stage rolling canary in direct mode and monitors the resulting
+service, saga, doctor, and event-stream views through `skiffd`.
 
 ```bash
 make e2e-apple-container

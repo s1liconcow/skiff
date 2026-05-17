@@ -1,6 +1,8 @@
 package e2e_test
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,17 +28,15 @@ func TestAWSE2ESmokeGatesAndReport(t *testing.T) {
 		t.Skip("SKIFF_AWS_E2E_STATE, SKIFF_AWS_E2E_REGION or AWS_REGION, and SKIFF_AWS_E2E_PREFIX are required")
 	}
 
-	const (
-		service = "http-hello"
-		env     = "prod"
-		traceID = "tr_aws_e2e"
-	)
+	service := awsE2EServiceName(prefix)
+	const env = "prod"
+	traceID := "tr_aws_e2e_" + awsE2EID(prefix)
 	report := newE2EReport(t, "aws", service, env, traceID)
 	report.CleanupStatus = "not started"
 	report.fact("aws_gate", "AWS e2e explicitly enabled with isolated prefix "+prefix)
 	defer writeE2EReport(t, report)
 
-	specPath := filepath.Join("..", "..", "examples", "service", "http-hello", "skiff.yaml")
+	specPath := awsE2ESpec(t, filepath.Join("..", "..", "examples", "service", "http-hello", "skiff.yaml"), service)
 	var plan localPlanOutput
 	decodeCLIJSON(t, runSkiffCLI(t, report, "plan", specPath, "--provider", "aws", "--region", region, "--state", stateURI, "--format", "json", "--trace-id", traceID), &plan)
 	if !plan.OK || len(plan.Plan.Resources) == 0 {
@@ -62,8 +62,51 @@ func TestAWSE2ESmokeGatesAndReport(t *testing.T) {
 		t.Skip("AWS live apply requires " + strings.Join(missing, ", "))
 	}
 	report.fact("aws_live_apply_preflight", "AWS live-shape inputs are present")
-	report.fact("aws_live_apply", "requested but real AWS apply adapters are not linked into this provider build")
-	t.Skip("real AWS apply/discovery adapters are not available in this build; tracked as an explicit matrix gap")
+	report.CleanupStatus = "live AWS resources require explicit cleanup by tags skiff.dev/service=" + service + " skiff.dev/env=" + env
+	report.RecommendedNextCommands = append(report.RecommendedNextCommands,
+		"aws resourcegroupstaggingapi get-resources --tag-filters Key=skiff.dev/service,Values="+service+" Key=skiff.dev/env,Values="+env,
+		"skiff status "+service+" --direct --state "+stateURI+" --env "+env+" --provider aws --region "+region+" --aws-live-apply --format json --trace-id "+traceID,
+	)
+
+	signingSeed := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("A", ed25519.SeedSize)))
+	var deployed localDeployOutput
+	decodeCLIJSON(t, runSkiffCLI(t, report,
+		"deploy", specPath,
+		"--direct", "--state", stateURI, "--env", env, "--provider", "aws", "--region", region,
+		"--aws-live-apply",
+		"--aws-vpc-id", strings.TrimSpace(os.Getenv("SKIFF_AWS_VPC_ID")),
+		"--aws-subnet-ids", strings.TrimSpace(os.Getenv("SKIFF_AWS_SUBNET_IDS")),
+		"--aws-ami-id", strings.TrimSpace(os.Getenv("SKIFF_AWS_AMI_ID")),
+		"--release-id", "rel-"+awsE2EID(prefix),
+		"--operation-id", "op-"+awsE2EID(prefix),
+		"--key-id", "aws-e2e",
+		"--signing-seed-base64", signingSeed,
+		"--format", "json",
+		"--trace-id", traceID,
+	), &deployed)
+	if !deployed.OK || !deployed.Result.OK || deployed.Result.OperationID == "" {
+		t.Fatalf("unexpected AWS live deploy output: %+v", deployed)
+	}
+	report.addOperationID(deployed.Result.OperationID)
+	for _, resource := range deployed.Result.Plan.Resources {
+		report.addProviderID(resource.ProviderID)
+	}
+
+	var status awsLiveStatusOutput
+	decodeCLIJSON(t, runSkiffCLI(t, report,
+		"status", service,
+		"--direct", "--state", stateURI, "--env", env, "--provider", "aws", "--region", region,
+		"--aws-live-apply",
+		"--format", "json",
+		"--trace-id", traceID,
+	), &status)
+	if !status.OK || len(status.Status.Services) == 0 {
+		t.Fatalf("unexpected AWS live status output: %+v", status)
+	}
+	for _, resource := range status.Status.Services[0].Resources {
+		report.addProviderID(resource.ProviderID)
+	}
+	report.fact("aws_live_apply", "live AWS apply completed and direct status observed resource records")
 }
 
 func missingAWSLiveShapeEnv() []string {
@@ -79,4 +122,69 @@ func missingAWSLiveShapeEnv() []string {
 		}
 	}
 	return missing
+}
+
+type awsLiveStatusOutput struct {
+	OK     bool `json:"ok"`
+	Status struct {
+		Services []struct {
+			Service   string `json:"service"`
+			Resources []struct {
+				ProviderID string `json:"provider_id"`
+			} `json:"resources"`
+		} `json:"services"`
+	} `json:"status"`
+}
+
+func awsE2ESpec(t *testing.T, basePath, service string) string {
+	t.Helper()
+	body, err := os.ReadFile(basePath)
+	if err != nil {
+		t.Fatalf("read AWS e2e spec: %v", err)
+	}
+	rendered := strings.Replace(string(body), "  name: http-hello\n", "  name: "+service+"\n", 1)
+	if rendered == string(body) {
+		t.Fatal("AWS e2e spec did not contain expected service name")
+	}
+	path := filepath.Join(t.TempDir(), "skiff.yaml")
+	if err := os.WriteFile(path, []byte(rendered), 0o644); err != nil {
+		t.Fatalf("write AWS e2e spec: %v", err)
+	}
+	return path
+}
+
+func awsE2EServiceName(prefix string) string {
+	id := awsE2EID(prefix)
+	if id == "" {
+		id = "live"
+	}
+	return id + "-http-hello"
+}
+
+func awsE2EID(value string) string {
+	var b strings.Builder
+	lastHyphen := false
+	for _, r := range strings.ToLower(strings.TrimSpace(value)) {
+		allowed := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if allowed {
+			b.WriteRune(r)
+			lastHyphen = false
+			continue
+		}
+		if !lastHyphen {
+			b.WriteByte('-')
+			lastHyphen = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "aws-e2e"
+	}
+	if len(out) > 24 {
+		out = strings.Trim(out[:24], "-")
+	}
+	if out == "" {
+		return "aws-e2e"
+	}
+	return out
 }

@@ -70,6 +70,13 @@ func NewFromConfig(cfg config.Config, opts ...Option) (*Provider, error) {
 			LoadBalancerSecurityGroupRef: cfg.AWSLoadBalancerSecurityGroupRef,
 		},
 	}
+	if cfg.AWSLiveApply {
+		clients, err := NewSDKClients(context.Background(), awsCfg)
+		if err != nil {
+			return nil, err
+		}
+		opts = append([]Option{WithClients(clients)}, opts...)
+	}
 	return New(awsCfg, opts...)
 }
 
