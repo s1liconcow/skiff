@@ -289,6 +289,263 @@
     .warn { color: var(--warn); }
     .danger { color: var(--danger); }
 
+    .hero-motion-root {
+      isolation: isolate;
+      min-height: 548px;
+      display: grid;
+    }
+    .hero-motion-root::after {
+      content: "";
+      position: absolute;
+      inset: auto -26% -18% 12%;
+      height: 170px;
+      background: linear-gradient(90deg, rgba(125,227,255,0.12), rgba(154,240,194,0.12), rgba(255,210,125,0.08));
+      filter: blur(34px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .hero-motion-app {
+      position: relative;
+      z-index: 1;
+      min-height: 508px;
+      display: grid;
+      grid-template-rows: auto 1fr auto auto;
+      gap: 14px;
+    }
+    .hero-motion-topline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .hero-motion-command {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 36px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(125,227,255,0.22);
+      background: rgba(3, 12, 20, 0.62);
+      color: #dff7ff;
+      font-family: var(--mono);
+      font-size: .78rem;
+      white-space: nowrap;
+    }
+    .hero-motion-command span:first-child { color: var(--brand-2); }
+    .hero-stage-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 11px;
+      border-radius: 999px;
+      border: 1px solid rgba(154,240,194,0.24);
+      background: rgba(154,240,194,0.08);
+      color: #ddfff0;
+      font-size: .78rem;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+    .hero-stage-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--ok);
+      box-shadow: 0 0 0 7px rgba(154,240,194,0.12);
+    }
+    .hero-flow-canvas {
+      position: relative;
+      min-height: 342px;
+      border-radius: 24px;
+      border: 1px solid rgba(255,255,255,0.11);
+      background:
+        linear-gradient(rgba(255,255,255,.038) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px),
+        radial-gradient(circle at 52% 45%, rgba(154,240,194,0.11), transparent 13rem),
+        rgba(4, 15, 25, 0.62);
+      background-size: 32px 32px, 32px 32px, auto, auto;
+      overflow: hidden;
+    }
+    .hero-flow-lines {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      opacity: .86;
+    }
+    .hero-flow-lines path {
+      fill: none;
+      stroke: rgba(125,227,255,0.48);
+      stroke-width: .75;
+      stroke-linecap: round;
+      stroke-dasharray: 5 5;
+      vector-effect: non-scaling-stroke;
+    }
+    .hero-node {
+      position: absolute;
+      z-index: 2;
+      width: 118px;
+      min-height: 78px;
+      padding: 9px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.11);
+      background: rgba(5, 17, 28, 0.82);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+    }
+    .hero-node.active {
+      border-color: rgba(125,227,255,0.42);
+      background: rgba(125,227,255,0.10);
+      box-shadow: 0 12px 34px rgba(125,227,255,0.10), inset 0 1px 0 rgba(255,255,255,0.08);
+    }
+    .hero-node.intent { left: 16px; top: 78px; }
+    .hero-node.bucket {
+      left: 50%;
+      top: 50%;
+      width: 120px;
+      min-height: 126px;
+      transform: translate(-50%, -50%);
+      display: grid;
+      align-content: center;
+      text-align: center;
+      border-color: rgba(154,240,194,0.24);
+      background:
+        radial-gradient(circle at 50% 42%, rgba(154,240,194,0.20), transparent 4.5rem),
+        rgba(3, 13, 21, 0.88);
+    }
+    .hero-node.skiffd { right: 16px; top: 18px; }
+    .hero-node.cloud { right: 16px; bottom: 48px; }
+    .hero-node.recovery { left: 18px; bottom: 22px; width: 136px; }
+    .hero-node-kicker {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted-2);
+      font-family: var(--mono);
+      font-size: .62rem;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .hero-node-title {
+      display: block;
+      color: #f2fbff;
+      font-size: .8rem;
+      font-weight: 850;
+      line-height: 1.15;
+      letter-spacing: -0.01em;
+    }
+    .hero-node-meta {
+      display: block;
+      margin-top: 5px;
+      color: #aac4d8;
+      font-size: .65rem;
+      line-height: 1.32;
+    }
+    .hero-bucket-rings {
+      position: absolute;
+      inset: 10px;
+      pointer-events: none;
+    }
+    .hero-bucket-rings span {
+      position: absolute;
+      inset: 4px;
+      border-radius: 999px;
+      border: 1px solid rgba(154,240,194,0.20);
+    }
+    .hero-bucket-rings span:nth-child(2) {
+      inset: 20px;
+      border-color: rgba(125,227,255,0.20);
+    }
+    .hero-ledger-mini {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 5px;
+      margin-top: 10px;
+    }
+    .hero-ledger-mini span {
+      min-height: 22px;
+      display: grid;
+      place-items: center;
+      border-radius: 9px;
+      background: rgba(255,255,255,0.06);
+      color: #dff7ff;
+      font-family: var(--mono);
+      font-size: .56rem;
+    }
+    .hero-cloud-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 5px;
+      margin-top: 9px;
+    }
+    .hero-cloud-grid span {
+      min-height: 22px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.055);
+      color: #cfe4f2;
+      font-family: var(--mono);
+      font-size: .56rem;
+    }
+    .hero-packet {
+      position: absolute;
+      z-index: 1;
+      width: 15px;
+      height: 15px;
+      border-radius: 999px;
+      background: #fff8c9;
+      box-shadow: 0 0 0 7px rgba(255,210,125,0.12), 0 0 24px rgba(255,210,125,0.72);
+      pointer-events: none;
+    }
+    .hero-live-note {
+      min-height: 72px;
+      padding: 13px;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.11);
+      background: rgba(5, 17, 28, 0.64);
+    }
+    .hero-live-note b {
+      display: block;
+      margin-bottom: 4px;
+      color: #f4fbff;
+      font-size: .94rem;
+      line-height: 1.18;
+    }
+    .hero-live-note span {
+      color: var(--muted);
+      font-size: .82rem;
+      line-height: 1.4;
+    }
+    .hero-value-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .hero-value {
+      min-height: 62px;
+      padding: 10px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.055);
+    }
+    .hero-value.active {
+      border-color: rgba(154,240,194,0.30);
+      background: rgba(154,240,194,0.085);
+    }
+    .hero-value b {
+      display: block;
+      margin-bottom: 2px;
+      font-size: .78rem;
+    }
+    .hero-value span {
+      display: block;
+      color: var(--muted-2);
+      font-size: .68rem;
+      line-height: 1.28;
+    }
+
     section { padding: 78px 0; position: relative; }
     .section-head { display: flex; align-items: end; justify-content: space-between; gap: 28px; margin-bottom: 30px; }
     .section-head p { max-width: 610px; font-size: 1.04rem; }
@@ -980,6 +1237,9 @@
       .deploy-column { min-height: auto; }
       .deploy-timeline { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .deploy-packet { display: none; }
+      .hero-motion-root { min-height: 520px; }
+      .hero-node.intent { left: 22px; }
+      .hero-node.recovery { left: 22px; }
       .saga-node:nth-child(2)::after { display: none; }
       .tui-body { grid-template-columns: 1fr; }
       .tui-sidebar { border-right: none; border-bottom: 1px solid rgba(255,255,255,0.08); }
@@ -999,6 +1259,31 @@
       .deploy-command, .deploy-status-pill { width: 100%; justify-content: center; white-space: normal; text-align: center; }
       .ledger-grid, .cloud-resource-grid { grid-template-columns: 1fr; }
       .deploy-timeline { grid-template-columns: 1fr; }
+      .hero-motion-root { min-height: auto; }
+      .hero-motion-app { min-height: auto; }
+      .hero-motion-topline { align-items: stretch; }
+      .hero-motion-command, .hero-stage-pill { width: 100%; justify-content: center; white-space: normal; text-align: center; }
+      .hero-flow-canvas {
+        min-height: auto;
+        display: grid;
+        gap: 10px;
+        padding: 14px;
+      }
+      .hero-flow-lines, .hero-packet { display: none; }
+      .hero-node, .hero-node.intent, .hero-node.bucket, .hero-node.skiffd, .hero-node.cloud, .hero-node.recovery {
+        position: relative;
+        inset: auto;
+        left: auto;
+        right: auto;
+        top: auto;
+        bottom: auto;
+        transform: none;
+        width: auto;
+        min-height: auto;
+      }
+      .hero-node.bucket { text-align: left; }
+      .hero-bucket-rings { display: none; }
+      .hero-value-row { grid-template-columns: 1fr; }
       .hero-actions .btn { width: 100%; }
       pre { font-size: .78rem; }
     }
@@ -1040,7 +1325,7 @@
           <div class="eyebrow"><span class="pulse"></span> Clusterless operations for native cloud teams</div>
           <h1><span class="gradient-text">The VM is the pod.</span><br/>The cloud is the control plane.</h1>
           <p class="hero-subtitle">
-            Skiff gives teams Kubernetes-class deployment and operational power without Kubernetes-class cost or complexity. Define services as IaC, compile them into native cloud primitives, and with object storage as the only dependency and immutable source of truth. You get Skiff-managed ops like rollouts or restores, persisted observability, and agentic remediation without the need for managed control planes, overlay networks, hidden controller state machines, Kubernetes/cloud impedance mismatch, or thousands of lines of YAML.
+            Skiff gives teams Kubernetes-class operational-leverage without Kubernetes-class cost or complexity.  Skiff provides a simple way to define and compile your service definition into cloud-native primitives, managed ops like canary rollouts or database restores, automatic observability via metrics and logs, and a harness for agentic infra remediation.   No need for a managed control planes, overlay networks, hidden controller state machines, kubernetes/cloud impedance mismatch, or thousands of lines of YAML.
           </p>
           <div class="hero-actions">
             <a class="btn primary" href="#architecture">See how it works</a>
@@ -1054,37 +1339,57 @@
           </div>
         </div>
 
-        <aside class="hero-card" aria-label="Skiff primitive mapping">
-          <div class="map">
-            <div class="map-row">
-              <div><div class="map-label">Pod</div><div class="map-sub">workload replica</div></div>
-              <div class="arrow">→</div>
-              <div><div class="map-label">Cloud VM</div><div class="map-sub">one app identity</div></div>
+        <aside id="hero-motion-root" class="hero-card hero-motion-root" aria-label="Skiff customer journey animation">
+          <div class="hero-motion-app hero-motion-fallback">
+            <div class="hero-motion-topline">
+              <div class="hero-motion-command"><span>$</span><span>skiff service up payments-api</span></div>
+              <div class="hero-stage-pill"><span class="hero-stage-dot"></span> service live</div>
             </div>
-            <div class="map-row">
-              <div><div class="map-label">Deployment</div><div class="map-sub">rollout shape</div></div>
-              <div class="arrow">→</div>
-              <div><div class="map-label">Auto Scaling Group</div><div class="map-sub">cloud-native capacity</div></div>
+            <div class="hero-flow-canvas">
+              <svg class="hero-flow-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M21 33 C34 35 38 50 49 50" />
+                <path d="M51 49 C64 30 72 21 83 19" />
+                <path d="M56 55 C67 68 73 74 83 75" />
+                <path d="M46 59 C36 75 29 81 19 82" />
+              </svg>
+              <div class="hero-node intent active">
+                <span class="hero-node-kicker">bring up</span>
+                <span class="hero-node-title">service live</span>
+                <span class="hero-node-meta">deploy, route, health check</span>
+              </div>
+              <div class="hero-node bucket active">
+                <div class="hero-bucket-rings"><span></span><span></span></div>
+                <span class="hero-node-kicker">canary gate</span>
+                <span class="hero-node-title">metrics decide</span>
+                <span class="hero-node-meta">advance, pause, or repair</span>
+                <div class="hero-ledger-mini"><span>p95</span><span>error</span><span>health</span><span>slo</span></div>
+              </div>
+              <div class="hero-node skiffd">
+                <span class="hero-node-kicker">inspect</span>
+                <span class="hero-node-title">status + logs</span>
+                <span class="hero-node-meta">fresh health, target errors</span>
+              </div>
+              <div class="hero-node cloud active">
+                <span class="hero-node-kicker">traffic</span>
+                <span class="hero-node-title">safe rollout</span>
+                <div class="hero-cloud-grid"><span>5%</span><span>25%</span><span>50%</span><span>100%</span></div>
+              </div>
+              <div class="hero-node recovery">
+                <span class="hero-node-kicker">agent</span>
+                <span class="hero-node-title">auto remediate</span>
+                <span class="hero-node-meta">pause, diagnose, fix safe steps</span>
+              </div>
             </div>
-            <div class="map-row">
-              <div><div class="map-label">Service</div><div class="map-sub">routing</div></div>
-              <div class="arrow">→</div>
-              <div><div class="map-label">Target Group</div><div class="map-sub">load balancer health</div></div>
+            <div class="hero-live-note">
+              <b>Bring a service up without building a platform first.</b>
+              <span>Skiff turns the common operator journey into one explicit flow: deploy, watch, inspect, and repair.</span>
             </div>
-            <div class="map-row">
-              <div><div class="map-label">Operator</div><div class="map-sub">runbook automation</div></div>
-              <div class="arrow">→</div>
-              <div><div class="map-label">Saga</div><div class="map-sub">explicit operation graph</div></div>
+            <div class="hero-value-row">
+              <div class="hero-value active"><b>Service up</b><span>route, identity, logs, health</span></div>
+              <div class="hero-value active"><b>Canary gated</b><span>metrics decide promotion</span></div>
+              <div class="hero-value"><b>Status + logs</b><span>one command to evidence</span></div>
+              <div class="hero-value"><b>Auto repair</b><span>agent runs low-risk fixes</span></div>
             </div>
-          </div>
-          <div class="terminal">
-            <div class="term-top"><span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span><span class="term-name">skiff</span></div>
-            <pre><span class="cmd">$ skiff deploy</span>
-<span class="ok">✓</span> validated spec and policy
-<span class="ok">✓</span> published signed release
-<span class="ok">✓</span> acquired service lease via CAS
-<span class="ok">✓</span> started canary saga
-<span class="warn">•</span> waiting at 10% for metrics gate</pre>
           </div>
         </aside>
       </div>
@@ -1495,6 +1800,207 @@
   <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/framer-motion@10.18.0/dist/framer-motion.js"></script>
+  <script>
+    (() => {
+      const root = document.getElementById('hero-motion-root');
+      const MotionLib = window.Motion || window.FramerMotion || window.framerMotion;
+      if (!root || !window.React || !window.ReactDOM || !MotionLib) return;
+
+      const { useEffect, useState } = React;
+      const { AnimatePresence, motion } = MotionLib;
+      const h = React.createElement;
+
+      const stages = [
+        {
+          key: 'service-up',
+          command: 'skiff service up payments-api',
+          label: 'service live',
+          title: 'Bring up a production service',
+          detail: 'Skiff creates the service shape, wires routing and identity, starts VMs, and waits for health.',
+          nodes: ['intent'],
+          values: ['service'],
+          packet: { from: { left: '18%', top: '34%' }, to: { left: '48%', top: '50%' } }
+        },
+        {
+          key: 'canary',
+          command: 'skiff canary payments-api --gate p95,error-rate',
+          label: 'metric gate',
+          title: 'Promote only when the canary earns it',
+          detail: 'Traffic advances through 5%, 25%, 50%, and 100% only while latency, errors, and health stay inside policy.',
+          nodes: ['intent', 'bucket', 'cloud'],
+          values: ['service', 'canary'],
+          packet: { from: { left: '26%', top: '34%' }, to: { left: '50%', top: '50%' } }
+        },
+        {
+          key: 'status',
+          command: 'skiff status payments-api --fresh',
+          label: 'live status',
+          title: 'Pull status before guessing',
+          detail: 'Operators get rollout state, target health, current traffic split, recent findings, and recommended next commands.',
+          nodes: ['bucket', 'skiffd'],
+          values: ['canary', 'inspect'],
+          packet: { from: { left: '52%', top: '48%' }, to: { left: '82%', top: '20%' } }
+        },
+        {
+          key: 'logs',
+          command: 'skiff logs payments-api --since 10m --errors',
+          label: 'logs linked',
+          title: 'Jump from status to the logs that matter',
+          detail: 'Skiff scopes logs to the rollout, unhealthy targets, and current trace so diagnosis starts at the failure.',
+          nodes: ['skiffd', 'cloud'],
+          values: ['inspect'],
+          packet: { from: { left: '54%', top: '53%' }, to: { left: '84%', top: '75%' } }
+        },
+        {
+          key: 'agent',
+          command: 'skiff agent remediate payments-api --auto low-risk',
+          label: 'agent repair',
+          title: 'Let an agent handle safe remediation',
+          detail: 'The agent reads structured facts, pauses risky rollout movement, applies approved low-risk fixes, and reports the exact action trail.',
+          nodes: ['bucket', 'skiffd', 'recovery'],
+          values: ['inspect', 'agent'],
+          packet: { from: { left: '48%', top: '56%' }, to: { left: '20%', top: '82%' } }
+        }
+      ];
+
+      const values = [
+        { key: 'service', title: 'Service up', detail: 'route, identity, logs, health' },
+        { key: 'canary', title: 'Canary gated', detail: 'metrics decide promotion' },
+        { key: 'inspect', title: 'Status + logs', detail: 'one command to evidence' },
+        { key: 'agent', title: 'Auto repair', detail: 'agent runs low-risk fixes' }
+      ];
+
+      function HeroMotionApp() {
+        const [active, setActive] = useState(0);
+        const stage = stages[active];
+        const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const isActive = (node) => stage.nodes.includes(node);
+
+        useEffect(() => {
+          if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
+          const id = window.setInterval(() => {
+            setActive((value) => (value + 1) % stages.length);
+          }, 2300);
+          return () => window.clearInterval(id);
+        }, []);
+
+        const renderNode = (id, kicker, title, meta, children) =>
+          h(motion.div, {
+            className: `hero-node ${id} ${isActive(id) ? 'active' : ''}`,
+            key: id,
+            animate: { y: isActive(id) ? -3 : 0, opacity: isActive(id) ? 1 : .74 },
+            transition: { duration: .32 }
+          }, [
+            h('span', { className: 'hero-node-kicker', key: 'kicker' }, kicker),
+            h('span', { className: 'hero-node-title', key: 'title' }, title),
+            meta ? h('span', { className: 'hero-node-meta', key: 'meta' }, meta) : null,
+            children
+          ]);
+
+        return h('div', { className: 'hero-motion-app' }, [
+          h('div', { className: 'hero-motion-topline', key: 'topline' }, [
+            h(AnimatePresence, { mode: 'wait', key: 'command-presence' },
+              h(motion.div, {
+                className: 'hero-motion-command',
+                key: stage.command,
+                initial: { opacity: .82, y: -5 },
+                animate: { opacity: 1, y: 0 },
+                exit: { opacity: .82, y: 5 },
+                transition: { duration: .25 }
+              }, [h('span', { key: 'prompt' }, '$'), h('span', { key: 'command' }, stage.command)])
+            ),
+            h(AnimatePresence, { mode: 'wait', key: 'label-presence' },
+              h(motion.div, {
+                className: 'hero-stage-pill',
+                key: stage.label,
+                initial: { opacity: .82, y: -5 },
+                animate: { opacity: 1, y: 0 },
+                exit: { opacity: .82, y: 5 },
+                transition: { duration: .25 }
+              }, [h('span', { className: 'hero-stage-dot', key: 'dot' }), stage.label])
+            )
+          ]),
+          h('div', { className: 'hero-flow-canvas', key: 'canvas' }, [
+            h('svg', { className: 'hero-flow-lines', viewBox: '0 0 100 100', preserveAspectRatio: 'none', 'aria-hidden': 'true', key: 'lines' }, [
+              h(motion.path, { d: 'M21 33 C34 35 38 50 49 50', key: 'intent-line', animate: { strokeDashoffset: reduceMotion ? 0 : [0, -20], opacity: isActive('intent') || isActive('bucket') ? 1 : .55 }, transition: { strokeDashoffset: { duration: 2.2, repeat: reduceMotion ? 0 : Infinity, ease: 'linear' }, opacity: { duration: .25 } } }),
+              h(motion.path, { d: 'M51 49 C64 30 72 21 83 19', key: 'skiffd-line', animate: { strokeDashoffset: reduceMotion ? 0 : [0, -20], opacity: isActive('skiffd') ? 1 : .48 }, transition: { strokeDashoffset: { duration: 2.2, repeat: reduceMotion ? 0 : Infinity, ease: 'linear' }, opacity: { duration: .25 } } }),
+              h(motion.path, { d: 'M56 55 C67 68 73 74 83 75', key: 'cloud-line', animate: { strokeDashoffset: reduceMotion ? 0 : [0, -20], opacity: isActive('cloud') ? 1 : .48 }, transition: { strokeDashoffset: { duration: 2.2, repeat: reduceMotion ? 0 : Infinity, ease: 'linear' }, opacity: { duration: .25 } } }),
+              h(motion.path, { d: 'M46 59 C36 75 29 81 19 82', key: 'recovery-line', animate: { strokeDashoffset: reduceMotion ? 0 : [0, -20], opacity: isActive('recovery') ? 1 : .48 }, transition: { strokeDashoffset: { duration: 2.2, repeat: reduceMotion ? 0 : Infinity, ease: 'linear' }, opacity: { duration: .25 } } })
+            ]),
+            h(AnimatePresence, { mode: 'wait', key: 'packet-presence' },
+              h(motion.div, {
+                className: 'hero-packet',
+                key: stage.key,
+                initial: { ...stage.packet.from, opacity: 0, scale: .72 },
+                animate: { ...stage.packet.to, opacity: reduceMotion ? .72 : [0, 1, 0], scale: reduceMotion ? .9 : [.72, 1.18, .8] },
+                exit: { opacity: 0 },
+                transition: { duration: reduceMotion ? .2 : 1.2, ease: 'easeInOut' }
+              })
+            ),
+            renderNode('intent', 'bring up', 'service live', 'deploy, route, health check'),
+            h(motion.div, {
+              className: `hero-node bucket ${isActive('bucket') ? 'active' : ''}`,
+              key: 'bucket',
+              animate: { opacity: isActive('bucket') ? 1 : .82 },
+              transition: { duration: .32 }
+            }, [
+              h('div', { className: 'hero-bucket-rings', key: 'rings' }, [
+                h(motion.span, { key: 'ring-1', animate: { scale: isActive('bucket') && !reduceMotion ? [1, 1.08, 1] : 1, opacity: isActive('bucket') ? [.62, 1, .62] : .45 }, transition: { duration: 1.7, repeat: reduceMotion ? 0 : Infinity, ease: 'easeInOut' } }),
+                h(motion.span, { key: 'ring-2', animate: { scale: isActive('bucket') && !reduceMotion ? [1, 1.12, 1] : 1, opacity: isActive('bucket') ? [.48, .86, .48] : .36 }, transition: { duration: 2.1, repeat: reduceMotion ? 0 : Infinity, ease: 'easeInOut' } })
+              ]),
+              h('span', { className: 'hero-node-kicker', key: 'kicker' }, 'canary gate'),
+              h('span', { className: 'hero-node-title', key: 'title' }, 'metrics decide'),
+              h('span', { className: 'hero-node-meta', key: 'meta' }, 'advance, pause, or repair'),
+              h('div', { className: 'hero-ledger-mini', key: 'ledger' }, [
+                h('span', { key: 'p95' }, 'p95'),
+                h('span', { key: 'error' }, 'error'),
+                h('span', { key: 'health' }, 'health'),
+                h('span', { key: 'slo' }, 'slo')
+              ])
+            ]),
+            renderNode('skiffd', 'inspect', 'status + logs', 'fresh health, target errors'),
+            renderNode('cloud', 'traffic', 'safe rollout', null,
+              h('div', { className: 'hero-cloud-grid', key: 'cloud-grid' }, [
+                h('span', { key: 'five' }, '5%'),
+                h('span', { key: 'twenty-five' }, '25%'),
+                h('span', { key: 'fifty' }, '50%'),
+                h('span', { key: 'hundred' }, '100%')
+              ])
+            ),
+            renderNode('recovery', 'agent', 'auto remediate', 'pause, diagnose, fix safe steps')
+          ]),
+          h(AnimatePresence, { mode: 'wait', key: 'note-presence' },
+            h(motion.div, {
+              className: 'hero-live-note',
+              key: stage.key,
+              initial: { opacity: .86, y: 6 },
+              animate: { opacity: 1, y: 0 },
+              exit: { opacity: .86, y: -6 },
+              transition: { duration: .25 }
+            }, [h('b', { key: 'title' }, stage.title), h('span', { key: 'detail' }, stage.detail)])
+          ),
+          h('div', { className: 'hero-value-row', key: 'values' },
+            values.slice(0, 4).map((item) =>
+              h(motion.div, {
+                className: `hero-value ${stage.values.includes(item.key) ? 'active' : ''}`,
+                key: item.key,
+                animate: { y: stage.values.includes(item.key) ? -2 : 0, opacity: stage.values.includes(item.key) ? 1 : .72 },
+                transition: { duration: .25 }
+              }, [h('b', { key: 'title' }, item.title), h('span', { key: 'detail' }, item.detail)])
+            )
+          )
+        ]);
+      }
+
+      try {
+        const app = h(HeroMotionApp);
+        if (ReactDOM.createRoot) ReactDOM.createRoot(root).render(app);
+        else ReactDOM.render(app, root);
+      } catch (error) {
+        console.warn('Skiff hero animation fallback is active.', error);
+      }
+    })();
+  </script>
   <script>
     (() => {
       const root = document.getElementById('deployment-motion-root');
