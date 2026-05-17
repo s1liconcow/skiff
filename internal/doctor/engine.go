@@ -514,6 +514,56 @@ func (b *resultBuilder) checkRecentEvents(service servicestatus.Service) {
 			b.addAction(inspectEventsAction(b.binary, service.Service))
 			b.addAction(inspectLogsAction(b.binary, service.Service))
 		}
+		if containsAny(lower, "certificate", "cert", "tls", "mtls") && containsAny(lower, "expired", "expires", "expiring", "near expiry", "notafter") {
+			severity := SeverityMedium
+			code := "CERTIFICATE_EXPIRING"
+			summary := "recent events show a certificate is nearing expiry"
+			if containsAny(lower, "expired", "not valid") {
+				severity = SeverityCritical
+				code = "CERTIFICATE_EXPIRED"
+				summary = "recent events show a certificate is expired"
+			}
+			finding := Finding{
+				ID:         findingID(service.Service, code),
+				Code:       code,
+				Severity:   severity,
+				Service:    service.Service,
+				Summary:    summary,
+				Confidence: 0.86,
+				Evidence:   eventEvidence,
+			}
+			b.addFinding(finding)
+			b.addHypothesis(Hypothesis{
+				ID:         hypothesisID(service.Service, "certificate_expiry"),
+				FindingID:  finding.ID,
+				Service:    service.Service,
+				Message:    "certificate rotation may be needed before consumers reject the workload certificate",
+				Confidence: 0.76,
+				Evidence:   eventEvidence,
+			})
+			b.addAction(inspectEventsAction(b.binary, service.Service))
+		}
+		if containsAny(lower, "key", "kms", "policy") && containsAny(lower, "policy mismatch", "least privilege", "overbroad", "wrong principal", "missing grant", "access denied") {
+			finding := Finding{
+				ID:         findingID(service.Service, "KEY_POLICY_MISMATCH"),
+				Code:       "KEY_POLICY_MISMATCH",
+				Severity:   SeverityHigh,
+				Service:    service.Service,
+				Summary:    "recent events show a key policy or grant mismatch",
+				Confidence: 0.82,
+				Evidence:   eventEvidence,
+			}
+			b.addFinding(finding)
+			b.addHypothesis(Hypothesis{
+				ID:         hypothesisID(service.Service, "key_policy_mismatch"),
+				FindingID:  finding.ID,
+				Service:    service.Service,
+				Message:    "the runner, skiffd, or a workload role may not have the least-privilege key permissions needed after rotation",
+				Confidence: 0.72,
+				Evidence:   eventEvidence,
+			})
+			b.addAction(inspectEventsAction(b.binary, service.Service))
+		}
 	}
 }
 

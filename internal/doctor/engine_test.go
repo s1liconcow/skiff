@@ -133,6 +133,20 @@ func TestDiagnoseCommonFailureScenarios(t *testing.T) {
 					Subject: schema.Target{Kind: "service", Name: "payments-api"},
 					Summary: "orders-api still using old version of credential after roll",
 				},
+				{
+					ID:      "01JCERT",
+					Time:    "2026-05-16T23:06:00Z",
+					Type:    "certificate.expiry",
+					Subject: schema.Target{Kind: "service", Name: "payments-api"},
+					Summary: "mTLS certificate expires in 48h and is near expiry",
+				},
+				{
+					ID:      "01JKEY",
+					Time:    "2026-05-16T23:07:00Z",
+					Type:    "key.policy_mismatch",
+					Subject: schema.Target{Kind: "service", Name: "payments-api"},
+					Summary: "KMS key policy mismatch: missing grant for runner role",
+				},
 			},
 		}},
 	}, Options{Service: "payments-api"})
@@ -150,6 +164,8 @@ func TestDiagnoseCommonFailureScenarios(t *testing.T) {
 		"DESIRED_RELEASE_NOT_STABLE",
 		"SECRET_ROTATION_FAILED",
 		"SECRET_CONSUMER_STALE",
+		"CERTIFICATE_EXPIRING",
+		"KEY_POLICY_MISMATCH",
 	} {
 		assertFinding(t, result, code, "")
 	}

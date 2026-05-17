@@ -27,12 +27,20 @@ type rotateResult struct {
 	SagaID         string                     `json:"saga_id"`
 	OperationID    string                     `json:"operation_id,omitempty"`
 	Command        string                     `json:"command"`
+	TargetKind     string                     `json:"target_kind,omitempty"`
+	TargetName     string                     `json:"target_name,omitempty"`
 	SecretRef      string                     `json:"secret_ref"`
+	KeyAlias       string                     `json:"key_alias,omitempty"`
+	Certificate    string                     `json:"certificate,omitempty"`
+	CertificateRef string                     `json:"certificate_ref,omitempty"`
 	Env            string                     `json:"env,omitempty"`
 	Consumers      []string                   `json:"consumers"`
 	CanaryConsumer string                     `json:"canary_consumer,omitempty"`
 	Database       string                     `json:"database,omitempty"`
 	DisableAfter   string                     `json:"disable_after,omitempty"`
+	RetireAfter    string                     `json:"retire_after,omitempty"`
+	BlastRadius    []string                   `json:"blast_radius,omitempty"`
+	Reversibility  schema.Reversibility       `json:"reversibility,omitempty"`
 	Status         schema.SagaStatus          `json:"status"`
 	NextAction     string                     `json:"next_action,omitempty"`
 	CurrentSteps   []string                   `json:"current_steps,omitempty"`
@@ -52,6 +60,10 @@ func runRotate(binary string, args []string, root rootOptions, stdout, stderr io
 		return ExitUserError
 	}
 	switch args[0] {
+	case "cert", "certificate":
+		return runRotateCertificate(binary, args[1:], root, stdout, stderr)
+	case "key":
+		return runRotateKey(binary, args[1:], root, stdout, stderr)
 	case "secret":
 		return runRotateSecret(binary, args[1:], root, stdout, stderr)
 	case "help", "-h", "--help":
@@ -60,6 +72,150 @@ func runRotate(binary string, args []string, root rootOptions, stdout, stderr io
 	default:
 		return writeClientCommandError(binary, "rotate", root.Format, root.TraceID, fmt.Errorf("unknown rotate command %q", args[0]), stdout, stderr)
 	}
+}
+
+func runRotateKey(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" rotate key", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := addDatabaseClientFlags(fs, root)
+	consumers := fs.String("consumers", "", "comma-separated service consumers to roll after promotion")
+	canaryConsumer := fs.String("canary-consumer", "", "consumer to canary before promotion")
+	materialRefs := fs.String("material-refs", "", "comma-separated encrypted material refs to re-encrypt")
+	disableAfter := fs.String("disable-after", templates.DefaultKeyDisableAfter, "delay before disabling the old key")
+	operationID := fs.String("operation-id", "", "operation ID to use")
+	sagaID := fs.String("saga-id", "", "saga ID to use")
+	approvalID := fs.String("approval-id", "", "approval ID for policy-gated production operations")
+	run := fs.Bool("run", false, "run the saga immediately after creating it")
+	dryRun := fs.Bool("dry-run", false, "render the rotation saga plan without writing object state")
+
+	flagArgs, positionals, err := splitRotateArgs(args)
+	if err != nil {
+		return writeClientCommandError(binary, "rotate key", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeClientCommandError(binary, "rotate key", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeClientCommandError(binary, "rotate key", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	keyAlias := ""
+	if len(positionals) == 1 {
+		keyAlias = positionals[0]
+	}
+	_ = flags.noColor
+	_ = flags.yes
+
+	loaded, err := flags.load(binary, root, fs)
+	if err != nil {
+		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+	}
+	if loaded.Config.Mode != config.ModeDirect && !*dryRun {
+		return writeClientCommandError(binary, "rotate key", *flags.format, *flags.traceID, errors.New("key rotation currently requires --direct mode"), stdout, stderr)
+	}
+	req := templates.KeyRotationRequest{
+		SagaID:         *sagaID,
+		OperationID:    *operationID,
+		KeyAlias:       keyAlias,
+		Env:            loaded.Config.Env,
+		Consumers:      parseCommaList(*consumers),
+		CanaryConsumer: *canaryConsumer,
+		MaterialRefs:   parseCommaList(*materialRefs),
+		DisableAfter:   *disableAfter,
+		Actor:          schema.Actor{ID: "skiff-cli", Type: "user"},
+		TraceID:        *flags.traceID,
+	}
+	if _, err := authz.MustAuthorize(nilContext(), authz.DefaultPolicy{}, authz.Request{
+		Actor:      req.Actor,
+		Action:     authz.ActionRotate,
+		Target:     schema.Target{Kind: "kms-key-alias", Name: req.KeyAlias},
+		Env:        req.Env,
+		Service:    firstListItem(req.Consumers),
+		Risk:       schema.RiskHigh,
+		ApprovalID: *approvalID,
+		DryRun:     *dryRun,
+		TraceID:    req.TraceID,
+	}); err != nil {
+		return writeClientCommandError(binary, "rotate key", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	result, err := createAndMaybeRunKeyRotation(nilContext(), binary, loaded.Config, req, *run, *dryRun)
+	if err != nil {
+		return writeClientError(binary, "rotate key", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	return writeRotateResult(binary, "rotate key", *flags.format, *flags.traceID, *result, stdout, stderr)
+}
+
+func runRotateCertificate(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" rotate cert", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := addDatabaseClientFlags(fs, root)
+	consumers := fs.String("consumers", "", "comma-separated service consumers to roll after promotion")
+	canaryConsumer := fs.String("canary-consumer", "", "consumer to canary before promotion")
+	certificateRef := fs.String("certificate-ref", "", "current certificate reference")
+	trustStoreRef := fs.String("trust-store-ref", "", "trust store or CA reference to verify")
+	retireAfter := fs.String("retire-after", templates.DefaultCertificateRetireAfter, "delay before retiring the old certificate")
+	validateFrom := fs.String("validate-from", templates.DefaultCertificateValidateFrom, "consumer perspective used for certificate verification")
+	operationID := fs.String("operation-id", "", "operation ID to use")
+	sagaID := fs.String("saga-id", "", "saga ID to use")
+	approvalID := fs.String("approval-id", "", "approval ID for policy-gated production operations")
+	run := fs.Bool("run", false, "run the saga immediately after creating it")
+	dryRun := fs.Bool("dry-run", false, "render the rotation saga plan without writing object state")
+
+	flagArgs, positionals, err := splitRotateArgs(args)
+	if err != nil {
+		return writeClientCommandError(binary, "rotate cert", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeClientCommandError(binary, "rotate cert", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeClientCommandError(binary, "rotate cert", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	name := ""
+	if len(positionals) == 1 {
+		name = positionals[0]
+	}
+	_ = flags.noColor
+	_ = flags.yes
+
+	loaded, err := flags.load(binary, root, fs)
+	if err != nil {
+		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+	}
+	if loaded.Config.Mode != config.ModeDirect && !*dryRun {
+		return writeClientCommandError(binary, "rotate cert", *flags.format, *flags.traceID, errors.New("certificate rotation currently requires --direct mode"), stdout, stderr)
+	}
+	req := templates.CertificateRotationRequest{
+		SagaID:         *sagaID,
+		OperationID:    *operationID,
+		Name:           name,
+		CertificateRef: *certificateRef,
+		Env:            loaded.Config.Env,
+		Consumers:      parseCommaList(*consumers),
+		CanaryConsumer: *canaryConsumer,
+		TrustStoreRef:  *trustStoreRef,
+		RetireAfter:    *retireAfter,
+		ValidateFrom:   *validateFrom,
+		Actor:          schema.Actor{ID: "skiff-cli", Type: "user"},
+		TraceID:        *flags.traceID,
+	}
+	if _, err := authz.MustAuthorize(nilContext(), authz.DefaultPolicy{}, authz.Request{
+		Actor:      req.Actor,
+		Action:     authz.ActionRotate,
+		Target:     schema.Target{Kind: "certificate", Name: req.Name},
+		Env:        req.Env,
+		Service:    firstListItem(req.Consumers),
+		Risk:       schema.RiskHigh,
+		ApprovalID: *approvalID,
+		DryRun:     *dryRun,
+		TraceID:    req.TraceID,
+	}); err != nil {
+		return writeClientCommandError(binary, "rotate cert", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	result, err := createAndMaybeRunCertificateRotation(nilContext(), binary, loaded.Config, req, *run, *dryRun)
+	if err != nil {
+		return writeClientError(binary, "rotate cert", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	return writeRotateResult(binary, "rotate cert", *flags.format, *flags.traceID, *result, stdout, stderr)
 }
 
 func runRotateSecret(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
@@ -181,17 +337,87 @@ func createAndMaybeRunSecretRotation(ctx context.Context, binary string, cfg con
 	return &result, nil
 }
 
+func createAndMaybeRunKeyRotation(ctx context.Context, binary string, cfg config.Config, req templates.KeyRotationRequest, run, dryRun bool) (*rotateResult, error) {
+	req = templates.NormalizeKeyRotationRequest(req)
+	createReq, err := templates.KeyRotation(req)
+	if err != nil {
+		return nil, err
+	}
+	result := rotateResultFromKeyRequest(req, schema.SagaPending, nil)
+	if dryRun {
+		result.NextAction = "create_saga"
+		result.CurrentSteps = []string{"preflight"}
+		result.Plan = &createReq
+		return &result, nil
+	}
+	if run {
+		return nil, errors.New("key rotation execution requires provider security steps; create the saga without --run or inspect the dry-run plan")
+	}
+	store, err := openRotateObjectStore(cfg)
+	if err != nil {
+		return nil, err
+	}
+	sagas := sagastate.NewStore(store)
+	if _, err := sagas.Create(ctx, createReq); err != nil {
+		return nil, err
+	}
+	_ = appendDatabaseAudit(ctx, store, req.Actor, schema.Target{Kind: "kms-key-alias", Name: req.KeyAlias}, "key_rotation", req.OperationID, req.SagaID, req.TraceID, schema.RiskHigh, "created key rotation saga")
+	inspect, err := sagas.Inspect(ctx, req.SagaID)
+	if err != nil {
+		return nil, err
+	}
+	result = rotateResultFromInspect(*inspect, nil)
+	return &result, nil
+}
+
+func createAndMaybeRunCertificateRotation(ctx context.Context, binary string, cfg config.Config, req templates.CertificateRotationRequest, run, dryRun bool) (*rotateResult, error) {
+	req = templates.NormalizeCertificateRotationRequest(req)
+	createReq, err := templates.CertificateRotation(req)
+	if err != nil {
+		return nil, err
+	}
+	result := rotateResultFromCertificateRequest(req, schema.SagaPending, nil)
+	if dryRun {
+		result.NextAction = "create_saga"
+		result.CurrentSteps = []string{"preflight"}
+		result.Plan = &createReq
+		return &result, nil
+	}
+	if run {
+		return nil, errors.New("certificate rotation execution requires provider certificate steps; create the saga without --run or inspect the dry-run plan")
+	}
+	store, err := openRotateObjectStore(cfg)
+	if err != nil {
+		return nil, err
+	}
+	sagas := sagastate.NewStore(store)
+	if _, err := sagas.Create(ctx, createReq); err != nil {
+		return nil, err
+	}
+	_ = appendDatabaseAudit(ctx, store, req.Actor, schema.Target{Kind: "certificate", Name: req.Name}, "certificate_rotation", req.OperationID, req.SagaID, req.TraceID, schema.RiskHigh, "created certificate rotation saga")
+	inspect, err := sagas.Inspect(ctx, req.SagaID)
+	if err != nil {
+		return nil, err
+	}
+	result = rotateResultFromInspect(*inspect, nil)
+	return &result, nil
+}
+
 func rotateResultFromRequest(req templates.SecretRotationRequest, status schema.SagaStatus, execution *sagastate.ExecutionResult, inspect *sagastate.InspectResult) rotateResult {
 	return rotateResult{
 		SagaID:         req.SagaID,
 		OperationID:    req.OperationID,
 		Command:        "secret",
+		TargetKind:     "secret",
+		TargetName:     req.SecretRef,
 		SecretRef:      req.SecretRef,
 		Env:            req.Env,
 		Consumers:      append([]string(nil), req.Consumers...),
 		CanaryConsumer: req.CanaryConsumer,
 		Database:       req.Database,
 		DisableAfter:   req.DisableAfter,
+		BlastRadius:    append([]string{"secret_ref:" + req.SecretRef}, prefixedList("consumer:", req.Consumers)...),
+		Reversibility:  schema.Compensatable,
 		Status:         status,
 		NextAction:     "resume",
 		Execution:      execution,
@@ -199,13 +425,70 @@ func rotateResultFromRequest(req templates.SecretRotationRequest, status schema.
 	}
 }
 
+func rotateResultFromKeyRequest(req templates.KeyRotationRequest, status schema.SagaStatus, inspect *sagastate.InspectResult) rotateResult {
+	return rotateResult{
+		SagaID:         req.SagaID,
+		OperationID:    req.OperationID,
+		Command:        "key",
+		TargetKind:     "kms-key-alias",
+		TargetName:     req.KeyAlias,
+		KeyAlias:       req.KeyAlias,
+		Env:            req.Env,
+		Consumers:      append([]string(nil), req.Consumers...),
+		CanaryConsumer: req.CanaryConsumer,
+		DisableAfter:   req.DisableAfter,
+		BlastRadius:    keyBlastRadiusForResult(req),
+		Reversibility:  schema.PartiallyReversible,
+		Status:         status,
+		NextAction:     "inspect_saga",
+		Inspect:        inspect,
+	}
+}
+
+func rotateResultFromCertificateRequest(req templates.CertificateRotationRequest, status schema.SagaStatus, inspect *sagastate.InspectResult) rotateResult {
+	return rotateResult{
+		SagaID:         req.SagaID,
+		OperationID:    req.OperationID,
+		Command:        "cert",
+		TargetKind:     "certificate",
+		TargetName:     req.Name,
+		Certificate:    req.Name,
+		CertificateRef: req.CertificateRef,
+		Env:            req.Env,
+		Consumers:      append([]string(nil), req.Consumers...),
+		CanaryConsumer: req.CanaryConsumer,
+		RetireAfter:    req.RetireAfter,
+		BlastRadius:    certificateBlastRadiusForResult(req),
+		Reversibility:  schema.Compensatable,
+		Status:         status,
+		NextAction:     "inspect_saga",
+		Inspect:        inspect,
+	}
+}
+
 func rotateResultFromInspect(inspect sagastate.InspectResult, execution *sagastate.ExecutionResult) rotateResult {
-	var params templates.SecretRotationRequest
-	_ = json.Unmarshal(inspect.Intent.Params, &params)
-	result := rotateResultFromRequest(params, inspect.Status, execution, &inspect)
+	var result rotateResult
+	switch inspect.Intent.Kind {
+	case templates.KeyRotationKind:
+		var params templates.KeyRotationRequest
+		_ = json.Unmarshal(inspect.Intent.Params, &params)
+		result = rotateResultFromKeyRequest(templates.NormalizeKeyRotationRequest(params), inspect.Status, &inspect)
+	case templates.CertificateRotationKind:
+		var params templates.CertificateRotationRequest
+		_ = json.Unmarshal(inspect.Intent.Params, &params)
+		result = rotateResultFromCertificateRequest(templates.NormalizeCertificateRotationRequest(params), inspect.Status, &inspect)
+	default:
+		var params templates.SecretRotationRequest
+		_ = json.Unmarshal(inspect.Intent.Params, &params)
+		result = rotateResultFromRequest(templates.NormalizeSecretRotationRequest(params), inspect.Status, execution, &inspect)
+	}
 	result.SagaID = inspect.SagaID
+	if result.OperationID == "" {
+		result.OperationID = operationIDFromInspect(inspect)
+	}
 	result.CurrentSteps = append([]string(nil), inspect.CurrentSteps...)
 	result.NextAction = nextActionForSaga(inspect)
+	result.Execution = execution
 	return result
 }
 
@@ -213,9 +496,19 @@ func writeRotateResult(binary, command, format, traceID string, result rotateRes
 	switch format {
 	case "human", "text":
 		fmt.Fprintf(stdout, "rotate %s saga %s status=%s\n", result.Command, result.SagaID, result.Status)
-		fmt.Fprintf(stdout, "secret: %s\n", result.SecretRef)
+		switch result.Command {
+		case "key":
+			fmt.Fprintf(stdout, "key_alias: %s\n", result.KeyAlias)
+		case "cert":
+			fmt.Fprintf(stdout, "certificate: %s\n", result.Certificate)
+		default:
+			fmt.Fprintf(stdout, "secret: %s\n", result.SecretRef)
+		}
 		if result.CanaryConsumer != "" {
 			fmt.Fprintf(stdout, "canary_consumer: %s\n", result.CanaryConsumer)
+		}
+		if len(result.BlastRadius) > 0 {
+			fmt.Fprintf(stdout, "blast_radius: %s\n", strings.Join(result.BlastRadius, ","))
 		}
 		if result.NextAction != "" {
 			fmt.Fprintf(stdout, "next: %s\n", result.NextAction)
@@ -237,20 +530,25 @@ func splitRotateArgs(args []string) ([]string, []string, error) {
 		"api-url":         true,
 		"approval-id":     true,
 		"canary-consumer": true,
+		"certificate-ref": true,
 		"config":          true,
 		"consumers":       true,
 		"database":        true,
 		"disable-after":   true,
 		"env":             true,
 		"format":          true,
+		"material-refs":   true,
 		"mode":            true,
 		"operation-id":    true,
 		"provider":        true,
 		"region":          true,
+		"retire-after":    true,
 		"saga-id":         true,
 		"state":           true,
 		"state-bucket":    true,
 		"trace-id":        true,
+		"trust-store-ref": true,
+		"validate-from":   true,
 	}
 	return splitArgs(args, valueFlags)
 }
@@ -281,6 +579,47 @@ func firstListItem(values []string) string {
 	return values[0]
 }
 
+func keyBlastRadiusForResult(req templates.KeyRotationRequest) []string {
+	req = templates.NormalizeKeyRotationRequest(req)
+	out := []string{"key_alias:" + req.KeyAlias}
+	out = append(out, prefixedList("consumer:", req.Consumers)...)
+	out = append(out, prefixedList("material_ref:", req.MaterialRefs)...)
+	return out
+}
+
+func certificateBlastRadiusForResult(req templates.CertificateRotationRequest) []string {
+	req = templates.NormalizeCertificateRotationRequest(req)
+	out := []string{"certificate:" + req.Name}
+	if req.CertificateRef != "" {
+		out = append(out, "certificate_ref:"+req.CertificateRef)
+	}
+	out = append(out, prefixedList("consumer:", req.Consumers)...)
+	if req.TrustStoreRef != "" {
+		out = append(out, "trust_store_ref:"+req.TrustStoreRef)
+	}
+	return out
+}
+
+func prefixedList(prefix string, values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			out = append(out, prefix+value)
+		}
+	}
+	return out
+}
+
+func operationIDFromInspect(inspect sagastate.InspectResult) string {
+	var generic struct {
+		OperationID string `json:"operation_id"`
+	}
+	_ = json.Unmarshal(inspect.Intent.Params, &generic)
+	return generic.OperationID
+}
+
 func printRotateUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s rotate secret <secret-ref> --consumers <services> [flags]\n", binary)
+	fmt.Fprintf(w, "       %s rotate key <alias> --consumers <services> [--material-refs <refs>] [flags]\n", binary)
+	fmt.Fprintf(w, "       %s rotate cert <name> --consumers <services> [flags]\n", binary)
 }

@@ -103,11 +103,17 @@ No plaintext secret values are emitted.
 ```bash
 skiff rotate secret secret://managed-database/orders-db/connection-url --consumers orders-api,orders-worker --database orders-db --dry-run --format json
 skiff --direct --state s3://skiff-state-prod rotate secret secret://managed-database/orders-db/connection-url --consumers orders-api,orders-worker --canary-consumer orders-api --database orders-db --disable-after 24h --approval-id approval_01J... --format json
+skiff rotate key alias/skiff/prod/state --consumers payments-api --material-refs secret://payments/api-token --dry-run --format json
+skiff rotate cert payments-api-mtls --consumers payments-api --certificate-ref aws-acm://us-west-2/certificate/payments-api --dry-run --format json
 ```
 
 If the canary fails, the saga restores the previous secret pointer and stops.
 Old credential deletion is not immediate; it is represented by the explicit
 `schedule-disable-old` step.
+
+Key and certificate rotation commands are also saga templates. They expose blast
+radius and reversibility in JSON output and keep old-key deletion or
+old-certificate revocation as separately approved destructive actions.
 
 ## Database Backup And Restore
 
