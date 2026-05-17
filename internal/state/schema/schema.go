@@ -82,6 +82,64 @@ type ServiceControl struct {
 	TraceID        string           `json:"trace_id,omitempty"`
 }
 
+type StatefulGroupControl struct {
+	SchemaVersion string                  `json:"schema_version"`
+	Group         string                  `json:"group"`
+	Env           string                  `json:"env"`
+	Replicas      int                     `json:"replicas"`
+	Members       []StatefulMemberSummary `json:"members,omitempty"`
+	Lease         *Lease                  `json:"lease,omitempty"`
+	Version       int64                   `json:"version"`
+	UpdatedAt     string                  `json:"updated_at"`
+	UpdatedBy     Actor                   `json:"updated_by"`
+	TraceID       string                  `json:"trace_id,omitempty"`
+}
+
+type StatefulMemberSummary struct {
+	Member     int    `json:"member"`
+	Generation int64  `json:"generation"`
+	InstanceID string `json:"instance_id,omitempty"`
+	VolumeID   string `json:"volume_id,omitempty"`
+	DNSName    string `json:"dns_name,omitempty"`
+	Phase      string `json:"phase,omitempty"`
+}
+
+type StatefulMemberControl struct {
+	SchemaVersion      string                 `json:"schema_version"`
+	Group              string                 `json:"group"`
+	Env                string                 `json:"env"`
+	Member             int                    `json:"member"`
+	Zone               string                 `json:"zone,omitempty"`
+	InstanceID         string                 `json:"instance_id,omitempty"`
+	VolumeID           string                 `json:"volume_id,omitempty"`
+	DNSName            string                 `json:"dns_name,omitempty"`
+	Generation         int64                  `json:"generation"`
+	Phase              string                 `json:"phase"`
+	Lease              *Lease                 `json:"lease,omitempty"`
+	ProviderOperations []ProviderOperationRef `json:"provider_operations,omitempty"`
+	Replacement        *StatefulReplacement   `json:"replacement,omitempty"`
+	Version            int64                  `json:"version"`
+	UpdatedAt          string                 `json:"updated_at"`
+	UpdatedBy          Actor                  `json:"updated_by"`
+	TraceID            string                 `json:"trace_id,omitempty"`
+}
+
+type StatefulReplacement struct {
+	OperationID           string `json:"operation_id"`
+	SagaID                string `json:"saga_id,omitempty"`
+	OldInstanceID         string `json:"old_instance_id,omitempty"`
+	NewInstanceID         string `json:"new_instance_id,omitempty"`
+	VolumeID              string `json:"volume_id,omitempty"`
+	Generation            int64  `json:"generation"`
+	FencedAt              string `json:"fenced_at,omitempty"`
+	DetachedAt            string `json:"detached_at,omitempty"`
+	ReplacementLaunchedAt string `json:"replacement_launched_at,omitempty"`
+	AttachedAt            string `json:"attached_at,omitempty"`
+	DNSUpdatedAt          string `json:"dns_updated_at,omitempty"`
+	RecipeRecoveredAt     string `json:"recipe_recovered_at,omitempty"`
+	VerifiedAt            string `json:"verified_at,omitempty"`
+}
+
 type ActiveOperation struct {
 	ID    string `json:"id"`
 	Kind  string `json:"kind"`

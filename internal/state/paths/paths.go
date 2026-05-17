@@ -137,6 +137,30 @@ func ServiceEventsPrefix(service string) (string, error) {
 	return "services/" + service + "/events/", nil
 }
 
+func StatefulGroupControl(group string) (string, error) {
+	if err := validateName("stateful_group", group); err != nil {
+		return "", err
+	}
+	return "stateful/" + group + "/control.json", nil
+}
+
+func StatefulMemberControl(group string, member int) (string, error) {
+	if err := validateName("stateful_group", group); err != nil {
+		return "", err
+	}
+	if member < 0 {
+		return "", InputError{Field: "member", Value: fmt.Sprintf("%d", member), Code: "INVALID_MEMBER", Message: "member ordinal must be non-negative"}
+	}
+	return fmt.Sprintf("stateful/%s/members/%d/control.json", group, member), nil
+}
+
+func StatefulMembersPrefix(group string) (string, error) {
+	if err := validateName("stateful_group", group); err != nil {
+		return "", err
+	}
+	return "stateful/" + group + "/members/", nil
+}
+
 func OperationEventsPrefix(service, operation string) (string, error) {
 	if err := validateName("service", service); err != nil {
 		return "", err

@@ -82,6 +82,8 @@ func Validate(doc Document) Result {
 	case KindStatefulGroup:
 		if doc.StatefulGroup == nil {
 			add("$.stateful", "REQUIRED", "stateful group specs must include stateful settings")
+		} else {
+			validateStatefulGroup(&diagnostics, *doc.StatefulGroup, "$.stateful")
 		}
 	case KindStack:
 		if doc.Stack == nil {
@@ -339,6 +341,51 @@ func validateManagedDatabase(diagnostics *[]Diagnostic, db ManagedDatabase, path
 	}
 	if db.Backups.RetentionDays < 1 || db.Backups.RetentionDays > 35 {
 		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".backups.retentionDays", Code: "INVALID_BACKUP_RETENTION", Severity: SeverityError, Message: "database backups.retentionDays must be between 1 and 35"})
+	}
+}
+
+func validateStatefulGroup(diagnostics *[]Diagnostic, group StatefulGroup, path string) {
+	if group.Replicas < 1 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".replicas", Code: "INVALID_REPLICAS", Severity: SeverityError, Message: "stateful group replicas must be at least 1"})
+	}
+	if group.Replicas > 0 && len(group.Members) > 0 && len(group.Members) != group.Replicas {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".members", Code: "MEMBER_COUNT_MISMATCH", Severity: SeverityError, Message: "stateful members must match replicas when listed explicitly"})
+	}
+	seenMembers := map[int]struct{}{}
+	for i, member := range group.Members {
+		base := fmt.Sprintf("%s.members[%d]", path, i)
+		if member.Ordinal < 0 {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".ordinal", Code: "INVALID_MEMBER", Severity: SeverityError, Message: "member ordinal must be non-negative"})
+		}
+		if _, ok := seenMembers[member.Ordinal]; ok {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".ordinal", Code: "DUPLICATE_MEMBER", Severity: SeverityError, Message: "member ordinals must be unique"})
+		}
+		seenMembers[member.Ordinal] = struct{}{}
+		if member.Zone != "" && !skiffNamePattern.MatchString(member.Zone) {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".zone", Code: "INVALID_ZONE", Severity: SeverityError, Message: "member zone must be a DNS-style zone name"})
+		}
+		if member.DNSName != "" && (net.ParseIP(member.DNSName) != nil || !strings.Contains(member.DNSName, ".")) {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".dnsName", Code: "INVALID_DNS_NAME", Severity: SeverityError, Message: "member dnsName must be a DNS hostname"})
+		}
+	}
+	if strings.TrimSpace(group.Volume.Size) == "" {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".volume.size", Code: "REQUIRED", Severity: SeverityError, Message: "stateful volume size is required"})
+	}
+	switch strings.ToLower(strings.TrimSpace(group.Volume.Type)) {
+	case "", "gp3", "io1", "standard":
+	default:
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".volume.type", Code: "UNSUPPORTED_VOLUME_TYPE", Severity: SeverityError, Message: "stateful volume type must be gp3, io1, or standard"})
+	}
+	if strings.TrimSpace(group.Volume.MountPath) != "" && !strings.HasPrefix(group.Volume.MountPath, "/") {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".volume.mountPath", Code: "INVALID_PATH", Severity: SeverityError, Message: "stateful volume mountPath must be absolute"})
+	}
+	switch strings.ToLower(strings.TrimSpace(group.Update.Strategy)) {
+	case "", "ordered":
+	default:
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".update.strategy", Code: "UNSUPPORTED_UPDATE_STRATEGY", Severity: SeverityError, Message: "stateful update strategy must be ordered"})
+	}
+	if group.Recipe.Name == "" && group.Recipe.Ref == "" {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".recipe", Code: "RECIPE_REQUIRED", Severity: SeverityError, Message: "stateful groups require a recipe name or plugin ref"})
 	}
 }
 

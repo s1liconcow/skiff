@@ -177,13 +177,40 @@ type DatabaseNetwork struct {
 }
 
 type StatefulGroup struct {
-	Replicas int    `json:"replicas,omitempty"`
-	Volume   Volume `json:"volume,omitempty"`
+	Replicas int                  `json:"replicas,omitempty"`
+	Members  []StatefulMemberSpec `json:"members,omitempty"`
+	Volume   Volume               `json:"volume,omitempty"`
+	Identity StatefulIdentity     `json:"identity,omitempty"`
+	Recipe   StatefulRecipe       `json:"recipe,omitempty"`
+	Update   StatefulUpdate       `json:"update,omitempty"`
+}
+
+type StatefulMemberSpec struct {
+	Ordinal int    `json:"ordinal"`
+	Zone    string `json:"zone,omitempty"`
+	DNSName string `json:"dnsName,omitempty"`
 }
 
 type Volume struct {
-	Size string `json:"size,omitempty"`
-	Type string `json:"type,omitempty"`
+	Size      string `json:"size,omitempty"`
+	Type      string `json:"type,omitempty"`
+	MountPath string `json:"mountPath,omitempty"`
+	Encrypted bool   `json:"encrypted,omitempty"`
+}
+
+type StatefulIdentity struct {
+	DNSZoneRef     string `json:"dnsZoneRef,omitempty"`
+	HostnamePrefix string `json:"hostnamePrefix,omitempty"`
+}
+
+type StatefulRecipe struct {
+	Name   string          `json:"name,omitempty"`
+	Ref    string          `json:"ref,omitempty"`
+	Config json.RawMessage `json:"config,omitempty"`
+}
+
+type StatefulUpdate struct {
+	Strategy string `json:"strategy,omitempty"`
 }
 
 type Stack struct {

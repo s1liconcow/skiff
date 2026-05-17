@@ -237,6 +237,47 @@ multiRegion:
 	}
 }
 
+func TestStatefulGroupValidation(t *testing.T) {
+	doc, err := spec.Decode([]byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: StatefulGroup
+metadata:
+  name: postgres
+  env: prod
+stateful:
+  replicas: 1
+  members:
+    - ordinal: 0
+      zone: us-west-2a
+      dnsName: postgres-0.internal.example.com
+  volume:
+    size: 100Gi
+    type: gp3
+    mountPath: /var/lib/postgresql
+    encrypted: true
+  recipe:
+    name: postgres-single
+  update:
+    strategy: ordered
+`), spec.DecodeOptions{})
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	result := spec.Validate(*doc)
+	if !result.OK {
+		t.Fatalf("Validate diagnostics = %+v, want OK", result.Diagnostics)
+	}
+
+	doc.StatefulGroup.Volume.MountPath = "relative"
+	doc.StatefulGroup.Recipe = spec.StatefulRecipe{}
+	result = spec.Validate(*doc)
+	if result.OK {
+		t.Fatal("Validate returned OK, want stateful diagnostics")
+	}
+	assertDiagnostic(t, result.Diagnostics, "$.stateful.volume.mountPath", "INVALID_PATH")
+	assertDiagnostic(t, result.Diagnostics, "$.stateful.recipe", "RECIPE_REQUIRED")
+}
+
 func TestMarshalYAMLShowsDefaultedFields(t *testing.T) {
 	doc, err := spec.Decode([]byte(validServiceYAML), spec.DecodeOptions{})
 	if err != nil {
