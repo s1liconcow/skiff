@@ -16,7 +16,6 @@ import (
 	"github.com/s1liconcow/skiff/internal/events"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/provider"
-	"github.com/s1liconcow/skiff/internal/provider/aws"
 	"github.com/s1liconcow/skiff/internal/saga/templates"
 	"github.com/s1liconcow/skiff/internal/security/signing"
 	"github.com/s1liconcow/skiff/internal/spec"
@@ -30,11 +29,7 @@ type deployOutput struct {
 }
 
 var newDeployProvider = func(cfg config.Config, store objstore.ObjectStore) (provider.Provider, error) {
-	opts := []aws.Option{}
-	if store != nil {
-		opts = append(opts, aws.WithStateStore(store))
-	}
-	return aws.NewFromConfig(cfg, opts...)
+	return newCLIProvider(cfg, store)
 }
 
 func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {

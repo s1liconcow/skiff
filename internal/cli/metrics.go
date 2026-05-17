@@ -13,7 +13,6 @@ import (
 	"github.com/s1liconcow/skiff/internal/config"
 	skifferrors "github.com/s1liconcow/skiff/internal/errors"
 	"github.com/s1liconcow/skiff/internal/provider"
-	"github.com/s1liconcow/skiff/internal/provider/aws"
 )
 
 type metricsProvider interface {
@@ -27,7 +26,7 @@ type metricsOutput struct {
 }
 
 var newMetricsProviderForCLI = func(cfg config.Config) (metricsProvider, error) {
-	return aws.NewFromConfig(cfg)
+	return newCLIProviderNoStore(cfg)
 }
 
 func runMetrics(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {

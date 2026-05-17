@@ -11,6 +11,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/provider"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
+	"github.com/s1liconcow/skiff/internal/state/paths"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 )
 
@@ -151,7 +152,10 @@ func (d Detector) Detect(ctx context.Context, req Request) (*Result, error) {
 }
 
 func (d Detector) resourceRecords(ctx context.Context, providerName string, req Request) ([]schema.ResourceRecord, error) {
-	prefix := "resources/by-provider/" + providerName + "/"
+	prefix, err := paths.ProviderResourcesPrefix(providerName)
+	if err != nil {
+		return nil, err
+	}
 	metas, err := d.Store.List(ctx, prefix, objstore.ListOptions{})
 	if err != nil {
 		return nil, err

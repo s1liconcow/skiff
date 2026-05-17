@@ -14,6 +14,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/buildinfo"
 	"github.com/s1liconcow/skiff/internal/config"
 	servicedoctor "github.com/s1liconcow/skiff/internal/doctor"
+	skiffevents "github.com/s1liconcow/skiff/internal/events"
 	stateindex "github.com/s1liconcow/skiff/internal/index"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/objstore/file"
@@ -514,8 +515,8 @@ func scanEvents(ctx context.Context, store objstore.ObjectStore, opts EventOptio
 		if err != nil {
 			return nil, nil, Fail("OBJECT_STORE_GET_FAILED", "read event", ExitProviderError, err)
 		}
-		var event schema.Event
-		if err := canonical.UnmarshalStrict(obj.Body, &event); err != nil {
+		event, err := decodeScannedEvent(obj.Body)
+		if err != nil {
 			findings = append(findings, Finding{Code: "MALFORMED_EVENT", Summary: err.Error(), Key: meta.Key})
 			continue
 		}
@@ -534,6 +535,41 @@ func scanEvents(ctx context.Context, store objstore.ObjectStore, opts EventOptio
 		events[i], events[j] = events[j], events[i]
 	}
 	return events, findings, nil
+}
+
+func decodeScannedEvent(body []byte) (schema.Event, error) {
+	var event schema.Event
+	if err := canonical.UnmarshalStrict(body, &event); err == nil {
+		return event, nil
+	}
+	var logged skiffevents.Event
+	if err := canonical.UnmarshalStrict(body, &logged); err != nil {
+		return schema.Event{}, err
+	}
+	return schema.Event{
+		SchemaVersion: logged.SchemaVersion,
+		ID:            logged.ID,
+		Time:          logged.Time,
+		TraceID:       logged.TraceID,
+		Subject:       subjectFromEventScope(logged.Scope),
+		Type:          logged.Type,
+		Severity:      logged.Severity,
+		Actor:         logged.Actor,
+		Summary:       logged.Summary,
+		Facts:         logged.Facts,
+		Data:          logged.Data,
+	}, nil
+}
+
+func subjectFromEventScope(scope skiffevents.Scope) schema.Target {
+	switch scope.Kind {
+	case skiffevents.ScopeOperation:
+		return schema.Target{Kind: "operation", Name: scope.Operation}
+	case skiffevents.ScopeSaga:
+		return schema.Target{Kind: "saga", Name: scope.Saga}
+	default:
+		return schema.Target{Kind: "service", Name: scope.Service}
+	}
 }
 
 func eventPrefixes(opts EventOptions) ([]string, error) {

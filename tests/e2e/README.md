@@ -1,10 +1,22 @@
 # Skiff E2E Tests
 
-The local runner fixture test is mandatory and runs in normal `go test ./...`.
-The stateless service release-gate flow also runs in normal `go test ./...`
-with a high-fidelity fake AWS provider. It exercises `skiff validate`, `plan`,
-`deploy`, `rollout watch`, `status`, `logs`, `metrics`, `doctor`, and
-`rollback` against file-backed object state without creating cloud resources.
+The local suite is mandatory and runs in normal `go test ./...`. It includes:
+
+- `TestRunnerServesSignedReleaseFixture`, which proves the runner can fetch,
+  verify, prepare, start, health-check, and report a signed release.
+- `TestLocalCLIEndToEndCapabilityMatrix`, which drives the real CLI against
+  file-backed object state and the fake provider. It covers `validate`,
+  `compile`, `plan`, `explain`, release verification, `deploy`, `rollout
+  watch`, `status`, `events`, `logs`, `metrics`, `doctor`, `canary`,
+  `rollback`, `drift`, and `plugin validate`.
+
+```bash
+make e2e-local
+```
+
+Set `SKIFF_E2E_REPORT_DIR` to collect JSON reports containing trace IDs,
+operation IDs, saga IDs, provider IDs, object paths, facts, cleanup status, and
+recommended next commands.
 
 The Apple container/RustFS/Caddy rollout test is optional because it starts
 local Linux VMs and pulls OCI images. It exercises RustFS as the S3-compatible
@@ -23,6 +35,10 @@ Skiff release ID with the same Caddy image. `SKIFF_E2E_RUSTFS_IMAGE` defaults
 to `docker.io/rustfs/rustfs:latest`.
 
 Real AWS stateless-service smoke coverage must be explicitly gated before it is
-added to CI. Use `SKIFF_AWS_E2E=1`, a unique service/env prefix, digest-pinned
-test artifacts, aggressive cleanup by Skiff tags, and a non-default workflow so
-normal PRs never create cloud resources.
+added to CI. The current AWS test proves the explicit gates plus plan/explain
+lowering and records the live-apply gap until real AWS apply/discovery adapters
+are linked. Use `SKIFF_AWS_E2E=1`, `SKIFF_AWS_E2E_STATE`,
+`SKIFF_AWS_E2E_REGION`, and a unique `SKIFF_AWS_E2E_PREFIX`.
+
+See `docs/dev/e2e-matrix.md` for the full capability matrix, run modes, cleanup
+expectations, and failure triage commands.

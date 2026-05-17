@@ -13,7 +13,6 @@ import (
 	"github.com/s1liconcow/skiff/internal/config"
 	skifferrors "github.com/s1liconcow/skiff/internal/errors"
 	"github.com/s1liconcow/skiff/internal/provider"
-	"github.com/s1liconcow/skiff/internal/provider/aws"
 )
 
 type logsProvider interface {
@@ -28,7 +27,7 @@ type logsOutput struct {
 
 var (
 	newLogsProvider = func(cfg config.Config) (logsProvider, error) {
-		return aws.NewFromConfig(cfg)
+		return newCLIProviderNoStore(cfg)
 	}
 	logsContext        = nilContext
 	logsFollowInterval = 2 * time.Second

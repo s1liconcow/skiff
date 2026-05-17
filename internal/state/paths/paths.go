@@ -229,6 +229,13 @@ func ProviderResource(provider, kind, id string) (string, error) {
 	return "resources/by-provider/" + provider + "/" + kind + "/" + escaped + ".json", nil
 }
 
+func ProviderResourcesPrefix(provider string) (string, error) {
+	if err := validateName("provider", provider); err != nil {
+		return "", err
+	}
+	return "resources/by-provider/" + provider + "/", nil
+}
+
 func ServiceObservation(service, observation string) (string, error) {
 	if err := validateName("service", service); err != nil {
 		return "", err

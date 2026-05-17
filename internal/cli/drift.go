@@ -12,7 +12,6 @@ import (
 	"github.com/s1liconcow/skiff/internal/drift"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/provider"
-	"github.com/s1liconcow/skiff/internal/provider/aws"
 )
 
 type driftOutput struct {
@@ -22,11 +21,7 @@ type driftOutput struct {
 }
 
 var newDriftProvider = func(cfg config.Config, store objstore.ObjectStore) (provider.Provider, error) {
-	opts := []aws.Option{}
-	if store != nil {
-		opts = append(opts, aws.WithStateStore(store))
-	}
-	return aws.NewFromConfig(cfg, opts...)
+	return newCLIProvider(cfg, store)
 }
 
 func runDrift(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {

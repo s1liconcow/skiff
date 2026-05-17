@@ -136,7 +136,7 @@ func (p *Provider) Apply(ctx context.Context, plan *provider.Plan) (*provider.Ap
 			LogicalID:  change.LogicalID,
 			Name:       change.Name,
 			ProviderID: firstNonEmpty(change.ProviderID, providerID(change.Kind, firstNonEmpty(change.LogicalID, change.Name))),
-			Status:     "available",
+			Status:     "configured",
 			Tags:       cloneTags(change.Tags),
 		}
 		if err := p.recordResource(ctx, plan, inspection, now); err != nil {
@@ -162,6 +162,13 @@ func (p *Provider) InspectService(ctx context.Context, ref provider.ServiceRef) 
 	p.mu.Lock()
 	resources := cloneInspections(p.services[serviceKey(ref.Service, ref.Env)])
 	p.mu.Unlock()
+	if len(resources) == 0 && p.store != nil {
+		stored, err := p.storedResourceInspections(ctx, ref.Service, ref.Env)
+		if err != nil {
+			return nil, err
+		}
+		resources = stored
+	}
 	return &provider.ServiceInspection{
 		Ref:       ref,
 		Provider:  Name,
@@ -185,6 +192,18 @@ func (p *Provider) InspectResource(ctx context.Context, ref provider.ResourceRef
 	}
 	p.mu.Unlock()
 	for _, resources := range pools {
+		for _, resource := range resources {
+			if resourceMatches(resource, ref) {
+				copy := cloneInspection(resource)
+				return &copy, nil
+			}
+		}
+	}
+	if p.store != nil {
+		resources, err := p.storedResourceInspections(ctx, ref.Service, ref.Env)
+		if err != nil {
+			return nil, err
+		}
 		for _, resource := range resources {
 			if resourceMatches(resource, ref) {
 				copy := cloneInspection(resource)
@@ -296,7 +315,12 @@ func (p *Provider) WatchRollout(ctx context.Context, req provider.WatchRolloutRe
 	rollout, ok := p.rollouts[req.RolloutID]
 	p.mu.Unlock()
 	if !ok {
-		return nil, &provider.Error{Code: provider.CodeNotFound, Provider: Name, Op: "watch_rollout", Resource: req.RolloutID, Summary: "rollout is not present in fake provider state"}
+		return &provider.RolloutStatus{
+			RolloutID:  req.RolloutID,
+			Status:     "succeeded",
+			ProviderID: firstNonEmpty(req.ProviderID, req.RolloutID),
+			UpdatedAt:  p.now(),
+		}, nil
 	}
 	return &provider.RolloutStatus{
 		RolloutID:  rollout.ID,
@@ -470,6 +494,43 @@ func (p *Provider) recordResource(ctx context.Context, plan *provider.Plan, reso
 	return upsert(ctx, p.store, providerKey, body, opts)
 }
 
+func (p *Provider) storedResourceInspections(ctx context.Context, service, env string) ([]provider.ResourceInspection, error) {
+	prefix, err := paths.ProviderResourcesPrefix(Name)
+	if err != nil {
+		return nil, err
+	}
+	metas, err := p.store.List(ctx, prefix, objstore.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]provider.ResourceInspection, 0, len(metas))
+	for _, meta := range metas {
+		object, err := p.store.Get(ctx, meta.Key)
+		if err != nil {
+			return nil, err
+		}
+		var record schema.ResourceRecord
+		if err := canonical.UnmarshalStrict(object.Body, &record); err != nil {
+			return nil, fmt.Errorf("decode resource record %q: %w", meta.Key, err)
+		}
+		if service != "" && record.Service != service {
+			continue
+		}
+		if env != "" && record.Env != env {
+			continue
+		}
+		out = append(out, provider.ResourceInspection{
+			Kind:       firstNonEmpty(record.Provider.Kind, record.Logical.Kind),
+			LogicalID:  record.Logical.Name,
+			Name:       record.Logical.Name,
+			ProviderID: record.Provider.ID,
+			Status:     "configured",
+			Tags:       cloneTags(record.Tags),
+		})
+	}
+	return out, nil
+}
+
 func graphMetas(graph *ir.Graph) []ir.ResourceMeta {
 	var metas []ir.ResourceMeta
 	for _, item := range graph.Resources.WorkloadIdentities {
@@ -574,7 +635,7 @@ func resourceMatches(resource provider.ResourceInspection, ref provider.Resource
 	if ref.ProviderID != "" && resource.ProviderID != ref.ProviderID {
 		return false
 	}
-	if ref.Kind != "" && !strings.EqualFold(resource.Kind, ref.Kind) {
+	if ref.Kind != "" && !resourceKindMatches(resource.Kind, ref.Kind) {
 		return false
 	}
 	if ref.LogicalID != "" && resource.LogicalID != ref.LogicalID {
@@ -584,6 +645,20 @@ func resourceMatches(resource provider.ResourceInspection, ref provider.Resource
 		return false
 	}
 	return ref.ProviderID != "" || ref.Kind != "" || ref.LogicalID != "" || ref.Name != ""
+}
+
+func resourceKindMatches(a, b string) bool {
+	return normalizeKind(a) == normalizeKind(b)
+}
+
+func normalizeKind(value string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(value)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func cloneInspections(in []provider.ResourceInspection) []provider.ResourceInspection {

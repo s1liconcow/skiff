@@ -14,7 +14,6 @@ import (
 	"github.com/s1liconcow/skiff/internal/config"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/provider"
-	"github.com/s1liconcow/skiff/internal/provider/aws"
 	sagastate "github.com/s1liconcow/skiff/internal/saga"
 	"github.com/s1liconcow/skiff/internal/saga/steps/approval"
 	"github.com/s1liconcow/skiff/internal/saga/steps/builtin"
@@ -67,11 +66,7 @@ type canarySagaResult struct {
 var (
 	openSagaObjectStore = client.OpenObjectStore
 	newSagaProvider     = func(cfg config.Config, store objstore.ObjectStore) (provider.Provider, error) {
-		opts := []aws.Option{}
-		if store != nil {
-			opts = append(opts, aws.WithStateStore(store))
-		}
-		return aws.NewFromConfig(cfg, opts...)
+		return newCLIProvider(cfg, store)
 	}
 )
 
