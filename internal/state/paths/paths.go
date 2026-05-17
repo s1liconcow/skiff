@@ -53,6 +53,13 @@ func ReleaseManifest(service, release string) (string, error) {
 	return "services/" + service + "/releases/" + release + "/release.json", nil
 }
 
+func ServiceReleasesPrefix(service string) (string, error) {
+	if err := validateName("service", service); err != nil {
+		return "", err
+	}
+	return "services/" + service + "/releases/", nil
+}
+
 func RuntimeManifest(service, release string) (string, error) {
 	if err := validateName("service", service); err != nil {
 		return "", err

@@ -29,6 +29,13 @@ func TestCoreObjectPaths(t *testing.T) {
 			want: "services/payments-api/releases/rel_01JABC/release.json",
 		},
 		{
+			name: "service releases prefix",
+			path: func() (string, error) {
+				return paths.ServiceReleasesPrefix("payments-api")
+			},
+			want: "services/payments-api/releases/",
+		},
+		{
 			name: "runtime manifest",
 			path: func() (string, error) {
 				return paths.RuntimeManifest("payments-api", "rel_01JABC")
