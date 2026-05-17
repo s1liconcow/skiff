@@ -340,13 +340,6 @@ func (p *Provider) InspectResource(ctx context.Context, ref provider.ResourceRef
 	}
 }
 
-func (p *Provider) Debug(ctx context.Context, req provider.DebugRequest) (*provider.DebugSession, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return nil, provider.Unsupported(Name, "debug")
-}
-
 func (p *Provider) Rollback(ctx context.Context, req provider.RollbackRequest) (*provider.Rollout, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

@@ -89,6 +89,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runDeploy(binary, root.Args, root, stdout, stderr)
 	case "database":
 		return runDatabase(binary, root.Args, root, stdout, stderr)
+	case "debug":
+		return runDebug(binary, root.Args, root, stdout, stderr)
 	case "doctor":
 		return runDoctor(binary, root.Args, root, stdout, stderr)
 	case "drift":
@@ -247,6 +249,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  contract   Run CI contract checks")
 	fmt.Fprintln(w, "  cutover    Create a weighted traffic cutover saga")
 	fmt.Fprintln(w, "  database   Run managed database backup and restore sagas")
+	fmt.Fprintln(w, "  debug      Collect scoped diagnostic bundles")
 	fmt.Fprintln(w, "  deploy     Publish and deploy a service release")
 	fmt.Fprintln(w, "  doctor     Diagnose service health and recommend actions")
 	fmt.Fprintln(w, "  drift      Detect provider drift from Skiff resource records")

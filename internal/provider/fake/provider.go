@@ -273,11 +273,22 @@ func (p *Provider) Debug(ctx context.Context, req provider.DebugRequest) (*provi
 	if strings.TrimSpace(req.Service) == "" || strings.TrimSpace(req.Env) == "" {
 		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "debug", Summary: "service and env are required"}
 	}
+	mode := req.Mode
+	if mode == "" {
+		mode = provider.DebugModeBundle
+	}
 	now := p.now()
 	return &provider.DebugSession{
-		ID:        "debug-" + pathSafeResourceName(req.Env+"-"+req.Service),
-		Provider:  Name,
-		StartedAt: now,
+		ID:             "debug-" + pathSafeResourceName(req.Env+"-"+req.Service+"-"+string(mode)),
+		Provider:       Name,
+		Mode:           mode,
+		InstanceID:     req.InstanceID,
+		ProviderID:     firstNonEmpty(req.InstanceID, "fake-"+pathSafeResourceName(req.Service)),
+		Command:        append([]string(nil), req.Command...),
+		LocalPort:      req.LocalPort,
+		RemotePort:     req.RemotePort,
+		ConnectionHint: "fake debug session; no SSH ingress required",
+		StartedAt:      now,
 	}, nil
 }
 

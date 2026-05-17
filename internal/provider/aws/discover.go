@@ -24,6 +24,7 @@ type Clients struct {
 	Logs             LogsClient
 	LogQueries       LogQueryClient
 	MetricQueries    MetricQueryClient
+	DebugSessions    DebugSessionClient
 	Rollouts         ASGRolloutClient
 	ServiceResources ServiceResourceManager
 	Databases        DatabaseClient

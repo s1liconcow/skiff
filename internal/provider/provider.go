@@ -165,16 +165,37 @@ type MetricPoint struct {
 	Value     float64   `json:"value"`
 }
 
+type DebugMode string
+
+const (
+	DebugModeBundle      DebugMode = "bundle"
+	DebugModeShell       DebugMode = "shell"
+	DebugModeCommand     DebugMode = "command"
+	DebugModePortForward DebugMode = "port_forward"
+)
+
 type DebugRequest struct {
-	Service string `json:"service"`
-	Env     string `json:"env"`
-	Reason  string `json:"reason,omitempty"`
+	Service    string    `json:"service"`
+	Env        string    `json:"env"`
+	InstanceID string    `json:"instance_id,omitempty"`
+	Mode       DebugMode `json:"mode,omitempty"`
+	Command    []string  `json:"command,omitempty"`
+	LocalPort  int       `json:"local_port,omitempty"`
+	RemotePort int       `json:"remote_port,omitempty"`
+	Reason     string    `json:"reason,omitempty"`
 }
 
 type DebugSession struct {
-	ID        string    `json:"id"`
-	Provider  string    `json:"provider"`
-	StartedAt time.Time `json:"started_at"`
+	ID             string    `json:"id"`
+	Provider       string    `json:"provider"`
+	Mode           DebugMode `json:"mode,omitempty"`
+	InstanceID     string    `json:"instance_id,omitempty"`
+	ProviderID     string    `json:"provider_id,omitempty"`
+	Command        []string  `json:"command,omitempty"`
+	LocalPort      int       `json:"local_port,omitempty"`
+	RemotePort     int       `json:"remote_port,omitempty"`
+	ConnectionHint string    `json:"connection_hint,omitempty"`
+	StartedAt      time.Time `json:"started_at"`
 }
 
 type RolloutRequest struct {

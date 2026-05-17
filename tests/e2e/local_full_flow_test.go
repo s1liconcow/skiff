@@ -133,6 +133,12 @@ func TestLocalCLIEndToEndCapabilityMatrix(t *testing.T) {
 		}
 	}
 
+	var debug localDebugOutput
+	decodeCLIJSON(t, runSkiffCLI(t, report, "debug", "collect", service, "--direct", "--state", stateURI, "--env", env, "--provider", fakeprovider.Name, "--region", region, "--instance", "i-local-debug", "--approval-id", "approval_local_debug", "--format", "json", "--trace-id", traceID), &debug)
+	if !debug.OK || !debug.Bundle.OK || debug.Bundle.BundleID == "" || debug.Bundle.ReleaseDigest == "" || len(debug.Bundle.Logs) == 0 {
+		t.Fatalf("unexpected debug collect output: %+v", debug)
+	}
+
 	var canary localCanaryOutput
 	canaryBody := runSkiffCLI(t, report,
 		"deploy", specPath,
@@ -186,7 +192,7 @@ func TestLocalCLIEndToEndCapabilityMatrix(t *testing.T) {
 		t.Fatal("plugin validate returned ok=false")
 	}
 
-	report.fact("local_e2e", "validated compile/plan/explain/deploy/rollout/status/events/logs/metrics/doctor/canary/rollback/drift/plugin paths")
+	report.fact("local_e2e", "validated compile/plan/explain/deploy/rollout/status/events/logs/metrics/doctor/debug/canary/rollback/drift/plugin paths")
 }
 
 func deployRelease(t *testing.T, report *e2eReport, specPath, stateURI, env, region, keyID, signingSeed, releaseID, operationID, traceID string) localDeployOutput {
@@ -401,6 +407,18 @@ type localDoctorOutput struct {
 			Code     string `json:"code"`
 		} `json:"findings"`
 	} `json:"doctor"`
+}
+
+type localDebugOutput struct {
+	OK     bool `json:"ok"`
+	Bundle struct {
+		OK            bool   `json:"ok"`
+		BundleID      string `json:"bundle_id"`
+		ReleaseDigest string `json:"release_digest"`
+		Logs          []struct {
+			Message string `json:"message"`
+		} `json:"logs"`
+	} `json:"bundle"`
 }
 
 type localCanaryOutput struct {

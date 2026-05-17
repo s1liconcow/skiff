@@ -78,6 +78,20 @@ garbage collection require approval context unless the actor is explicit
 break-glass. Agents can request plans, but execution is denied until approval
 context is present.
 
+## Debug Bundles
+
+`skiff debug collect` creates a read-only diagnostic bundle before any
+interactive provider debug path. It requires direct mode today so service events
+and audit records are durable if `skiffd` is unavailable.
+
+```bash
+skiff debug collect payments-api --instance i-abc123 --approval-id approval_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+```
+
+The JSON bundle includes release evidence, provider session metadata, recent
+logs, metrics, redaction notes, and recommended next commands. Plaintext secrets
+must not be emitted.
+
 ## Secret Rotation
 
 `skiff rotate secret` creates a `secret.rotation` saga. Dry-run mode returns the

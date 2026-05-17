@@ -38,7 +38,7 @@ SKIFF_AWS_E2E=1 SKIFF_AWS_E2E_STATE=s3://skiff-e2e-state SKIFF_AWS_E2E_REGION=us
 | rollback | covered | not_applicable | gated | Local rolls back to the previous stable release and verifies service control. |
 | direct mode | covered | covered | gated | Local uses `--direct`; runner and Apple paths do not depend on `skiffd`. |
 | drift | covered | not_applicable | gated | Local runs drift against persisted fake-provider resource records. |
-| debug collect | not_implemented | not_implemented | not_implemented | `skiff debug collect` is tracked by bead `skiff-jss`; it is not implemented yet. |
+| debug collect | covered | not_implemented | gated | Local direct mode collects a redacted bundle through the fake provider and writes durable audit/event records. AWS remains gated behind a live SSM client adapter. |
 | provider conformance | covered | not_applicable | gated | CI runs `go test ./tests/conformance/provider`; local e2e documents the entry point. |
 | plugin conformance | covered | not_applicable | not_applicable | CI runs `go test ./tests/conformance/plugin`; local e2e runs `skiff plugin validate`. |
 | runner signed release | covered | covered | gated | Local runner fixture serves a signed release; Apple runs signed OCI releases in local Linux VMs. |
