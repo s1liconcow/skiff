@@ -97,6 +97,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runRollout(binary, root.Args, root, stdout, stderr)
 	case "saga":
 		return runSaga(binary, root.Args, root, stdout, stderr)
+	case "solve":
+		return runSolve(binary, root.Args, root, stdout, stderr)
 	case "state":
 		return runState(binary, root.Args, stdout, stderr)
 	case "status":
@@ -190,6 +192,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  rollback   Roll a service back to a stable release")
 	fmt.Fprintln(w, "  rollout    Watch rollout progress")
 	fmt.Fprintln(w, "  saga       Inspect saga object state")
+	fmt.Fprintln(w, "  solve      Build an agent action graph for service recovery")
 	if binary == "skiffd" {
 		fmt.Fprintln(w, "  serve      Start the stateless skiffd API server")
 	}
