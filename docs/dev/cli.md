@@ -156,6 +156,8 @@ skiff plugin explain ./plugins/mtls --spec examples/service/skiff.yaml --format 
 skiff plugin dev --plugin ./plugins/mtls --hook mutate_ir --request request.json --format json
 ```
 
+The built-in mTLS capability plugin is documented in `docs/dev/mtls-plugin.md` and is enabled only by an explicit `addons` entry plus `--plugin plugins/mtls`.
+
 ## Plan
 
 `skiff plan` renders the dry-run provider changes for a spec. JSON output includes the action, cloud kind, provider name, fingerprint, and desired payload for each resource so agents can inspect create/update/no-op decisions before any mutating deploy path runs.

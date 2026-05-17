@@ -123,16 +123,18 @@ type TargetGroupAWS struct {
 }
 
 type ListenerRule struct {
-	LogicalID      string            `json:"logical_id"`
-	Name           string            `json:"name"`
-	Visibility     string            `json:"visibility"`
-	Protocol       string            `json:"protocol"`
-	Port           int               `json:"port"`
-	Host           string            `json:"host,omitempty"`
-	CertificateRef string            `json:"certificate_ref,omitempty"`
-	TargetGroupRef string            `json:"target_group_ref"`
-	Tags           map[string]string `json:"tags,omitempty"`
-	Source         []ir.SourceRef    `json:"source,omitempty"`
+	LogicalID             string            `json:"logical_id"`
+	Name                  string            `json:"name"`
+	Visibility            string            `json:"visibility"`
+	Protocol              string            `json:"protocol"`
+	Port                  int               `json:"port"`
+	Host                  string            `json:"host,omitempty"`
+	CertificateRef        string            `json:"certificate_ref,omitempty"`
+	ClientCertificateMode string            `json:"client_certificate_mode,omitempty"`
+	TrustStoreRef         string            `json:"trust_store_ref,omitempty"`
+	TargetGroupRef        string            `json:"target_group_ref"`
+	Tags                  map[string]string `json:"tags,omitempty"`
+	Source                []ir.SourceRef    `json:"source,omitempty"`
 }
 
 type DatabaseAWS struct {
@@ -310,7 +312,7 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 		if err != nil {
 			return nil, err
 		}
-		out.ListenerRules = append(out.ListenerRules, ListenerRule{
+		rule := ListenerRule{
 			LogicalID:      listener.Meta.LogicalID,
 			Name:           name,
 			Visibility:     listener.Visibility,
@@ -321,7 +323,12 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 			TargetGroupRef: listener.TargetGroupRef,
 			Tags:           TagsMap(listener.Meta, nil),
 			Source:         append([]ir.SourceRef(nil), listener.Meta.Source...),
-		})
+		}
+		if listener.TLS.ClientCertificate != nil {
+			rule.ClientCertificateMode = listener.TLS.ClientCertificate.Mode
+			rule.TrustStoreRef = listener.TLS.ClientCertificate.TrustStoreRef
+		}
+		out.ListenerRules = append(out.ListenerRules, rule)
 	}
 	for _, db := range graph.Resources.ManagedDatabases {
 		name, err := NameForResource(graph.Service, graph.Env, db.Meta)

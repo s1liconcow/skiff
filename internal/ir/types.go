@@ -239,8 +239,14 @@ type Rollout struct {
 }
 
 type TLS struct {
-	Enabled bool   `json:"enabled"`
-	CertRef string `json:"cert_ref,omitempty"`
+	Enabled           bool               `json:"enabled"`
+	CertRef           string             `json:"cert_ref,omitempty"`
+	ClientCertificate *ClientCertificate `json:"client_certificate,omitempty"`
+}
+
+type ClientCertificate struct {
+	Mode          string `json:"mode"`
+	TrustStoreRef string `json:"trust_store_ref"`
 }
 
 type SecretRef struct {

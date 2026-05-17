@@ -98,6 +98,7 @@ func Validate(doc Document) Result {
 	}
 	validateNetworkAt(&diagnostics, doc.Network, "$.network")
 	validateSecretsAt(&diagnostics, doc.Secrets, "$.secrets")
+	validateAddonsAt(&diagnostics, doc.Addons, "$.addons")
 
 	return Result{
 		OK:          len(diagnostics) == 0,
@@ -293,6 +294,23 @@ func validateSecretsAt(diagnostics *[]Diagnostic, secrets []SecretRef, path stri
 		seen[secret.Name] = struct{}{}
 		if !validSecretRef(secret.Ref) {
 			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".ref", Code: "INVALID_SECRET_REF", Severity: SeverityError, Message: "secrets must use secret manager references, not plaintext values"})
+		}
+	}
+}
+
+func validateAddonsAt(diagnostics *[]Diagnostic, addons []Addon, path string) {
+	seen := make(map[string]struct{}, len(addons))
+	for i, addon := range addons {
+		base := fmt.Sprintf("%s[%d]", path, i)
+		validateName(diagnostics, base+".name", addon.Name, "addon name must be a DNS-style Skiff name")
+		if addon.Name != "" {
+			if _, ok := seen[addon.Name]; ok {
+				*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".name", Code: "DUPLICATE_ADDON", Severity: SeverityError, Message: "addon names must be unique"})
+			}
+			seen[addon.Name] = struct{}{}
+		}
+		if strings.TrimSpace(addon.Mode) != "" && len(addon.Mode) > 64 {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".mode", Code: "INVALID_ADDON_MODE", Severity: SeverityError, Message: "addon mode must be 64 characters or fewer"})
 		}
 	}
 }

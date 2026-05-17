@@ -1,0 +1,31 @@
+apiVersion: skiff.dev/v1alpha1
+kind: Service
+metadata:
+  name: payments-api
+  env: prod
+artifact:
+  type: oci
+  ref: registry.example.com/payments-api@sha256:abc123
+runtime:
+  port: 8080
+  health:
+    path: /healthz
+network:
+  ingress:
+    type: public-http
+    host: payments.example.com
+    tls:
+      enabled: true
+      certRef: aws-acm://us-west-2/certificate/payments-api
+addons:
+  - name: mtls
+    mode: strict
+    config:
+      certificateSecretRef: aws-secretsmanager://arn:aws:secretsmanager:us-west-2:111122223333:secret:skiff/prod/payments-api/mtls-workload-cert
+      ingress:
+        clientCertificate:
+          mode: verify
+          trustStoreRef: aws-elbv2-trust-store://us-west-2/payments-client-ca
+      outbound:
+        - service: orders-api
+          port: 8443

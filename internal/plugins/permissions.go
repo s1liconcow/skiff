@@ -11,6 +11,8 @@ import (
 
 const (
 	PatchKindSecurityGroupRule = "SecurityGroupRule"
+	PatchKindListenerMTLS      = "ListenerMTLS"
+	PatchKindIAMRoleSecretRef  = "IAMRoleSecretRef"
 )
 
 type PermissionError struct {
@@ -92,6 +94,18 @@ type SecurityGroupRulePatch struct {
 	Description      string `json:"description,omitempty"`
 }
 
+type ListenerMTLSPatch struct {
+	ListenerRef   string `json:"listener_ref,omitempty"`
+	Mode          string `json:"mode"`
+	TrustStoreRef string `json:"trust_store_ref"`
+}
+
+type IAMRoleSecretRefPatch struct {
+	IAMRoleRef string `json:"iam_role_ref,omitempty"`
+	Name       string `json:"name"`
+	Ref        string `json:"ref"`
+}
+
 func ApplyIRPatches(graph *ir.Graph, sets []PatchSet) error {
 	if graph == nil {
 		return fmt.Errorf("graph is required")
@@ -101,6 +115,14 @@ func ApplyIRPatches(graph *ir.Graph, sets []PatchSet) error {
 			switch patch.Kind {
 			case PatchKindSecurityGroupRule:
 				if err := applySecurityGroupRulePatch(graph, patch); err != nil {
+					return fmt.Errorf("plugin %s %s patch failed: %w", set.Plugin, patch.Kind, err)
+				}
+			case PatchKindListenerMTLS:
+				if err := applyListenerMTLSPatch(graph, patch); err != nil {
+					return fmt.Errorf("plugin %s %s patch failed: %w", set.Plugin, patch.Kind, err)
+				}
+			case PatchKindIAMRoleSecretRef:
+				if err := applyIAMRoleSecretRefPatch(graph, patch); err != nil {
 					return fmt.Errorf("plugin %s %s patch failed: %w", set.Plugin, patch.Kind, err)
 				}
 			default:
@@ -170,6 +192,73 @@ func applySecurityGroupRulePatch(graph *ir.Graph, patch pluginapi.IRPatch) error
 	return fmt.Errorf("security group %q was not found", value.SecurityGroupRef)
 }
 
+func applyListenerMTLSPatch(graph *ir.Graph, patch pluginapi.IRPatch) error {
+	var value ListenerMTLSPatch
+	if err := json.Unmarshal(patch.Value, &value); err != nil {
+		return fmt.Errorf("decode listener mTLS: %w", err)
+	}
+	if value.ListenerRef == "" {
+		value.ListenerRef = listenerRefFromPath(patch.Path)
+	}
+	if value.ListenerRef == "" {
+		return fmt.Errorf("listener_ref is required")
+	}
+	if value.Mode == "" {
+		return fmt.Errorf("mode is required")
+	}
+	if value.TrustStoreRef == "" {
+		return fmt.Errorf("trust_store_ref is required")
+	}
+	for i := range graph.Resources.Listeners {
+		if graph.Resources.Listeners[i].Meta.LogicalID == value.ListenerRef {
+			graph.Resources.Listeners[i].TLS.ClientCertificate = &ir.ClientCertificate{
+				Mode:          value.Mode,
+				TrustStoreRef: value.TrustStoreRef,
+			}
+			if patch.Source.Plugin != "" {
+				graph.Resources.Listeners[i].Meta.Source = append(graph.Resources.Listeners[i].Meta.Source, ir.SourceRef{Path: "plugin:" + patch.Source.Plugin})
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("listener %q was not found", value.ListenerRef)
+}
+
+func applyIAMRoleSecretRefPatch(graph *ir.Graph, patch pluginapi.IRPatch) error {
+	var value IAMRoleSecretRefPatch
+	if err := json.Unmarshal(patch.Value, &value); err != nil {
+		return fmt.Errorf("decode IAM role secret ref: %w", err)
+	}
+	if value.IAMRoleRef == "" {
+		value.IAMRoleRef = iamRoleRefFromPath(patch.Path)
+	}
+	if value.IAMRoleRef == "" {
+		return fmt.Errorf("iam_role_ref is required")
+	}
+	if value.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if value.Ref == "" {
+		return fmt.Errorf("ref is required")
+	}
+	for i := range graph.Resources.IAMRoles {
+		if graph.Resources.IAMRoles[i].Meta.LogicalID != value.IAMRoleRef {
+			continue
+		}
+		for _, existing := range graph.Resources.IAMRoles[i].SecretRefs {
+			if existing.Name == value.Name || existing.Ref == value.Ref {
+				return nil
+			}
+		}
+		graph.Resources.IAMRoles[i].SecretRefs = append(graph.Resources.IAMRoles[i].SecretRefs, ir.SecretRef{Name: value.Name, Ref: value.Ref})
+		if patch.Source.Plugin != "" {
+			graph.Resources.IAMRoles[i].Meta.Source = append(graph.Resources.IAMRoles[i].Meta.Source, ir.SourceRef{Path: "plugin:" + patch.Source.Plugin})
+		}
+		return nil
+	}
+	return fmt.Errorf("IAM role %q was not found", value.IAMRoleRef)
+}
+
 func securityGroupRefFromPath(path string) string {
 	const prefix = "/resources/security_groups/"
 	const suffix = "/rules/-"
@@ -179,9 +268,29 @@ func securityGroupRefFromPath(path string) string {
 	return strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
 }
 
+func listenerRefFromPath(path string) string {
+	const prefix = "/resources/listeners/"
+	const suffix = "/tls/client_certificate"
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return ""
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+}
+
+func iamRoleRefFromPath(path string) string {
+	const prefix = "/resources/iam_roles/"
+	const suffix = "/secret_refs/-"
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return ""
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+}
+
 func knownPatchKind(kind string) bool {
 	switch kind {
 	case PatchKindSecurityGroupRule,
+		PatchKindListenerMTLS,
+		PatchKindIAMRoleSecretRef,
 		ir.ResourceKindWorkloadIdentity,
 		ir.ResourceKindIAMRole,
 		ir.ResourceKindSecurityGroup,

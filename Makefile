@@ -14,6 +14,7 @@ build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/skiff ./cmd/skiff
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/skiffd ./cmd/skiffd
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/skiff-runner ./cmd/skiff-runner
+	$(GO) build -ldflags "$(LDFLAGS)" -o bin/skiff-mtls-plugin ./cmd/skiff-mtls-plugin
 
 test:
 	$(GO_TEST_ENV) $(GO) test ./...

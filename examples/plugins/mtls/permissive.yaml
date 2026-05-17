@@ -1,0 +1,22 @@
+apiVersion: skiff.dev/v1alpha1
+kind: Service
+metadata:
+  name: payments-api
+  env: staging
+artifact:
+  type: oci
+  ref: registry.example.com/payments-api@sha256:abc123
+runtime:
+  port: 8080
+  health:
+    path: /healthz
+network:
+  ingress:
+    type: internal-http
+addons:
+  - name: mtls
+    mode: permissive
+    config:
+      outbound:
+        - service: orders-api
+          port: 8443

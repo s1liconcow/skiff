@@ -93,6 +93,35 @@ secrets:
 	assertDiagnostic(t, result.Diagnostics, "$.secrets[0].ref", "INVALID_SECRET_REF")
 }
 
+func TestAddonsAreExplicitAndValidated(t *testing.T) {
+	doc, err := spec.Decode([]byte(validServiceYAML+`
+addons:
+  - name: mtls
+    mode: strict
+    config:
+      outbound:
+        - service: orders-api
+          port: 8443
+`), spec.DecodeOptions{})
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	if len(doc.Addons) != 1 || doc.Addons[0].Name != "mtls" || len(doc.Addons[0].Config) == 0 {
+		t.Fatalf("addons not decoded: %+v", doc.Addons)
+	}
+	result := spec.Validate(*doc)
+	if !result.OK {
+		t.Fatalf("Validate diagnostics = %+v, want OK", result.Diagnostics)
+	}
+
+	doc.Addons = append(doc.Addons, doc.Addons[0])
+	result = spec.Validate(*doc)
+	if result.OK {
+		t.Fatal("Validate returned OK, want duplicate addon diagnostic")
+	}
+	assertDiagnostic(t, result.Diagnostics, "$.addons[1].name", "DUPLICATE_ADDON")
+}
+
 func TestStackValidationRequiresDatabaseBinding(t *testing.T) {
 	doc, err := spec.Decode([]byte(`
 apiVersion: skiff.dev/v1alpha1

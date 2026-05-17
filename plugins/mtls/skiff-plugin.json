@@ -1,0 +1,49 @@
+{
+  "apiVersion": "skiff.dev/plugin/v1alpha1",
+  "kind": "Plugin",
+  "name": "mtls",
+  "version": "0.1.0",
+  "description": "Optional mTLS capability for explicit service pairs and ingress client certificate validation.",
+  "runtime": {
+    "kind": "command",
+    "command": ["skiff-mtls-plugin"]
+  },
+  "hooks": ["validate", "mutate_ir", "runtime_addons", "doctor_checks"],
+  "permissions": {
+    "allowed_patch_kinds": ["SecurityGroupRule", "ListenerMTLS", "IAMRoleSecretRef"],
+    "runtime_addons": true,
+    "doctor_checks": true
+  },
+  "capabilities": [
+    {
+      "kind": "ir_patch",
+      "name": "service-to-service-egress",
+      "description": "Adds explicit workload egress rules for named mTLS peers.",
+      "patch_kinds": ["SecurityGroupRule"]
+    },
+    {
+      "kind": "ir_patch",
+      "name": "ingress-client-certificate",
+      "description": "Adds load balancer client-certificate validation when ingress mTLS is configured.",
+      "patch_kinds": ["ListenerMTLS"]
+    },
+    {
+      "kind": "ir_patch",
+      "name": "workload-certificate-secret",
+      "description": "Adds least-privilege IAM access to the configured workload certificate secret.",
+      "patch_kinds": ["IAMRoleSecretRef"]
+    },
+    {
+      "kind": "runtime_addon",
+      "name": "local-proxy-cert-agent",
+      "description": "Adds a VM-local proxy and certificate agent runtime addon.",
+      "runtime_addons": ["systemd-unit"]
+    },
+    {
+      "kind": "doctor_check",
+      "name": "mtls-health",
+      "description": "Reports mTLS certificate, proxy, and policy findings.",
+      "doctor_checks": ["MTLS_PROXY_UNHEALTHY", "MTLS_CERT_EXPIRING", "MTLS_CERT_EXPIRED", "MTLS_POLICY_MISMATCH"]
+    }
+  ]
+}

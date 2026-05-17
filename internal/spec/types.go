@@ -27,6 +27,7 @@ type Document struct {
 	Network         Network                    `json:"network,omitempty"`
 	Rollout         Rollout                    `json:"rollout,omitempty"`
 	Secrets         []SecretRef                `json:"secrets,omitempty"`
+	Addons          []Addon                    `json:"addons,omitempty"`
 	ManagedDatabase *ManagedDatabase           `json:"database,omitempty"`
 	StatefulGroup   *StatefulGroup             `json:"stateful,omitempty"`
 	Stack           *Stack                     `json:"stack,omitempty"`
@@ -139,6 +140,12 @@ type Rollout struct {
 type SecretRef struct {
 	Name string `json:"name"`
 	Ref  string `json:"ref"`
+}
+
+type Addon struct {
+	Name   string          `json:"name"`
+	Mode   string          `json:"mode,omitempty"`
+	Config json.RawMessage `json:"config,omitempty"`
 }
 
 type ManagedDatabase struct {
