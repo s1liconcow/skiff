@@ -145,7 +145,7 @@ func renderStats(m Model, p palette, width int) string {
 			chip := chips[i+j]
 			row = append(row, renderStatChip(p, chip.Label, chip.Value, chip.Detail, chipW))
 		}
-		rows = append(rows, strings.Join(row, strings.Repeat(" ", gap)))
+		rows = append(rows, joinBlocks(gap, row...))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
 }
@@ -212,7 +212,7 @@ func renderServiceDetail(m Model, p palette, width int) string {
 	}
 
 	lines = append(lines,
-		p.title.Render(service.Service)+"  "+healthStyle(p, service.Health).Render(firstNonEmpty(service.Health, "unknown")),
+		joinSpaced(p.title.Render(fit(service.Service, max(12, inner-18))), healthToken(p, service.Health), inner),
 		renderReleaseRail(p, service, inner),
 	)
 	if service.OperationID != "" {
@@ -431,6 +431,15 @@ func healthToken(p palette, health string) string {
 	}
 }
 
+func healthCell(p palette, health string, width int) string {
+	value := firstNonEmpty(health, "unknown")
+	token := healthToken(p, value)
+	if lipgloss.Width(token) <= width {
+		return token + strings.Repeat(" ", width-lipgloss.Width(token))
+	}
+	return healthStyle(p, value).Render(column(value, width))
+}
+
 func statusPill(p palette, status string) string {
 	status = firstNonEmpty(status, "ready")
 	if strings.Contains(status, "refreshing") {
@@ -455,23 +464,28 @@ func renderMetaChips(p palette, values []string, width int) string {
 		return ""
 	}
 	var lines []string
-	current := ""
+	var current []string
+	currentW := 0
 	for _, value := range values {
 		chip := p.softBox.Render(strings.TrimSpace(value))
-		if current == "" {
-			current = chip
+		chipW := lipgloss.Width(chip)
+		if len(current) == 0 {
+			current = append(current, chip)
+			currentW = chipW
 			continue
 		}
-		next := current + " " + chip
-		if width > 0 && lipgloss.Width(next) > width {
-			lines = append(lines, current)
-			current = chip
+		nextW := currentW + 1 + chipW
+		if width > 0 && nextW > width {
+			lines = append(lines, joinBlocks(1, current...))
+			current = []string{chip}
+			currentW = chipW
 			continue
 		}
-		current = next
+		current = append(current, chip)
+		currentW = nextW
 	}
-	if current != "" {
-		lines = append(lines, current)
+	if len(current) > 0 {
+		lines = append(lines, joinBlocks(1, current...))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -567,7 +581,7 @@ func renderServiceRow(p palette, prefix string, service client.ServiceStatus, wi
 	}
 	return prefix +
 		column(service.Service, nameW) + " " +
-		healthStyle(p, service.Health).Render(column(firstNonEmpty(service.Health, "unknown"), 10)) + " " +
+		healthCell(p, service.Health, 10) + " " +
 		column(firstNonEmpty(service.DesiredRelease, "<none>"), releaseW) + " " +
 		column(firstNonEmpty(op, "-"), opW)
 }
@@ -593,7 +607,7 @@ func renderSagaRow(p palette, prefix string, saga client.SagaSummary, width int)
 	}
 	return prefix +
 		column(saga.SagaID, idW) + " " +
-		sagaStatusStyle(p, saga.Status).Render(column(string(saga.Status), statusW)) + " " +
+		sagaStatusCell(p, saga.Status, statusW) + " " +
 		column(firstNonEmpty(step, "-"), stepW)
 }
 
@@ -639,10 +653,12 @@ func renderActionHints(p palette, hints []ActionHint, width int) string {
 }
 
 func renderStatChip(p palette, label, value, detail string, width int) string {
+	inner := max(1, width-4)
 	if width > 0 {
-		detail = fit(detail, max(1, width-8))
+		detail = fit(detail, inner)
 	}
-	body := p.statLabel.Render(strings.ToUpper(label)) + "\n" + p.statValue.Render(value) + " " + p.meta.Render(detail)
+	top := joinSpaced(p.statLabel.Render(strings.ToUpper(label)), p.statValue.Render(value), inner)
+	body := top + "\n" + p.meta.Render(detail)
 	if width > 0 {
 		return p.stat.Width(width).Render(body)
 	}
@@ -674,6 +690,26 @@ func sagaStatusSummary(sagas []client.SagaSummary) string {
 		}
 	}
 	return fmt.Sprintf("%d running", running)
+}
+
+func sagaStatusToken(p palette, status schema.SagaStatus) string {
+	switch status {
+	case schema.SagaSucceeded:
+		return p.okPill.Render(firstNonEmpty(string(status), "succeeded"))
+	case schema.SagaFailed, schema.SagaCanceled:
+		return p.badPill.Render(firstNonEmpty(string(status), "failed"))
+	default:
+		return p.warnPill.Render(firstNonEmpty(string(status), "pending"))
+	}
+}
+
+func sagaStatusCell(p palette, status schema.SagaStatus, width int) string {
+	value := firstNonEmpty(string(status), "pending")
+	token := sagaStatusToken(p, status)
+	if lipgloss.Width(token) <= width {
+		return token + strings.Repeat(" ", width-lipgloss.Width(token))
+	}
+	return sagaStatusStyle(p, status).Render(column(value, width))
 }
 
 func findingsCount(m Model) int {
@@ -723,6 +759,24 @@ func joinSpaced(left, right string, width int) string {
 		gap = 1
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+func joinBlocks(gap int, blocks ...string) string {
+	if len(blocks) == 0 {
+		return ""
+	}
+	if len(blocks) == 1 {
+		return blocks[0]
+	}
+	parts := make([]string, 0, len(blocks)*2-1)
+	spacer := strings.Repeat(" ", max(1, gap))
+	for i, block := range blocks {
+		if i > 0 {
+			parts = append(parts, spacer)
+		}
+		parts = append(parts, block)
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
 func column(value string, width int) string {
