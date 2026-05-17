@@ -16,6 +16,7 @@ type palette struct {
 	shell      lipgloss.Style
 	header     lipgloss.Style
 	brand      lipgloss.Style
+	brandMark  lipgloss.Style
 	title      lipgloss.Style
 	subtitle   lipgloss.Style
 	meta       lipgloss.Style
@@ -43,6 +44,8 @@ type palette struct {
 	warnPill   lipgloss.Style
 	badPill    lipgloss.Style
 	softBox    lipgloss.Style
+	signal     lipgloss.Style
+	divider    lipgloss.Style
 }
 
 func render(m Model) string {
@@ -62,16 +65,24 @@ func render(m Model) string {
 	stats := renderStats(m, p, width)
 	body := renderBody(m, p, width)
 	footer := renderFooter(m, p, width)
-	return p.shell.Width(width).Render(lipgloss.JoinVertical(lipgloss.Left, header, stats, body, footer)) + "\n"
+	sections := []string{header, "", stats, "", body}
+	if strings.TrimSpace(footer) != "" {
+		sections = append(sections, footer)
+	}
+	return p.shell.Width(width).Render(lipgloss.JoinVertical(lipgloss.Left, sections...)) + "\n"
 }
 
 func renderBody(m Model, p palette, width int) string {
 	if width < 104 {
 		return lipgloss.JoinVertical(lipgloss.Left,
 			renderServices(m, p, width),
+			"",
 			renderSagas(m, p, width),
+			"",
 			renderServiceDetail(m, p, width),
+			"",
 			renderEvents(m, p, width),
+			"",
 			renderCommandPalette(m, p, width),
 		)
 	}
@@ -95,23 +106,23 @@ func renderHeader(m Model, p palette, width int) string {
 	if m.loading {
 		status = strings.TrimSpace(m.spinner.View()) + " refreshing"
 	}
-	left := p.brand.Render("Skiff") + " " + p.title.Render("Operations Deck")
+	left := p.brandMark.Render("::") + " " + p.brand.Render("Skiff") + " " + p.title.Render("Operations Deck")
 	top := joinSpaced(left, statusPill(p, status), max(1, width-4))
 
-	meta := []string{
-		"env " + firstNonEmpty(m.dashboard.Status.Env, "unknown"),
-		"mode " + firstNonEmpty(string(m.dashboard.Status.Mode), "unknown"),
-		"source " + firstNonEmpty(m.dashboard.Source, m.dashboard.Freshness.Source, "unknown"),
-		fmt.Sprintf("fresh %ds", m.dashboard.Freshness.FreshnessSeconds),
-	}
+	meta := []string{renderSignal(p, "env", firstNonEmpty(m.dashboard.Status.Env, "unknown"))}
+	meta = append(meta,
+		renderSignal(p, "mode", firstNonEmpty(string(m.dashboard.Status.Mode), "unknown")),
+		renderSignal(p, "source", firstNonEmpty(m.dashboard.Source, m.dashboard.Freshness.Source, "unknown")),
+		renderSignal(p, "fresh", fmt.Sprintf("%ds", m.dashboard.Freshness.FreshnessSeconds)),
+	)
 	if provider := providerSummary(m); provider != "" {
-		meta = append(meta, provider)
+		meta = append(meta, renderSignal(p, "cloud", provider))
 	}
 	if m.trace() != "" {
-		meta = append(meta, "trace "+m.trace())
+		meta = append(meta, renderSignal(p, "trace", m.trace()))
 	}
 	if m.readOnly {
-		meta = append(meta, "read-only")
+		meta = append(meta, p.warnPill.Render("read-only"))
 	}
 
 	tagline := p.subtitle.Render(fit("object storage truth / typed sagas / direct recovery", max(1, width-4)))
@@ -287,7 +298,7 @@ func renderCommandPalette(m Model, p palette, width int) string {
 			}, innerWidth(width)),
 		}
 		if m.readOnly {
-			lines = append(lines, p.meta.Render("Mutating actions are blocked by read-only mode."))
+			lines = append(lines, p.warn.Render("Mutating actions are blocked by read-only mode."))
 		} else {
 			lines = append(lines, p.meta.Render("Mutating actions still emit explicit, auditable Skiff commands."))
 		}
@@ -314,6 +325,7 @@ func renderCommandPalette(m Model, p palette, width int) string {
 		lines = append(lines, style.Render(action.Label+"  "+state))
 	}
 	command := p.command.Render(wrapWords(action.Command, max(12, innerWidth(width)-4)))
+	lines = append(lines, p.divider.Render(strings.Repeat("-", max(1, innerWidth(width)))))
 	lines = append(lines, p.commandBox.Width(innerWidth(width)).Render(command))
 	return p.panel.Width(width).Render(strings.Join(lines, "\n"))
 }
@@ -337,6 +349,7 @@ func styles(noColor bool) palette {
 			shell:      base,
 			header:     panel,
 			brand:      base,
+			brandMark:  base,
 			title:      base,
 			subtitle:   base,
 			meta:       base,
@@ -364,13 +377,16 @@ func styles(noColor bool) palette {
 			warnPill:   base,
 			badPill:    base,
 			softBox:    base,
+			signal:     base,
+			divider:    base,
 		}
 	}
 	base := lipgloss.NewStyle()
 	return palette{
-		shell:      base,
+		shell:      base.Foreground(lipgloss.Color("252")),
 		header:     base.Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("43")).Padding(0, 1),
 		brand:      base.Bold(true).Foreground(lipgloss.Color("16")).Background(lipgloss.Color("43")).Padding(0, 1),
+		brandMark:  base.Foreground(lipgloss.Color("43")).Bold(true),
 		title:      base.Bold(true).Foreground(lipgloss.Color("231")),
 		subtitle:   base.Foreground(lipgloss.Color("152")),
 		meta:       base.Foreground(lipgloss.Color("245")),
@@ -398,6 +414,8 @@ func styles(noColor bool) palette {
 		warnPill:   base.Foreground(lipgloss.Color("16")).Background(lipgloss.Color("220")).Bold(true).Padding(0, 1),
 		badPill:    base.Foreground(lipgloss.Color("231")).Background(lipgloss.Color("160")).Bold(true).Padding(0, 1),
 		softBox:    base.Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("238")).Padding(0, 1),
+		signal:     base.Foreground(lipgloss.Color("81")),
+		divider:    base.Foreground(lipgloss.Color("238")),
 	}
 }
 
@@ -446,6 +464,15 @@ func statusPill(p palette, status string) string {
 		return p.warnPill.Render(status)
 	}
 	return p.okPill.Render(status)
+}
+
+func renderSignal(p palette, label, value string) string {
+	label = strings.TrimSpace(label)
+	value = strings.TrimSpace(firstNonEmpty(value, "unknown"))
+	if label == "" {
+		return p.signal.Render(value)
+	}
+	return p.meta.Render(label+" ") + p.signal.Render(value)
 }
 
 func sagaStatusStyle(p palette, status schema.SagaStatus) lipgloss.Style {
