@@ -1,0 +1,40 @@
+{
+  "apiVersion": "skiff.dev/plugin/v1alpha1",
+  "kind": "Plugin",
+  "name": "skiff-fake-plugin",
+  "version": "0.1.0",
+  "description": "Reference fake plugin used by Skiff plugin conformance tests.",
+  "runtime": {
+    "kind": "command",
+    "command": ["skiff-fake-plugin"]
+  },
+  "hooks": ["validate", "mutate_ir", "runtime_addons", "doctor_checks", "saga_step"],
+  "permissions": {
+    "allowed_patch_kinds": ["SecurityGroupRule"],
+    "runtime_addons": true,
+    "doctor_checks": true,
+    "saga_step_kinds": ["plugin.fake-step"]
+  },
+  "capabilities": [
+    {
+      "kind": "ir_patch",
+      "name": "security-group-egress",
+      "patch_kinds": ["SecurityGroupRule"]
+    },
+    {
+      "kind": "runtime_addon",
+      "name": "systemd-dropin",
+      "runtime_addons": ["systemd-dropin"]
+    },
+    {
+      "kind": "doctor_check",
+      "name": "fake-health",
+      "doctor_checks": ["FAKE_PLUGIN_CHECK"]
+    },
+    {
+      "kind": "saga_step",
+      "name": "fake-step",
+      "saga_step_kinds": ["plugin.fake-step"]
+    }
+  ]
+}

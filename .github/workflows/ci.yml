@@ -15,6 +15,8 @@ jobs:
           cache: true
       - name: Check formatting
         run: test -z "$(gofmt -l $(find cmd internal tests -name '*.go' -print))"
+      - name: Conformance
+        run: go test ./tests/conformance/...
       - name: Test
         run: go test ./...
       - name: Vet
