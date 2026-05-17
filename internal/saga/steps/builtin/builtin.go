@@ -6,6 +6,8 @@ import (
 	"github.com/s1liconcow/skiff/internal/saga/steps"
 	"github.com/s1liconcow/skiff/internal/saga/steps/approval"
 	"github.com/s1liconcow/skiff/internal/saga/steps/check"
+	"github.com/s1liconcow/skiff/internal/saga/steps/service"
+	sagatime "github.com/s1liconcow/skiff/internal/saga/steps/time"
 )
 
 type Options struct {
@@ -27,6 +29,9 @@ func New(opts Options) map[string]steps.Step {
 		check.MetricsGate{Client: metrics},
 		approval.Manual{Binary: opts.Binary},
 		approval.ChangeWindow{Binary: opts.Binary},
+		service.Stage{Store: opts.Store, Provider: opts.Provider},
+		service.MarkStable{Store: opts.Store, Provider: opts.Provider},
+		sagatime.Sleep{},
 	}
 	out := make(map[string]steps.Step, len(items))
 	for _, item := range items {

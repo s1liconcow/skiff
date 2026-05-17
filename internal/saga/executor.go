@@ -293,6 +293,9 @@ func (e *Executor) persistStepResult(ctx context.Context, sagaID string, node sc
 		ProviderOperations: append([]schema.ProviderOperationRef(nil), result.ProviderOperations...),
 		CompletedAt:        now,
 	}
+	if status == string(steps.StatusWaiting) {
+		return persisted, nil
+	}
 	_, err := e.Store.CreateStepResult(ctx, persisted)
 	if err != nil {
 		if errors.Is(err, objstore.ErrAlreadyExists) {
@@ -376,15 +379,18 @@ func upsertStepResultRef(refs []schema.StepResultRef, next schema.StepResultRef)
 }
 
 func stepResultRef(result schema.StepResult) schema.StepResultRef {
-	return schema.StepResultRef{
+	ref := schema.StepResultRef{
 		StepID:      result.StepID,
 		Kind:        result.Kind,
 		Status:      result.Status,
-		ResultRef:   fmt.Sprintf("sagas/%s/artifacts/results/%s.json", result.SagaID, result.StepID),
 		Result:      cloneRaw(result.Result),
 		Failure:     result.Failure,
 		CompletedAt: result.CompletedAt,
 	}
+	if result.Status != string(steps.StatusWaiting) {
+		ref.ResultRef = fmt.Sprintf("sagas/%s/artifacts/results/%s.json", result.SagaID, result.StepID)
+	}
+	return ref
 }
 
 func failedStepResult(node schema.SagaNode, err error) *steps.StepResult {

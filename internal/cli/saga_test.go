@@ -7,9 +7,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/s1liconcow/skiff/internal/config"
+	"github.com/s1liconcow/skiff/internal/ir"
+	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/objstore/file"
+	"github.com/s1liconcow/skiff/internal/provider"
 	sagastate "github.com/s1liconcow/skiff/internal/saga"
 	"github.com/s1liconcow/skiff/internal/saga/steps/approval"
+	"github.com/s1liconcow/skiff/internal/state"
+	"github.com/s1liconcow/skiff/internal/state/canonical"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 )
 
@@ -95,7 +101,7 @@ func TestSagaSkeletonCommandsReturnJSON(t *testing.T) {
 	clearSkiffEnv(t)
 	var stdout, stderr bytes.Buffer
 	code := Run("skiff", []string{
-		"saga", "resume", "saga_01JABC",
+		"saga", "watch", "saga_01JABC",
 		"--format", "json",
 		"--trace-id", "tr_saga_skeleton",
 	}, &stdout, &stderr)
@@ -109,7 +115,7 @@ func TestSagaSkeletonCommandsReturnJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("saga skeleton output is not valid JSON: %v\n%s", err, stdout.String())
 	}
-	if !got.OK || got.TraceID != "tr_saga_skeleton" || got.Command != "resume" || got.Saga != "saga_01JABC" || got.Implemented {
+	if !got.OK || got.TraceID != "tr_saga_skeleton" || got.Command != "watch" || got.Saga != "saga_01JABC" || got.Implemented {
 		t.Fatalf("unexpected skeleton output: %+v", got)
 	}
 }
@@ -192,4 +198,119 @@ func TestSagaApproveJSONMutatesWaitingApproval(t *testing.T) {
 	if !got.OK || got.Result.Decision != approval.DecisionApprove || got.Result.Control.StepResults[0].Status != "succeeded" {
 		t.Fatalf("unexpected approval output: %+v", got)
 	}
+}
+
+func TestSagaStartCanaryDeployJSONCreatesAndRuns(t *testing.T) {
+	clearSkiffEnv(t)
+	dir := t.TempDir()
+	store, err := file.New(dir)
+	if err != nil {
+		t.Fatalf("new file store: %v", err)
+	}
+	control := schema.NewServiceControl("payments-api", "prod", canonical.Time(time.Date(2026, 5, 17, 3, 20, 0, 0, time.UTC)), schema.Actor{ID: "agent-one", Type: "agent"})
+	control.DesiredRelease = "rel_old"
+	control.StableRelease = "rel_old"
+	if _, err := state.NewClient(store).CreateServiceControl(context.Background(), control); err != nil {
+		t.Fatalf("create service control: %v", err)
+	}
+	fake := &fakeCanaryCLIProvider{}
+	oldProvider := newSagaProvider
+	newSagaProvider = func(config.Config, objstore.ObjectStore) (provider.Provider, error) {
+		return fake, nil
+	}
+	defer func() { newSagaProvider = oldProvider }()
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"saga", "start", "canary-deploy",
+		"--service", "payments-api",
+		"--release-id", "rel_new",
+		"--stages", "100",
+		"--bake", "0s",
+		"--direct",
+		"--state", "file://" + dir,
+		"--env", "prod",
+		"--provider", "aws",
+		"--region", "us-west-2",
+		"--format", "json",
+		"--trace-id", "tr_canary_cli",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var got canarySagaOutput
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("saga start output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_canary_cli" || got.Result.Status != schema.SagaSucceeded || got.Result.Stage != 100 || got.Result.NextAction != "complete" {
+		t.Fatalf("unexpected canary output: %+v", got)
+	}
+	if len(fake.rollouts) != 1 || fake.rollouts[0].ReleaseID != "rel_new" {
+		t.Fatalf("rollout not started for canary release: %+v", fake.rollouts)
+	}
+	updated, err := state.NewClient(store).GetServiceControl(context.Background(), "payments-api")
+	if err != nil {
+		t.Fatalf("get service control: %v", err)
+	}
+	if updated.Control.DesiredRelease != "rel_new" || updated.Control.StableRelease != "rel_new" {
+		t.Fatalf("canary did not mark release stable: %+v", updated.Control)
+	}
+}
+
+type fakeCanaryCLIProvider struct {
+	rollouts []provider.RolloutRequest
+}
+
+func (p *fakeCanaryCLIProvider) Name() string { return "aws" }
+
+func (p *fakeCanaryCLIProvider) Plan(ctx context.Context, graph *ir.Graph) (*provider.Plan, error) {
+	return &provider.Plan{Provider: "aws", Service: graph.Service, Env: graph.Env}, nil
+}
+
+func (p *fakeCanaryCLIProvider) Apply(ctx context.Context, plan *provider.Plan) (*provider.ApplyResult, error) {
+	return &provider.ApplyResult{Provider: "aws", Service: plan.Service, Env: plan.Env, AppliedAt: time.Now().UTC()}, nil
+}
+
+func (p *fakeCanaryCLIProvider) InspectService(ctx context.Context, ref provider.ServiceRef) (*provider.ServiceInspection, error) {
+	return &provider.ServiceInspection{Ref: ref, Provider: "aws", FreshAt: time.Now().UTC()}, nil
+}
+
+func (p *fakeCanaryCLIProvider) InspectResource(ctx context.Context, ref provider.ResourceRef) (*provider.ResourceInspection, error) {
+	return &provider.ResourceInspection{Kind: ref.Kind, LogicalID: ref.LogicalID, ProviderID: "tg-123", Status: "healthy"}, nil
+}
+
+func (p *fakeCanaryCLIProvider) Logs(ctx context.Context, req provider.LogsRequest) (*provider.LogsResult, error) {
+	return &provider.LogsResult{}, nil
+}
+
+func (p *fakeCanaryCLIProvider) Metrics(ctx context.Context, req provider.MetricsRequest) (*provider.MetricsResult, error) {
+	name := "aws.elb.http_5xx_count"
+	if len(req.Names) > 0 {
+		name = req.Names[0]
+	}
+	return &provider.MetricsResult{Series: []provider.MetricSeries{{
+		Name:   name,
+		Source: "fake",
+		Points: []provider.MetricPoint{{Timestamp: time.Now().UTC(), Value: 0}},
+	}}}, nil
+}
+
+func (p *fakeCanaryCLIProvider) Debug(ctx context.Context, req provider.DebugRequest) (*provider.DebugSession, error) {
+	return &provider.DebugSession{ID: "debug-1", Provider: "aws", StartedAt: time.Now().UTC()}, nil
+}
+
+func (p *fakeCanaryCLIProvider) StartRollout(ctx context.Context, req provider.RolloutRequest) (*provider.Rollout, error) {
+	p.rollouts = append(p.rollouts, req)
+	return &provider.Rollout{ID: req.OperationID, Provider: "aws", Service: req.Service, Env: req.Env, ProviderID: "ir-" + req.ReleaseID, StartedAt: time.Now().UTC()}, nil
+}
+
+func (p *fakeCanaryCLIProvider) WatchRollout(ctx context.Context, req provider.WatchRolloutRequest) (*provider.RolloutStatus, error) {
+	return &provider.RolloutStatus{RolloutID: req.RolloutID, Status: "succeeded", ProviderID: req.ProviderID, UpdatedAt: time.Now().UTC()}, nil
+}
+
+func (p *fakeCanaryCLIProvider) Rollback(ctx context.Context, req provider.RollbackRequest) (*provider.Rollout, error) {
+	return &provider.Rollout{ID: "rollback-" + req.ReleaseID, Provider: "aws", Service: req.Service, Env: req.Env, ProviderID: "rb-" + req.ReleaseID, StartedAt: time.Now().UTC()}, nil
 }

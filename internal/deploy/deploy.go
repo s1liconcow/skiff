@@ -51,6 +51,16 @@ type Result struct {
 	NextCommands    []string                `json:"next_commands,omitempty"`
 }
 
+type PublishReleaseResult struct {
+	OK              bool                    `json:"ok"`
+	OperationID     string                  `json:"operation_id,omitempty"`
+	ReleaseID       string                  `json:"release_id,omitempty"`
+	TraceID         string                  `json:"trace_id,omitempty"`
+	RuntimeManifest *schema.RuntimeManifest `json:"runtime_manifest,omitempty"`
+	ReleaseManifest *schema.ReleaseManifest `json:"release_manifest,omitempty"`
+	Events          []events.Event          `json:"events,omitempty"`
+}
+
 func (d Deployer) Deploy(ctx context.Context, graph *ir.Graph, req Request) (*Result, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -187,6 +197,51 @@ func (d Deployer) Deploy(ctx context.Context, graph *ir.Graph, req Request) (*Re
 		return fail(err, "release_lease")
 	}
 	leaseHeld = false
+	return result, nil
+}
+
+func (d Deployer) PublishRelease(ctx context.Context, graph *ir.Graph, req Request) (*PublishReleaseResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if graph == nil {
+		return nil, fmt.Errorf("graph is required")
+	}
+	if d.Store == nil {
+		return nil, fmt.Errorf("object store is required")
+	}
+	if d.Signer == nil {
+		return nil, fmt.Errorf("signer is required for release publish")
+	}
+	now := d.now()
+	req = normalizeRequest(req, graph, now)
+	runtimeManifest, releaseManifest, err := d.publishRelease(ctx, graph, req, now)
+	if err != nil {
+		return nil, err
+	}
+	result := &PublishReleaseResult{
+		OK:              true,
+		OperationID:     req.OperationID,
+		ReleaseID:       req.ReleaseID,
+		TraceID:         req.TraceID,
+		RuntimeManifest: runtimeManifest,
+		ReleaseManifest: releaseManifest,
+	}
+	log, err := events.NewLog(events.Options{Store: d.Store, Clock: d.now})
+	if err != nil {
+		return nil, err
+	}
+	event := events.NewOperationEvent(graph.Service, req.OperationID, "deploy.release_published", "signed release and runtime manifest objects published", d.now(), req.TraceID+"canary-release-published")
+	event.TraceID = req.TraceID
+	event.Actor = &req.Actor
+	event.Facts = []schema.Fact{{Type: "release", Message: req.ReleaseID}}
+	if _, err := log.Append(ctx, event); err == nil {
+		result.Events = append(result.Events, event)
+	}
+	audit := events.NewAuditRecord(req.Actor, schema.Target{Kind: "service", Name: graph.Service}, "publish_release", "published signed release "+req.ReleaseID, req.TraceID, d.now(), req.OperationID+"publish-release")
+	audit.Risk = schema.RiskLow
+	audit.Data = rawJSON(map[string]string{"operation_id": req.OperationID, "release_id": req.ReleaseID})
+	_, _ = log.AppendAudit(ctx, audit)
 	return result, nil
 }
 

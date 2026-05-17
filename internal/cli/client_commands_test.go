@@ -2,12 +2,17 @@ package cli
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/s1liconcow/skiff/internal/config"
+	"github.com/s1liconcow/skiff/internal/objstore"
+	"github.com/s1liconcow/skiff/internal/provider"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 )
@@ -364,6 +369,62 @@ func TestDeployDryRunJSON(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("dry-run deploy wrote files under state root: %+v", entries)
+	}
+}
+
+func TestDeployCanaryJSONCreatesAndRunsSaga(t *testing.T) {
+	clearSkiffEnv(t)
+	root := t.TempDir()
+	writeStateObject(t, root, "services/payments-api/control.json", schema.ServiceControl{
+		SchemaVersion:  schema.Version,
+		Service:        "payments-api",
+		Env:            "prod",
+		DesiredRelease: "rel_old",
+		StableRelease:  "rel_old",
+		Version:        1,
+		UpdatedAt:      "2026-05-17T03:30:00Z",
+		UpdatedBy:      schema.Actor{ID: "agent-one", Type: "agent"},
+	})
+	fake := &fakeCanaryCLIProvider{}
+	oldProvider := newSagaProvider
+	newSagaProvider = func(config.Config, objstore.ObjectStore) (provider.Provider, error) {
+		return fake, nil
+	}
+	defer func() { newSagaProvider = oldProvider }()
+
+	specPath := filepath.Join("..", "..", "examples", "service", "skiff.yaml")
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"deploy",
+		specPath,
+		"--canary",
+		"--release-id", "rel_new",
+		"--canary-stages", "100",
+		"--canary-bake", "0s",
+		"--signing-seed-base64", base64.StdEncoding.EncodeToString([]byte(strings.Repeat("D", ed25519.SeedSize))),
+		"--direct",
+		"--state", "file://" + root,
+		"--env", "prod",
+		"--provider", "aws",
+		"--region", "us-west-2",
+		"--format", "json",
+		"--trace-id", "tr_deploy_canary",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var got canarySagaOutput
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("deploy canary output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_deploy_canary" || got.Result.Status != schema.SagaSucceeded || got.Result.Stage != 100 {
+		t.Fatalf("unexpected deploy canary output: %+v", got)
+	}
+	if len(fake.rollouts) != 1 || fake.rollouts[0].ReleaseID != "rel_new" {
+		t.Fatalf("canary rollout was not started: %+v", fake.rollouts)
 	}
 }
 

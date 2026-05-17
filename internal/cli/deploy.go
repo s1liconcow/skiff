@@ -7,13 +7,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/s1liconcow/skiff/internal/client"
 	"github.com/s1liconcow/skiff/internal/compiler"
 	"github.com/s1liconcow/skiff/internal/config"
 	"github.com/s1liconcow/skiff/internal/deploy"
+	"github.com/s1liconcow/skiff/internal/events"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
+	"github.com/s1liconcow/skiff/internal/saga/templates"
 	"github.com/s1liconcow/skiff/internal/security/signing"
 	"github.com/s1liconcow/skiff/internal/spec"
 	"github.com/s1liconcow/skiff/internal/state/schema"
@@ -36,6 +39,13 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 	operationID := fs.String("operation-id", "", "operation ID to use")
 	keyID := fs.String("key-id", "local-deploy", "signing key ID")
 	signingSeed := fs.String("signing-seed-base64", "", "base64 Ed25519 seed for release signing")
+	canary := fs.Bool("canary", false, "create and run a staged canary deployment saga")
+	canaryStages := fs.String("canary-stages", "5,25,100", "comma-separated canary stages by percent")
+	canaryBake := fs.String("canary-bake", templates.DefaultCanaryBake, "canary bake duration")
+	canaryRun := fs.Bool("canary-run", true, "run the canary saga after creating it")
+	canaryMetric := fs.String("canary-metric", "", "metric gate name for canary stages")
+	canaryComparator := fs.String("canary-comparator", "<=", "metric gate comparator for canary stages")
+	canaryThreshold := fs.Float64("canary-threshold", 0, "metric gate threshold for canary stages")
 
 	flagArgs, positionals, err := splitDeployArgs(args)
 	if err != nil {
@@ -74,6 +84,65 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 			return writeSpecError(binary, "SPEC_INVALID", *flags.format, *flags.traceID, errors.New("spec validation failed"), validation.Diagnostics, stdout, stderr)
 		}
 		return writeSpecError(binary, "SPEC_COMPILE_FAILED", *flags.format, *flags.traceID, err, nil, stdout, stderr)
+	}
+	if *canary {
+		stages, err := parseCanaryStages(*canaryStages)
+		if err != nil {
+			return writeSpecError(binary, "DEPLOY_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
+		}
+		req := templates.CanaryRequest{
+			OperationID:  *operationID,
+			Service:      graph.Service,
+			Env:          graph.Env,
+			ReleaseID:    firstNonEmptyString(*releaseID, "rel_"+events.NewID(time.Now().UTC(), *flags.traceID+graph.Service+"canary")),
+			Stages:       stages,
+			BakeDuration: *canaryBake,
+			Actor:        schema.Actor{ID: "skiff-cli", Type: "user"},
+			TraceID:      *flags.traceID,
+		}
+		if *canaryMetric != "" {
+			req.MetricGates = []templates.MetricGate{{Metric: *canaryMetric, Comparator: *canaryComparator, Threshold: *canaryThreshold}}
+		}
+		if *dryRun || *planOnly {
+			req = templates.NormalizeCanaryRequest(req)
+			result := canarySagaResult{
+				SagaID:       req.SagaID,
+				OperationID:  req.OperationID,
+				Service:      req.Service,
+				Env:          req.Env,
+				ReleaseID:    req.ReleaseID,
+				Status:       schema.SagaPending,
+				Stage:        req.Stages[0].Percent,
+				NextAction:   "create_saga",
+				CurrentSteps: []string{"preflight"},
+			}
+			return writeCanarySagaResult(binary, "deploy --canary", *flags.format, *flags.traceID, result, stdout, stderr)
+		}
+		store, err := openSagaObjectStore(loaded.Config)
+		if err != nil {
+			return writeClientError(binary, "deploy", *flags.format, *flags.traceID, err, stdout, stderr)
+		}
+		signer, err := signerFromSeed(*keyID, *signingSeed)
+		if err != nil {
+			return writeSpecError(binary, "DEPLOY_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
+		}
+		published, err := (deploy.Deployer{Store: store, Signer: signer}).PublishRelease(nilContext(), graph, deploy.Request{
+			Actor:       req.Actor,
+			TraceID:     req.TraceID,
+			ReleaseID:   req.ReleaseID,
+			OperationID: req.OperationID,
+		})
+		if err != nil {
+			return writeSpecError(binary, "DEPLOY_FAILED", *flags.format, *flags.traceID, err, nil, stdout, stderr)
+		}
+		req.ReleaseID = published.ReleaseID
+		req.OperationID = published.OperationID
+		req.TraceID = published.TraceID
+		result, err := createAndMaybeRunCanary(nilContext(), binary, loaded.Config, req, *canaryRun)
+		if err != nil {
+			return writeClientError(binary, "deploy", *flags.format, *flags.traceID, err, stdout, stderr)
+		}
+		return writeCanarySagaResult(binary, "deploy --canary", *flags.format, *flags.traceID, *result, stdout, stderr)
 	}
 
 	var storeOpts []aws.Option
@@ -140,6 +209,11 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 func splitDeployArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
 		"api-url":             true,
+		"canary-bake":         true,
+		"canary-comparator":   true,
+		"canary-metric":       true,
+		"canary-stages":       true,
+		"canary-threshold":    true,
 		"config":              true,
 		"env":                 true,
 		"file":                true,
