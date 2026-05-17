@@ -1,0 +1,73 @@
+env:
+  SKIFF_SERVICE: [[ .Service ]]
+  SKIFF_SPEC: [[ .SpecPath ]]
+  SKIFF_STATE: [[ .StateURI ]]
+  SKIFF_PROVIDER: [[ .Provider ]]
+  AWS_REGION: [[ .Region ]]
+  SKIFF_STAGING_ENV: [[ .StagingEnv ]]
+  SKIFF_PROD_ENV: [[ .ProductionEnv ]]
+  IMAGE_REPO: [[ .ImageRepository ]]
+  AWS_ROLE_TO_ASSUME: ${AWS_ROLE_TO_ASSUME}
+  SKIFF_OIDC_TOKEN_FILE: ${BUILDKITE_OIDC_TOKEN_FILE}
+
+steps:
+  - label: test, build, contract, plan
+    key: test-build-plan
+    command:
+      - "[[ .InstallCommand ]]"
+      - "go test ./..."
+      - "docker buildx build --push --tag \"$IMAGE_REPO:$BUILDKITE_COMMIT\" --metadata-file image-metadata.json ."
+      - "export IMAGE_DIGEST=\"$(jq -r '.\\\"containerimage.digest\\\"' image-metadata.json)\""
+      - "test -n \"$IMAGE_DIGEST\""
+      - "export IMAGE_REF=\"$IMAGE_REPO@$IMAGE_DIGEST\""
+      - "export RELEASE_ID=\"rel_${BUILDKITE_BUILD_NUMBER}_${BUILDKITE_JOB_ID}\""
+      - "export CANDIDATE_ID=\"cand_${BUILDKITE_BUILD_NUMBER}_${BUILDKITE_JOB_ID}\""
+      - "[[ .SkiffBinary ]] validate \"$SKIFF_SPEC\" --format json --show-defaulted > skiff-validate.json"
+      - "jq '.spec.metadata.env = env.SKIFF_STAGING_ENV | .spec.artifact.ref = env.IMAGE_REF | .spec.artifact.digest = env.IMAGE_DIGEST' skiff-validate.json > skiff-staging-wrapper.json"
+      - "jq '.spec' skiff-staging-wrapper.json > skiff.staging.json"
+      - "[[ .SkiffBinary ]] contract test skiff.staging.json --artifact-uri \"$IMAGE_REF\" --artifact-digest \"$IMAGE_DIGEST\" --format json > skiff-contract.json"
+      - "[[ .SkiffBinary ]] plan skiff.staging.json --provider \"$SKIFF_PROVIDER\" --region \"$AWS_REGION\" --state \"$SKIFF_STATE\" --format json > skiff-plan.json"
+      - "[[ .SkiffBinary ]] release candidate create \"$CANDIDATE_ID\" --direct --state \"$SKIFF_STATE\" --env \"$SKIFF_STAGING_ENV\" --provider \"$SKIFF_PROVIDER\" --region \"$AWS_REGION\" --service \"$SKIFF_SERVICE\" --candidate-env \"$SKIFF_STAGING_ENV\" --release-id \"$RELEASE_ID\" --artifact-uri \"$IMAGE_REF\" --artifact-digest \"$IMAGE_DIGEST\" --git-repo \"$BUILDKITE_REPO\" --git-sha \"$BUILDKITE_COMMIT\" --git-ref \"$BUILDKITE_BRANCH\" --ci-provider buildkite --ci-run-id \"$BUILDKITE_BUILD_ID\" --ci-run-url \"$BUILDKITE_BUILD_URL\" --check tests=passed --check contract=passed --check plan=passed --format json > skiff-candidate.json"
+      - "if [ -n \"${SKIFF_API_URL:-}\" ]; then [[ .SkiffBinary ]] status \"$SKIFF_SERVICE\" --api --api-url \"$SKIFF_API_URL\" --format json > skiff-status-api.json; fi"
+      - "buildkite-agent artifact upload \"skiff-*.json\""
+      - "buildkite-agent artifact upload skiff.staging.json"
+    agents:
+      queue: default
+
+  - wait
+
+  - label: deploy staging
+    key: deploy-staging
+    depends_on:
+      - test-build-plan
+    if: build.branch == "main"
+    command:
+      - "[[ .InstallCommand ]]"
+      - "buildkite-agent artifact download skiff-candidate.json ."
+      - "buildkite-agent artifact download skiff.staging.json ."
+      - "export RELEASE_ID=\"$(jq -r '.result.candidate.release_id' skiff-candidate.json)\""
+      - "[[ .SkiffBinary ]] deploy skiff.staging.json --direct --state \"$SKIFF_STATE\" --env \"$SKIFF_STAGING_ENV\" --provider \"$SKIFF_PROVIDER\" --region \"$AWS_REGION\" --release-id \"$RELEASE_ID\" --signing-seed-base64 \"$SKIFF_RELEASE_SIGNING_SEED\" --format json > skiff-deploy-staging.json"
+      - "buildkite-agent artifact upload skiff-deploy-staging.json"
+    agents:
+      queue: default
+
+  - block: approve production promotion
+    key: approve-prod
+    if: build.branch == "main"
+    prompt: Protected production environment approval.
+
+  - label: promote production
+    key: promote-prod
+    depends_on:
+      - deploy-staging
+      - approve-prod
+    if: build.branch == "main"
+    command:
+      - "[[ .InstallCommand ]]"
+      - "buildkite-agent artifact download skiff-candidate.json ."
+      - "export CANDIDATE_ID=\"$(jq -r '.result.candidate.candidate_id' skiff-candidate.json)\""
+      - "export PROD_APPROVAL_ID=\"buildkite-${BUILDKITE_BUILD_ID}\""
+      - "[[ .SkiffBinary ]] promote \"$SKIFF_SERVICE\" --direct --state \"$SKIFF_STATE\" --env \"$SKIFF_STAGING_ENV\" --provider \"$SKIFF_PROVIDER\" --region \"$AWS_REGION\" --from \"$SKIFF_STAGING_ENV\" --to \"$SKIFF_PROD_ENV\" --candidate \"$CANDIDATE_ID\" --approval-id \"$PROD_APPROVAL_ID\" --format json > skiff-promote-prod.json"
+      - "buildkite-agent artifact upload skiff-promote-prod.json"
+    agents:
+      queue: default

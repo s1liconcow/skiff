@@ -1,0 +1,200 @@
+name: skiff-[[ .Service ]]
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  SKIFF_SERVICE: [[ .Service ]]
+  SKIFF_SPEC: [[ .SpecPath ]]
+  SKIFF_STATE: [[ .StateURI ]]
+  SKIFF_PROVIDER: [[ .Provider ]]
+  AWS_REGION: [[ .Region ]]
+  SKIFF_STAGING_ENV: [[ .StagingEnv ]]
+  SKIFF_PROD_ENV: [[ .ProductionEnv ]]
+  IMAGE_REPO: [[ .ImageRepository ]]
+  SKIFF_API_URL: ${{ vars.SKIFF_API_URL }}
+  AWS_ROLE_TO_ASSUME: ${{ secrets.SKIFF_DEPLOY_ROLE_ARN }}
+
+jobs:
+  test-build-plan:
+    name: test, build, contract, plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Skiff
+        run: [[ .InstallCommand ]]
+
+      - name: Assume Skiff deploy role through OIDC
+        if: "${{ env.AWS_ROLE_TO_ASSUME != '' }}"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build and push immutable image
+        run: |
+          docker buildx build --push --tag "$IMAGE_REPO:${GITHUB_SHA}" --metadata-file image-metadata.json .
+          IMAGE_DIGEST="$(jq -r '."containerimage.digest"' image-metadata.json)"
+          test -n "$IMAGE_DIGEST"
+          echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
+          echo "IMAGE_REF=$IMAGE_REPO@$IMAGE_DIGEST" >> "$GITHUB_ENV"
+          echo "RELEASE_ID=rel_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+          echo "CANDIDATE_ID=cand_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Validate Skiff spec
+        run: |
+          [[ .SkiffBinary ]] validate "$SKIFF_SPEC" --format json --show-defaulted > skiff-validate.json
+          jq '.spec.metadata.env = env.SKIFF_STAGING_ENV | .spec.artifact.ref = env.IMAGE_REF | .spec.artifact.digest = env.IMAGE_DIGEST' \
+            skiff-validate.json > skiff-staging-wrapper.json
+          jq '.spec' skiff-staging-wrapper.json > skiff.staging.json
+
+      - name: Contract test immutable artifact
+        run: |
+          [[ .SkiffBinary ]] contract test skiff.staging.json \
+            --artifact-uri "$IMAGE_REF" \
+            --artifact-digest "$IMAGE_DIGEST" \
+            --format json > skiff-contract.json
+
+      - name: Plan staging deployment
+        run: |
+          [[ .SkiffBinary ]] plan skiff.staging.json \
+            --provider "$SKIFF_PROVIDER" \
+            --region "$AWS_REGION" \
+            --state "$SKIFF_STATE" \
+            --format json > skiff-plan.json
+
+      - name: Create release candidate evidence
+        run: |
+          [[ .SkiffBinary ]] release candidate create "$CANDIDATE_ID" \
+            --direct \
+            --state "$SKIFF_STATE" \
+            --env "$SKIFF_STAGING_ENV" \
+            --provider "$SKIFF_PROVIDER" \
+            --region "$AWS_REGION" \
+            --service "$SKIFF_SERVICE" \
+            --candidate-env "$SKIFF_STAGING_ENV" \
+            --release-id "$RELEASE_ID" \
+            --artifact-uri "$IMAGE_REF" \
+            --artifact-digest "$IMAGE_DIGEST" \
+            --git-repo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --git-sha "$GITHUB_SHA" \
+            --git-ref "$GITHUB_REF_NAME" \
+            --ci-provider github-actions \
+            --ci-run-id "$GITHUB_RUN_ID" \
+            --ci-run-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --check tests=passed \
+            --check contract=passed \
+            --check plan=passed \
+            --format json > skiff-candidate.json
+
+      - name: API mode freshness example
+        if: "${{ env.SKIFF_API_URL != '' }}"
+        run: |
+          [[ .SkiffBinary ]] status "$SKIFF_SERVICE" \
+            --api \
+            --api-url "$SKIFF_API_URL" \
+            --format json > skiff-status-api.json
+
+      - name: Archive Skiff JSON evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: skiff-evidence
+          path: |
+            skiff-*.json
+            skiff.staging.json
+
+  deploy-staging:
+    name: deploy staging
+    needs:
+      - test-build-plan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Skiff
+        run: [[ .InstallCommand ]]
+
+      - name: Assume Skiff deploy role through OIDC
+        if: "${{ env.AWS_ROLE_TO_ASSUME != '' }}"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download Skiff evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: skiff-evidence
+
+      - name: Deploy signed staging release
+        env:
+          SKIFF_RELEASE_SIGNING_SEED: ${{ secrets.SKIFF_RELEASE_SIGNING_SEED }}
+        run: |
+          [[ .SkiffBinary ]] deploy skiff.staging.json \
+            --direct \
+            --state "$SKIFF_STATE" \
+            --env "$SKIFF_STAGING_ENV" \
+            --provider "$SKIFF_PROVIDER" \
+            --region "$AWS_REGION" \
+            --release-id "$(jq -r '.result.candidate.release_id' skiff-candidate.json)" \
+            --signing-seed-base64 "$SKIFF_RELEASE_SIGNING_SEED" \
+            --format json > skiff-deploy-staging.json
+
+      - name: Archive staging deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: skiff-staging
+          path: skiff-deploy-staging.json
+
+  promote-prod:
+    name: promote production
+    needs:
+      - deploy-staging
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Skiff
+        run: [[ .InstallCommand ]]
+
+      - name: Assume Skiff deploy role through OIDC
+        if: "${{ env.AWS_ROLE_TO_ASSUME != '' }}"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download Skiff evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: skiff-evidence
+
+      - name: Promote candidate to production
+        env:
+          PROD_APPROVAL_ID: ${{ github.run_id }}
+        run: |
+          [[ .SkiffBinary ]] promote "$SKIFF_SERVICE" \
+            --direct \
+            --state "$SKIFF_STATE" \
+            --env "$SKIFF_STAGING_ENV" \
+            --provider "$SKIFF_PROVIDER" \
+            --region "$AWS_REGION" \
+            --from "$SKIFF_STAGING_ENV" \
+            --to "$SKIFF_PROD_ENV" \
+            --candidate "$(jq -r '.result.candidate.candidate_id' skiff-candidate.json)" \
+            --approval-id "$PROD_APPROVAL_ID" \
+            --format json > skiff-promote-prod.json

@@ -1,0 +1,90 @@
+stages:
+  - test-build-plan
+  - deploy-staging
+  - promote-prod
+
+variables:
+  SKIFF_SERVICE: [[ .Service ]]
+  SKIFF_SPEC: [[ .SpecPath ]]
+  SKIFF_STATE: [[ .StateURI ]]
+  SKIFF_PROVIDER: [[ .Provider ]]
+  AWS_REGION: [[ .Region ]]
+  SKIFF_STAGING_ENV: [[ .StagingEnv ]]
+  SKIFF_PROD_ENV: [[ .ProductionEnv ]]
+  IMAGE_REPO: [[ .ImageRepository ]]
+  AWS_ROLE_TO_ASSUME: $AWS_ROLE_TO_ASSUME
+  SKIFF_OIDC_AUDIENCE: $SKIFF_OIDC_AUDIENCE
+
+default:
+  before_script:
+    - [[ .InstallCommand ]]
+
+test-build-plan:
+  stage: test-build-plan
+  id_tokens:
+    SKIFF_OIDC_TOKEN:
+      aud: $SKIFF_OIDC_AUDIENCE
+  script:
+    - go test ./...
+    - docker buildx build --push --tag "$IMAGE_REPO:$CI_COMMIT_SHA" --metadata-file image-metadata.json .
+    - export IMAGE_DIGEST="$(jq -r '.\"containerimage.digest\"' image-metadata.json)"
+    - test -n "$IMAGE_DIGEST"
+    - export IMAGE_REF="$IMAGE_REPO@$IMAGE_DIGEST"
+    - export RELEASE_ID="rel_${CI_PIPELINE_ID}_${CI_JOB_ID}"
+    - export CANDIDATE_ID="cand_${CI_PIPELINE_ID}_${CI_JOB_ID}"
+    - [[ .SkiffBinary ]] validate "$SKIFF_SPEC" --format json --show-defaulted > skiff-validate.json
+    - jq '.spec.metadata.env = env.SKIFF_STAGING_ENV | .spec.artifact.ref = env.IMAGE_REF | .spec.artifact.digest = env.IMAGE_DIGEST' skiff-validate.json > skiff-staging-wrapper.json
+    - jq '.spec' skiff-staging-wrapper.json > skiff.staging.json
+    - [[ .SkiffBinary ]] contract test skiff.staging.json --artifact-uri "$IMAGE_REF" --artifact-digest "$IMAGE_DIGEST" --format json > skiff-contract.json
+    - [[ .SkiffBinary ]] plan skiff.staging.json --provider "$SKIFF_PROVIDER" --region "$AWS_REGION" --state "$SKIFF_STATE" --format json > skiff-plan.json
+    - [[ .SkiffBinary ]] release candidate create "$CANDIDATE_ID" --direct --state "$SKIFF_STATE" --env "$SKIFF_STAGING_ENV" --provider "$SKIFF_PROVIDER" --region "$AWS_REGION" --service "$SKIFF_SERVICE" --candidate-env "$SKIFF_STAGING_ENV" --release-id "$RELEASE_ID" --artifact-uri "$IMAGE_REF" --artifact-digest "$IMAGE_DIGEST" --git-repo "$CI_PROJECT_URL" --git-sha "$CI_COMMIT_SHA" --git-ref "$CI_COMMIT_REF_NAME" --ci-provider gitlab --ci-run-id "$CI_PIPELINE_ID" --ci-run-url "$CI_PIPELINE_URL" --check tests=passed --check contract=passed --check plan=passed --format json > skiff-candidate.json
+    - if [ -n "${SKIFF_API_URL:-}" ]; then [[ .SkiffBinary ]] status "$SKIFF_SERVICE" --api --api-url "$SKIFF_API_URL" --format json > skiff-status-api.json; fi
+  artifacts:
+    when: always
+    paths:
+      - skiff-*.json
+      - skiff.staging.json
+
+deploy-staging:
+  stage: deploy-staging
+  needs:
+    - job: test-build-plan
+      artifacts: true
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  environment:
+    name: staging
+  id_tokens:
+    SKIFF_OIDC_TOKEN:
+      aud: $SKIFF_OIDC_AUDIENCE
+  script:
+    - export RELEASE_ID="$(jq -r '.result.candidate.release_id' skiff-candidate.json)"
+    - [[ .SkiffBinary ]] deploy skiff.staging.json --direct --state "$SKIFF_STATE" --env "$SKIFF_STAGING_ENV" --provider "$SKIFF_PROVIDER" --region "$AWS_REGION" --release-id "$RELEASE_ID" --signing-seed-base64 "$SKIFF_RELEASE_SIGNING_SEED" --format json > skiff-deploy-staging.json
+  artifacts:
+    when: always
+    paths:
+      - skiff-deploy-staging.json
+
+promote-prod:
+  stage: promote-prod
+  needs:
+    - job: test-build-plan
+      artifacts: true
+    - job: deploy-staging
+      artifacts: true
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+  environment:
+    name: production
+  id_tokens:
+    SKIFF_OIDC_TOKEN:
+      aud: $SKIFF_OIDC_AUDIENCE
+  script:
+    - export CANDIDATE_ID="$(jq -r '.result.candidate.candidate_id' skiff-candidate.json)"
+    - export PROD_APPROVAL_ID="${CI_PIPELINE_ID}-${CI_JOB_ID}"
+    - [[ .SkiffBinary ]] promote "$SKIFF_SERVICE" --direct --state "$SKIFF_STATE" --env "$SKIFF_STAGING_ENV" --provider "$SKIFF_PROVIDER" --region "$AWS_REGION" --from "$SKIFF_STAGING_ENV" --to "$SKIFF_PROD_ENV" --candidate "$CANDIDATE_ID" --approval-id "$PROD_APPROVAL_ID" --format json > skiff-promote-prod.json
+  artifacts:
+    when: always
+    paths:
+      - skiff-promote-prod.json
