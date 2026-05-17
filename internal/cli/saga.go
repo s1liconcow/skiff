@@ -18,6 +18,15 @@ type sagaInspectOutput struct {
 	Result  sagastate.InspectResult `json:"result"`
 }
 
+type sagaCommandOutput struct {
+	OK          bool   `json:"ok"`
+	TraceID     string `json:"trace_id,omitempty"`
+	Command     string `json:"command"`
+	Saga        string `json:"saga,omitempty"`
+	Implemented bool   `json:"implemented"`
+	Summary     string `json:"summary"`
+}
+
 func runSaga(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		return writeClientCommandError(binary, "saga", root.Format, root.TraceID, errors.New("expected saga command inspect"), stdout, stderr)
@@ -25,11 +34,56 @@ func runSaga(binary string, args []string, root rootOptions, stdout, stderr io.W
 	switch args[0] {
 	case "inspect":
 		return runSagaInspect(binary, args[1:], root, stdout, stderr)
+	case "start", "watch", "resume", "cancel", "compensate":
+		return runSagaSkeleton(binary, args[0], args[1:], root, stdout, stderr)
 	case "help", "-h", "--help":
 		printSagaUsage(stdout, binary)
 		return ExitSuccess
 	default:
 		return writeClientCommandError(binary, "saga", root.Format, root.TraceID, fmt.Errorf("unknown saga command %q", args[0]), stdout, stderr)
+	}
+}
+
+func runSagaSkeleton(binary, command string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" saga "+command, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := addClientFlags(fs, root)
+	sagaID := fs.String("saga", "", "saga ID")
+	flagArgs, positionals, err := splitSagaInspectArgs(args)
+	if err != nil {
+		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	if len(positionals) == 1 && *sagaID == "" {
+		*sagaID = positionals[0]
+	}
+	_ = flags.noColor
+	_ = flags.yes
+	summary := "saga " + command + " command is registered; execution wiring will be enabled by concrete saga templates"
+	switch *flags.format {
+	case "human", "text":
+		fmt.Fprintln(stdout, summary)
+		return ExitSuccess
+	case "json":
+		if err := json.NewEncoder(stdout).Encode(sagaCommandOutput{
+			OK:          true,
+			TraceID:     *flags.traceID,
+			Command:     command,
+			Saga:        *sagaID,
+			Implemented: false,
+			Summary:     summary,
+		}); err != nil {
+			fmt.Fprintf(stderr, "%s saga %s: %v\n", binary, command, err)
+			return ExitInternalError
+		}
+		return ExitSuccess
+	default:
+		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
 	}
 }
 
@@ -127,4 +181,5 @@ func printSagaInspectHuman(w io.Writer, result sagastate.InspectResult) {
 
 func printSagaUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s saga inspect <saga> [flags]\n", binary)
+	fmt.Fprintln(w, "       "+binary+" saga start|watch|resume|cancel|compensate <saga> [flags]")
 }

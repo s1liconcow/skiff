@@ -89,3 +89,26 @@ func TestSagaInspectJSONReadsDirectObjectState(t *testing.T) {
 		t.Fatalf("current steps missing: %+v", got.Result.CurrentSteps)
 	}
 }
+
+func TestSagaSkeletonCommandsReturnJSON(t *testing.T) {
+	clearSkiffEnv(t)
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"saga", "resume", "saga_01JABC",
+		"--format", "json",
+		"--trace-id", "tr_saga_skeleton",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var got sagaCommandOutput
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("saga skeleton output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_saga_skeleton" || got.Command != "resume" || got.Saga != "saga_01JABC" || got.Implemented {
+		t.Fatalf("unexpected skeleton output: %+v", got)
+	}
+}

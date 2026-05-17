@@ -290,6 +290,26 @@ func (s *Store) CreateStepResult(ctx context.Context, result schema.StepResult) 
 	return &StepResultDocument{Key: key, ETag: meta.ETag, Meta: *meta, Result: result}, nil
 }
 
+func (s *Store) GetStepResult(ctx context.Context, sagaID, stepID string) (*StepResultDocument, error) {
+	if err := s.requireStore(); err != nil {
+		return nil, err
+	}
+	key, err := paths.SagaStepResult(sagaID, stepID)
+	if err != nil {
+		return nil, err
+	}
+	var result schema.StepResult
+	obj, err := getStrict(ctx, s.store, key, &result)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateStepResult(result); err != nil {
+		return nil, err
+	}
+	meta := objectMetaFromObject(obj)
+	return &StepResultDocument{Key: key, ETag: meta.ETag, Meta: meta, Result: result}, nil
+}
+
 func (s *Store) Inspect(ctx context.Context, sagaID string) (*InspectResult, error) {
 	intent, err := s.GetIntent(ctx, sagaID)
 	if err != nil {
