@@ -39,3 +39,20 @@ skiff --direct --state s3://skiff-state-prod failover orders \
 The failover saga verifies secondary capacity and replica lag, asks for manual approval, optionally freezes writes, promotes the secondary database, updates the writer secret, shifts traffic through a 10% gate, then shifts to 100%.
 
 After the writer secret points at the promoted region and new writes begin, failback is not a rollback. It is a separate plan with its own risk and approval because writes may have diverged.
+
+Expected output from the dry run includes the planned saga ID, current steps,
+risk classification, reversibility, and the next approval action. Execution
+writes saga intent, graph, control, events, step result artifacts, and audit
+records before provider changes continue.
+
+Diagnose regional failures with:
+
+```bash
+skiff saga inspect saga_01J... --direct --state s3://skiff-state-prod --format json
+skiff events --scope saga --saga saga_01J... --direct --state s3://skiff-state-prod --format json
+skiff doctor orders --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --fresh --format json
+```
+
+If failure occurs before writer promotion, compensation can usually keep traffic
+and writes in the original region. After promotion, recover through a new
+failover or repair plan instead of treating the move as a rollback.

@@ -46,3 +46,27 @@ skiff plan examples/stacks/api-database/skiff.yaml --provider aws --region us-we
 ```
 
 The plan should show visible cloud resources, including RDS, Secrets Manager, EC2 security groups, a launch template, an Auto Scaling Group, a target group, and CloudWatch logging/metrics.
+
+Expected deployment output includes an operation ID, release ID, and provider
+resource IDs. The durable state written by deploy includes immutable release and
+runtime manifests, service operation intent/control documents, service control,
+resource records, events, and audit records. The managed database itself is a
+cloud primitive; its credentials stay behind the secret reference.
+
+Diagnose failures through direct mode:
+
+```bash
+skiff doctor orders-api --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --fresh --format json
+skiff logs orders-api --since 20m --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+skiff database restore orders-db --to 2026-05-17T02:00:00Z --mode new-db-cutover --dry-run --format json
+```
+
+Rollback of the API release is reversible while the previous release still
+exists:
+
+```bash
+skiff rollback orders-api --to previous-stable --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+```
+
+Database restore is not an API rollback. Use the explicit database restore saga
+and approval gate when data must move.

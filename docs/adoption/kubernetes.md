@@ -95,3 +95,16 @@ skiff cutover payments-api --env prod --percent 10 --dry-run --format json
 The cutover saga writes immutable intent and graph documents plus a CAS-controlled
 saga control document. It includes preflight, manual approval, weighted traffic
 shift, and target health verification steps.
+
+Expected successful output includes a saga ID, current traffic percentage, and
+next action. Diagnose cutover with:
+
+```bash
+skiff saga inspect saga_01J... --direct --state s3://skiff-state-prod --format json
+skiff events --scope saga --saga saga_01J... --direct --state s3://skiff-state-prod --format json
+skiff doctor payments-api --direct --state s3://skiff-state-prod --fresh --format json
+```
+
+Before 100% cutover, recovery is normally another traffic-shift saga back toward
+the Kubernetes target. After 100% cutover, treat rollback as a new explicit
+operation and record the chosen target and approval context.

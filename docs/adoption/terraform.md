@@ -95,3 +95,20 @@ skiff deploy ./skiff.yaml \
 
 Skiff still writes immutable release/runtime manifests before updating service
 control. Terraform-owned infrastructure is not reapplied during deploy.
+
+Expected deploy output includes the Skiff operation ID, signed release ID, and
+`no-op` plan entries for Terraform-owned resources. Diagnose adopted
+infrastructure with:
+
+```bash
+skiff drift payments-api --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+skiff explain ./skiff.yaml --provider aws --region us-west-2 --state s3://skiff-state-prod --format json
+skiff doctor payments-api --direct --state s3://skiff-state-prod --fresh --format json
+```
+
+Rollback remains a Skiff release operation. Terraform should not be used to
+rewrite release or operation objects:
+
+```bash
+skiff rollback payments-api --to previous-stable --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+```
