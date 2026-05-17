@@ -837,7 +837,7 @@ func runBootstrap(t *testing.T, ctx context.Context, store *s3store.Store, verif
 		Now:        fixedNow,
 	})
 	if err != nil {
-		t.Fatalf("Bootstrap returned error: %v", err)
+		t.Fatalf("Bootstrap returned error: %v (cause: %v)", err, errors.Unwrap(err))
 	}
 	if !bootstrap.Verification.OK {
 		t.Fatalf("release verification failed: %+v", bootstrap.Verification)
@@ -862,7 +862,7 @@ func runCaddyLifecycle(t *testing.T, ctx context.Context, runtimeManifest schema
 		Now:              fixedNow,
 	})
 	if err != nil {
-		t.Fatalf("RunLifecycle returned error: %v", err)
+		t.Fatalf("RunLifecycle returned error: %v (cause: %v)", err, errors.Unwrap(err))
 	}
 	if lifecycle.Status.State != runner.StateServing || lifecycle.Status.Health != runner.HealthHealthy {
 		t.Fatalf("unexpected lifecycle status: %+v", lifecycle.Status)
