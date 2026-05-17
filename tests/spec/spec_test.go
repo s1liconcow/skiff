@@ -164,6 +164,50 @@ stack:
 	assertDiagnostic(t, result.Diagnostics, "$.stack.bindings[0].as", "INVALID_ENV_NAME")
 }
 
+func TestMultiRegionStackValidation(t *testing.T) {
+	doc, err := spec.Decode([]byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: MultiRegionStack
+metadata:
+  name: orders
+  env: prod
+multiRegion:
+  primaryRegion: us-west-2
+  secondaryRegions:
+    - us-east-1
+  service:
+    name: api
+    artifact:
+      type: oci
+      ref: registry.example.com/orders-api@sha256:abc123
+    runtime:
+      port: 8080
+      health:
+        path: /healthz
+  database:
+    name: db
+    engine: postgres
+    version: "16"
+    size: small
+  trafficPolicy:
+    mode: weighted-dns
+    host: orders.example.com
+  databaseReplication:
+    mode: async
+    maxReplicaLag: 30s
+`), spec.DecodeOptions{})
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	if doc.MultiRegion.Binding.As != "DATABASE_URL" || !doc.MultiRegion.FailoverPolicy.RequireApproval {
+		t.Fatalf("multi-region defaults not applied: %+v", doc.MultiRegion)
+	}
+	result := spec.Validate(*doc)
+	if !result.OK {
+		t.Fatalf("Validate diagnostics = %+v, want OK", result.Diagnostics)
+	}
+}
+
 func TestMarshalYAMLShowsDefaultedFields(t *testing.T) {
 	doc, err := spec.Decode([]byte(validServiceYAML), spec.DecodeOptions{})
 	if err != nil {

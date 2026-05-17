@@ -1,0 +1,60 @@
+apiVersion: skiff.dev/v1alpha1
+kind: MultiRegionStack
+metadata:
+  name: orders
+  env: prod
+multiRegion:
+  primaryRegion: us-west-2
+  secondaryRegions:
+    - us-east-1
+  service:
+    name: api
+    artifact:
+      type: oci
+      ref: registry.example.com/orders-api@sha256:REPLACE_WITH_DIGEST
+    runtime:
+      port: 8080
+      env:
+        SKIFF_STACK: orders
+      health:
+        path: /healthz
+    scale:
+      min: 2
+      max: 4
+    network:
+      ingress:
+        type: internal-http
+  database:
+    name: db
+    engine: postgres
+    version: "16"
+    size: small
+    storage:
+      sizeGB: 20
+      type: gp3
+      encrypted: true
+    backups:
+      enabled: true
+      retentionDays: 7
+    network:
+      private: true
+  binding:
+    from: api
+    to: db
+    as: DATABASE_URL
+  trafficPolicy:
+    mode: weighted-dns
+    host: orders.example.com
+    weights:
+      - region: us-west-2
+        weight: 100
+      - region: us-east-1
+        weight: 0
+  databaseReplication:
+    mode: async
+    maxReplicaLag: 30s
+  failoverPolicy:
+    requireApproval: true
+    freezeWrites: true
+    maxReplicaLag: 30s
+    failback: plan-required

@@ -7,12 +7,13 @@ const APIVersion = "skiff.dev/v1alpha1"
 type Kind string
 
 const (
-	KindService         Kind = "Service"
-	KindWorker          Kind = "Worker"
-	KindJob             Kind = "Job"
-	KindManagedDatabase Kind = "ManagedDatabase"
-	KindStatefulGroup   Kind = "StatefulGroup"
-	KindStack           Kind = "Stack"
+	KindService          Kind = "Service"
+	KindWorker           Kind = "Worker"
+	KindJob              Kind = "Job"
+	KindManagedDatabase  Kind = "ManagedDatabase"
+	KindStatefulGroup    Kind = "StatefulGroup"
+	KindStack            Kind = "Stack"
+	KindMultiRegionStack Kind = "MultiRegionStack"
 )
 
 type Document struct {
@@ -29,6 +30,7 @@ type Document struct {
 	ManagedDatabase *ManagedDatabase           `json:"database,omitempty"`
 	StatefulGroup   *StatefulGroup             `json:"stateful,omitempty"`
 	Stack           *Stack                     `json:"stack,omitempty"`
+	MultiRegion     *MultiRegionStack          `json:"multiRegion,omitempty"`
 	Provider        map[string]json.RawMessage `json:"provider,omitempty"`
 }
 
@@ -205,4 +207,38 @@ type StackBinding struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 	As   string `json:"as"`
+}
+
+type MultiRegionStack struct {
+	PrimaryRegion       string                    `json:"primaryRegion"`
+	SecondaryRegions    []string                  `json:"secondaryRegions,omitempty"`
+	Service             StackService              `json:"service"`
+	Database            StackDatabase             `json:"database"`
+	Binding             StackBinding              `json:"binding"`
+	TrafficPolicy       MultiRegionTrafficPolicy  `json:"trafficPolicy,omitempty"`
+	DatabaseReplication DatabaseReplication       `json:"databaseReplication,omitempty"`
+	FailoverPolicy      MultiRegionFailoverPolicy `json:"failoverPolicy,omitempty"`
+}
+
+type MultiRegionTrafficPolicy struct {
+	Mode    string          `json:"mode,omitempty"`
+	Host    string          `json:"host,omitempty"`
+	Weights []TrafficWeight `json:"weights,omitempty"`
+}
+
+type TrafficWeight struct {
+	Region string `json:"region"`
+	Weight int    `json:"weight"`
+}
+
+type DatabaseReplication struct {
+	Mode          string `json:"mode,omitempty"`
+	MaxReplicaLag string `json:"maxReplicaLag,omitempty"`
+}
+
+type MultiRegionFailoverPolicy struct {
+	RequireApproval bool   `json:"requireApproval,omitempty"`
+	FreezeWrites    bool   `json:"freezeWrites,omitempty"`
+	MaxReplicaLag   string `json:"maxReplicaLag,omitempty"`
+	Failback        string `json:"failback,omitempty"`
 }

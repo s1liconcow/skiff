@@ -16,10 +16,45 @@ func ApplyDefaults(doc *Document) {
 				applyManagedDatabaseDefaults(&doc.Stack.Databases[i].ManagedDatabase)
 			}
 		}
+	case KindMultiRegionStack:
+		applyMultiRegionDefaults(doc.MultiRegion)
 	}
 	if usesWorkloadDefaults(doc.Kind) {
 		applyWorkloadDefaults(&doc.Runtime, &doc.Machine, &doc.Rollout, &doc.Scale, doc.Kind)
 	}
+}
+
+func applyMultiRegionDefaults(stack *MultiRegionStack) {
+	if stack == nil {
+		return
+	}
+	applyWorkloadDefaults(&stack.Service.Runtime, &stack.Service.Machine, &stack.Service.Rollout, &stack.Service.Scale, KindService)
+	applyManagedDatabaseDefaults(&stack.Database.ManagedDatabase)
+	if stack.Binding.From == "" {
+		stack.Binding.From = stack.Service.Name
+	}
+	if stack.Binding.To == "" {
+		stack.Binding.To = stack.Database.Name
+	}
+	if stack.Binding.As == "" {
+		stack.Binding.As = "DATABASE_URL"
+	}
+	if stack.TrafficPolicy.Mode == "" {
+		stack.TrafficPolicy.Mode = "weighted-dns"
+	}
+	if stack.DatabaseReplication.Mode == "" {
+		stack.DatabaseReplication.Mode = "async"
+	}
+	if stack.DatabaseReplication.MaxReplicaLag == "" {
+		stack.DatabaseReplication.MaxReplicaLag = "30s"
+	}
+	if stack.FailoverPolicy.MaxReplicaLag == "" {
+		stack.FailoverPolicy.MaxReplicaLag = stack.DatabaseReplication.MaxReplicaLag
+	}
+	if stack.FailoverPolicy.Failback == "" {
+		stack.FailoverPolicy.Failback = "plan-required"
+	}
+	stack.FailoverPolicy.RequireApproval = true
 }
 
 func applyWorkloadDefaults(runtime *Runtime, machine *Machine, rollout *Rollout, scale *Scale, kind Kind) {

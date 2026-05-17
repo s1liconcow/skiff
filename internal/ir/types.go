@@ -21,6 +21,7 @@ type Resources struct {
 	ManagedDatabases   []ManagedDatabase  `json:"managed_databases,omitempty"`
 	DatabaseSecrets    []DatabaseSecret   `json:"database_secrets,omitempty"`
 	DatabaseBindings   []DatabaseBinding  `json:"database_bindings,omitempty"`
+	GlobalTraffic      []GlobalTraffic    `json:"global_traffic,omitempty"`
 	InstanceTemplates  []InstanceTemplate `json:"instance_templates,omitempty"`
 	AutoscalingGroups  []AutoscalingGroup `json:"autoscaling_groups,omitempty"`
 	RuntimeManifests   []RuntimeManifest  `json:"runtime_manifests,omitempty"`
@@ -99,11 +100,22 @@ type ManagedDatabase struct {
 	Size                string          `json:"size"`
 	Port                int             `json:"port"`
 	Region              string          `json:"region,omitempty"`
+	Role                string          `json:"role,omitempty"`
+	PrimaryRegion       string          `json:"primary_region,omitempty"`
+	ReplicaOfRef        string          `json:"replica_of_ref,omitempty"`
+	ReplicationMode     string          `json:"replication_mode,omitempty"`
+	FailoverPolicy      FailoverPolicy  `json:"failover_policy,omitempty"`
 	Storage             DatabaseStorage `json:"storage"`
 	Backups             DatabaseBackups `json:"backups"`
 	Network             DatabaseNetwork `json:"network"`
 	SecurityGroupRefs   []string        `json:"security_group_refs,omitempty"`
 	ConnectionSecretRef string          `json:"connection_secret_ref"`
+}
+
+type FailoverPolicy struct {
+	MaxReplicaLag   string `json:"max_replica_lag,omitempty"`
+	FreezeWrites    bool   `json:"freeze_writes,omitempty"`
+	RequireApproval bool   `json:"require_approval,omitempty"`
 }
 
 type DatabaseStorage struct {
@@ -138,6 +150,21 @@ type DatabaseBinding struct {
 	DatabaseRef string       `json:"database_ref"`
 	EnvName     string       `json:"env_name"`
 	SecretRef   string       `json:"secret_ref"`
+}
+
+type GlobalTraffic struct {
+	Meta          ResourceMeta    `json:"meta"`
+	Host          string          `json:"host,omitempty"`
+	Mode          string          `json:"mode"`
+	PrimaryRegion string          `json:"primary_region"`
+	Regions       []TrafficRegion `json:"regions"`
+}
+
+type TrafficRegion struct {
+	Region         string `json:"region"`
+	ServiceRef     string `json:"service_ref"`
+	TargetGroupRef string `json:"target_group_ref,omitempty"`
+	Weight         int    `json:"weight"`
 }
 
 type InstanceTemplate struct {

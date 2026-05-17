@@ -180,6 +180,15 @@ skiff promote payments-api --direct --state s3://skiff-state-staging --env stagi
 skiff rollout watch payments-api --operation op_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
 ```
 
+## Regional Failover
+
+`skiff failover` creates a `regional.failover` saga for a multi-region stack. Dry-run mode renders the full graph, including the manual approval and irreversible boundary after database promotion. Production execution requires direct mode and approval context.
+
+```bash
+skiff failover orders --database orders-db --from-region us-west-2 --to-region us-east-1 --dry-run --format json
+skiff --direct --state s3://skiff-state-prod failover orders --database orders-db --from-region us-west-2 --to-region us-east-1 --approval-id approval_01J... --format json
+```
+
 ## Logs
 
 `skiff logs` queries the hot cloud log backend. JSON entries include timestamp, message, provider source, and labels for service, env, release, instance, region, and zone when available.

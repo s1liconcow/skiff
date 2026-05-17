@@ -192,6 +192,7 @@ func knownPatchKind(kind string) bool {
 		ir.ResourceKindManagedDatabase,
 		ir.ResourceKindDatabaseSecret,
 		ir.ResourceKindDatabaseBinding,
+		ir.ResourceKindGlobalTraffic,
 		ir.ResourceKindInstanceTemplate,
 		ir.ResourceKindAutoscalingGroup,
 		ir.ResourceKindRuntimeManifest:

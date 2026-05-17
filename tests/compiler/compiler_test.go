@@ -72,6 +72,74 @@ func TestSemanticDiffIgnoresResourceOrdering(t *testing.T) {
 	}
 }
 
+func TestCompileMultiRegionStack(t *testing.T) {
+	doc, err := spec.Decode([]byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: MultiRegionStack
+metadata:
+  name: orders
+  env: prod
+multiRegion:
+  primaryRegion: us-west-2
+  secondaryRegions:
+    - us-east-1
+  service:
+    name: api
+    artifact:
+      type: oci
+      ref: registry.example.com/orders-api@sha256:abc123
+    runtime:
+      port: 8080
+      health:
+        path: /healthz
+  database:
+    name: db
+    engine: postgres
+    version: "16"
+    size: small
+  trafficPolicy:
+    mode: weighted-dns
+    host: orders.example.com
+    weights:
+      - region: us-west-2
+        weight: 100
+      - region: us-east-1
+        weight: 0
+  databaseReplication:
+    mode: async
+    maxReplicaLag: 30s
+  failoverPolicy:
+    freezeWrites: true
+`), spec.DecodeOptions{})
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	graph, err := compiler.Compile(context.Background(), *doc, compiler.Options{})
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if graph.Service != "orders" || len(graph.Resources.GlobalTraffic) != 1 {
+		t.Fatalf("graph target/global traffic mismatch: %+v", graph)
+	}
+	if len(graph.Resources.ManagedDatabases) != 2 {
+		t.Fatalf("managed databases = %+v, want primary and replica", graph.Resources.ManagedDatabases)
+	}
+	roles := map[string]string{}
+	for _, db := range graph.Resources.ManagedDatabases {
+		roles[db.Region] = db.Role
+		if db.Meta.Tags[ir.TagRegion] != db.Region {
+			t.Fatalf("database %s missing region tag: %+v", db.Meta.LogicalID, db.Meta.Tags)
+		}
+	}
+	if roles["us-west-2"] != "primary" || roles["us-east-1"] != "replica" {
+		t.Fatalf("database roles = %+v", roles)
+	}
+	traffic := graph.Resources.GlobalTraffic[0]
+	if traffic.PrimaryRegion != "us-west-2" || len(traffic.Regions) != 2 || traffic.Regions[1].Weight != 0 {
+		t.Fatalf("traffic policy = %+v", traffic)
+	}
+}
+
 func compileExample(t *testing.T) *ir.Graph {
 	t.Helper()
 	path := filepath.Join("..", "..", "examples", "service", "skiff.yaml")

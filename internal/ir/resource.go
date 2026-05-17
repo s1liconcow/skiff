@@ -14,12 +14,14 @@ const (
 	ResourceKindInstanceTemplate = "InstanceTemplate"
 	ResourceKindAutoscalingGroup = "AutoscalingGroup"
 	ResourceKindRuntimeManifest  = "RuntimeManifest"
+	ResourceKindGlobalTraffic    = "GlobalTrafficPolicy"
 
 	TagService  = "skiff.dev/service"
 	TagEnv      = "skiff.dev/env"
 	TagManaged  = "skiff.dev/managed"
 	TagGraph    = "skiff.dev/graph"
 	TagDatabase = "skiff.dev/database"
+	TagRegion   = "skiff.dev/region"
 )
 
 func RequiredTags(service, env string) map[string]string {

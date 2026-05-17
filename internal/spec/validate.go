@@ -5,6 +5,7 @@ import (
 	"net"
 	"regexp"
 	"strings"
+	"time"
 )
 
 type Severity string
@@ -60,9 +61,9 @@ func Validate(doc Document) Result {
 		add("$.apiVersion", "UNSUPPORTED_API_VERSION", "apiVersion must be skiff.dev/v1alpha1")
 	}
 	switch doc.Kind {
-	case KindService, KindWorker, KindJob, KindManagedDatabase, KindStatefulGroup, KindStack:
+	case KindService, KindWorker, KindJob, KindManagedDatabase, KindStatefulGroup, KindStack, KindMultiRegionStack:
 	default:
-		add("$.kind", "UNSUPPORTED_KIND", "kind must be Service, Worker, Job, ManagedDatabase, StatefulGroup, or Stack")
+		add("$.kind", "UNSUPPORTED_KIND", "kind must be Service, Worker, Job, ManagedDatabase, StatefulGroup, Stack, or MultiRegionStack")
 	}
 	validateName(&diagnostics, "$.metadata.name", doc.Metadata.Name, "metadata.name is required and must be a DNS-style Skiff name")
 	validateName(&diagnostics, "$.metadata.env", doc.Metadata.Env, "metadata.env is required and must be a DNS-style Skiff name")
@@ -88,6 +89,12 @@ func Validate(doc Document) Result {
 		} else {
 			validateStack(&diagnostics, doc)
 		}
+	case KindMultiRegionStack:
+		if doc.MultiRegion == nil {
+			add("$.multiRegion", "REQUIRED", "multi-region stack specs must include multiRegion settings")
+		} else {
+			validateMultiRegionStack(&diagnostics, doc)
+		}
 	}
 	validateNetworkAt(&diagnostics, doc.Network, "$.network")
 	validateSecretsAt(&diagnostics, doc.Secrets, "$.secrets")
@@ -99,6 +106,80 @@ func Validate(doc Document) Result {
 		Name:        doc.Metadata.Name,
 		Env:         doc.Metadata.Env,
 		Diagnostics: diagnostics,
+	}
+}
+
+func validateMultiRegionStack(diagnostics *[]Diagnostic, doc Document) {
+	stack := doc.MultiRegion
+	validateName(diagnostics, "$.multiRegion.primaryRegion", stack.PrimaryRegion, "primaryRegion is required and must be a DNS-style region name")
+	if len(stack.SecondaryRegions) == 0 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.multiRegion.secondaryRegions", Code: "REQUIRED", Severity: SeverityError, Message: "at least one secondary region is required"})
+	}
+	regions := map[string]struct{}{}
+	if stack.PrimaryRegion != "" {
+		regions[stack.PrimaryRegion] = struct{}{}
+	}
+	for i, region := range stack.SecondaryRegions {
+		base := fmt.Sprintf("$.multiRegion.secondaryRegions[%d]", i)
+		validateName(diagnostics, base, region, "secondary region must be a DNS-style region name")
+		if _, ok := regions[region]; ok {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: base, Code: "DUPLICATE_REGION", Severity: SeverityError, Message: "regions must be unique"})
+		}
+		regions[region] = struct{}{}
+	}
+	validateName(diagnostics, "$.multiRegion.service.name", stack.Service.Name, "multi-region service name must be a DNS-style Skiff name")
+	validateArtifactAt(diagnostics, stack.Service.Artifact, doc.Metadata.Env, "$.multiRegion.service.artifact")
+	validateRuntimeAt(diagnostics, KindService, stack.Service.Runtime, "$.multiRegion.service.runtime")
+	validateScaleAt(diagnostics, KindService, stack.Service.Scale, "$.multiRegion.service.scale")
+	validateNetworkAt(diagnostics, stack.Service.Network, "$.multiRegion.service.network")
+	validateSecretsAt(diagnostics, stack.Service.Secrets, "$.multiRegion.service.secrets")
+	validateName(diagnostics, "$.multiRegion.database.name", stack.Database.Name, "multi-region database name must be a DNS-style Skiff name")
+	validateManagedDatabase(diagnostics, stack.Database.ManagedDatabase, "$.multiRegion.database")
+	if stack.Binding.From != stack.Service.Name {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.multiRegion.binding.from", Code: "UNKNOWN_STACK_SERVICE", Severity: SeverityError, Message: "binding.from must name the multi-region service"})
+	}
+	if stack.Binding.To != stack.Database.Name {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.multiRegion.binding.to", Code: "UNKNOWN_STACK_DATABASE", Severity: SeverityError, Message: "binding.to must name the multi-region database"})
+	}
+	if !validEnvName(stack.Binding.As) {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.multiRegion.binding.as", Code: "INVALID_ENV_NAME", Severity: SeverityError, Message: "binding.as must be an environment variable name like DATABASE_URL"})
+	}
+	switch strings.ToLower(strings.TrimSpace(stack.TrafficPolicy.Mode)) {
+	case "weighted-dns", "global-load-balancer":
+	default:
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.multiRegion.trafficPolicy.mode", Code: "UNSUPPORTED_TRAFFIC_POLICY", Severity: SeverityError, Message: "traffic policy mode must be weighted-dns or global-load-balancer"})
+	}
+	if stack.TrafficPolicy.Host != "" && (net.ParseIP(stack.TrafficPolicy.Host) != nil || !strings.Contains(stack.TrafficPolicy.Host, ".")) {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.multiRegion.trafficPolicy.host", Code: "INVALID_HOST", Severity: SeverityError, Message: "traffic policy host must be a DNS hostname"})
+	}
+	for i, weight := range stack.TrafficPolicy.Weights {
+		base := fmt.Sprintf("$.multiRegion.trafficPolicy.weights[%d]", i)
+		if _, ok := regions[weight.Region]; !ok {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".region", Code: "UNKNOWN_REGION", Severity: SeverityError, Message: "traffic weight region must name a primary or secondary region"})
+		}
+		if weight.Weight < 0 || weight.Weight > 100 {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".weight", Code: "INVALID_TRAFFIC_WEIGHT", Severity: SeverityError, Message: "traffic weight must be between 0 and 100"})
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(stack.DatabaseReplication.Mode)) {
+	case "async", "sync", "snapshot-seed":
+	default:
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.multiRegion.databaseReplication.mode", Code: "UNSUPPORTED_REPLICATION_MODE", Severity: SeverityError, Message: "database replication mode must be async, sync, or snapshot-seed"})
+	}
+	if stack.DatabaseReplication.MaxReplicaLag != "" {
+		if _, err := time.ParseDuration(stack.DatabaseReplication.MaxReplicaLag); err != nil {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: "$.multiRegion.databaseReplication.maxReplicaLag", Code: "INVALID_DURATION", Severity: SeverityError, Message: "maxReplicaLag must be a Go duration like 30s"})
+		}
+	}
+	if stack.FailoverPolicy.MaxReplicaLag != "" {
+		if _, err := time.ParseDuration(stack.FailoverPolicy.MaxReplicaLag); err != nil {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: "$.multiRegion.failoverPolicy.maxReplicaLag", Code: "INVALID_DURATION", Severity: SeverityError, Message: "failoverPolicy.maxReplicaLag must be a Go duration like 30s"})
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(stack.FailoverPolicy.Failback)) {
+	case "", "plan-required", "manual-only":
+	default:
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.multiRegion.failoverPolicy.failback", Code: "UNSUPPORTED_FAILBACK_POLICY", Severity: SeverityError, Message: "failback must be plan-required or manual-only"})
 	}
 }
 

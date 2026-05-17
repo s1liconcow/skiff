@@ -7,6 +7,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/saga/steps/approval"
 	"github.com/s1liconcow/skiff/internal/saga/steps/check"
 	"github.com/s1liconcow/skiff/internal/saga/steps/database"
+	"github.com/s1liconcow/skiff/internal/saga/steps/multiregion"
 	"github.com/s1liconcow/skiff/internal/saga/steps/service"
 	sagatime "github.com/s1liconcow/skiff/internal/saga/steps/time"
 )
@@ -37,6 +38,7 @@ func New(opts Options) map[string]steps.Step {
 	if databaseProvider, ok := opts.Provider.(provider.DatabaseOperations); ok {
 		items = append(items, database.New(databaseProvider)...)
 	}
+	items = append(items, multiregion.New(opts.Provider)...)
 	out := make(map[string]steps.Step, len(items))
 	for _, item := range items {
 		out[item.Kind()] = item

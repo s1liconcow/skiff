@@ -89,6 +89,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runEvents(binary, root.Args, root, stdout, stderr)
 	case "explain":
 		return runExplain(binary, root.Args, root, stdout, stderr)
+	case "failover":
+		return runFailover(binary, root.Args, root, stdout, stderr)
 	case "init":
 		return runInit(binary, root.Args, root, stdout, stderr)
 	case "logs":
@@ -232,6 +234,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  drift      Detect provider drift from Skiff resource records")
 	fmt.Fprintln(w, "  events     List local service, operation, or saga events")
 	fmt.Fprintln(w, "  explain    Explain provider cloud primitives for a spec")
+	fmt.Fprintln(w, "  failover   Run a regional failover saga")
 	fmt.Fprintln(w, "  gc         Plan and apply conservative cleanup actions")
 	fmt.Fprintln(w, "  init       Generate starter Skiff specs and recipes")
 	fmt.Fprintln(w, "  logs       Query service logs through the cloud provider")
