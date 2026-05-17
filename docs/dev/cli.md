@@ -78,6 +78,25 @@ garbage collection require approval context unless the actor is explicit
 break-glass. Agents can request plans, but execution is denied until approval
 context is present.
 
+## Drift And GC
+
+`skiff drift` compares Skiff resource records with provider inspection. It is
+read-only and reports missing, changed, orphaned, unsafe, and informational
+findings.
+
+```bash
+skiff drift payments-api --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+```
+
+`skiff gc plan` is conservative and read-only. `skiff gc apply --yes` audits
+cleanup decisions and skips protected stateful resources unless a later explicit
+workflow proves snapshot and retention policy.
+
+```bash
+skiff gc plan --service payments-api --direct --state s3://skiff-state-prod --env prod --format json
+skiff gc apply --service payments-api --direct --state s3://skiff-state-prod --env prod --approval-id approval_01J... --yes --format json
+```
+
 Completion scripts are generated with:
 
 ```bash
