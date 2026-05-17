@@ -111,6 +111,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runPolicy(binary, root.Args, stdout, stderr)
 	case "release":
 		return runRelease(binary, root.Args, root, stdout, stderr)
+	case "rotate":
+		return runRotate(binary, root.Args, root, stdout, stderr)
 	case "promote":
 		return runPromote(binary, root.Args, root, stdout, stderr)
 	case "rollback":
@@ -246,6 +248,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  policy     Explain generated state security policies")
 	fmt.Fprintln(w, "  promote    Validate and record release promotion intent")
 	fmt.Fprintln(w, "  release    Verify release manifests")
+	fmt.Fprintln(w, "  rotate     Run secret and credential rotation sagas")
 	fmt.Fprintln(w, "  rollback   Roll a service back to a stable release")
 	fmt.Fprintln(w, "  rollout    Watch rollout progress")
 	fmt.Fprintln(w, "  saga       Inspect saga object state")

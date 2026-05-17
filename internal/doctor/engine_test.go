@@ -119,6 +119,20 @@ func TestDiagnoseCommonFailureScenarios(t *testing.T) {
 					Subject: schema.Target{Kind: "service", Name: "payments-api"},
 					Summary: "application log panic on startup",
 				},
+				{
+					ID:      "01JSECRET",
+					Time:    "2026-05-16T23:04:00Z",
+					Type:    "secret.rotation_failed",
+					Subject: schema.Target{Kind: "service", Name: "payments-api"},
+					Summary: "secret rotation failed: canary failed and restored previous credential version",
+				},
+				{
+					ID:      "01JSTALE",
+					Time:    "2026-05-16T23:05:00Z",
+					Type:    "secret.consumer_stale",
+					Subject: schema.Target{Kind: "service", Name: "payments-api"},
+					Summary: "orders-api still using old version of credential after roll",
+				},
 			},
 		}},
 	}, Options{Service: "payments-api"})
@@ -134,6 +148,8 @@ func TestDiagnoseCommonFailureScenarios(t *testing.T) {
 		"METRIC_GATE_FAILED",
 		"RECENT_BAD_LOGS",
 		"DESIRED_RELEASE_NOT_STABLE",
+		"SECRET_ROTATION_FAILED",
+		"SECRET_CONSUMER_STALE",
 	} {
 		assertFinding(t, result, code, "")
 	}

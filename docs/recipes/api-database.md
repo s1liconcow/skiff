@@ -29,6 +29,15 @@ Credential handling is reference-based. The compiled runtime manifest carries `D
 
 Backup defaults are conservative: backups are enabled, storage is encrypted, retention defaults to seven days, deletion protection is enabled in the AWS plan, and destructive restore is intentionally not part of this recipe. Restore and cutover are handled by explicit database restore sagas.
 
+Database credential rotation uses the same secret reference. Plan and execute it
+as an explicit rotation saga so one consumer canary runs before promotion and
+old credentials are disabled only after a delay:
+
+```bash
+skiff rotate secret secret://managed-database/orders-db/connection-url --consumers orders-api --database orders-db --dry-run --format json
+skiff --direct --state s3://skiff-state-prod rotate secret secret://managed-database/orders-db/connection-url --consumers orders-api --database orders-db --approval-id approval_01J... --format json
+```
+
 Preview cloud primitives before deploying:
 
 ```bash

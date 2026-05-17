@@ -35,6 +35,16 @@ type DatabaseOperations interface {
 	RetireDatabase(ctx context.Context, req DatabaseRetireRequest) (*DatabaseRetireResult, error)
 }
 
+type SecretOperations interface {
+	CreateSecretVersion(ctx context.Context, req SecretVersionRequest) (*SecretVersion, error)
+	ValidateSecretVersion(ctx context.Context, req SecretValidationRequest) (*SecretValidationResult, error)
+	UpdateSecretVersionPointer(ctx context.Context, req SecretUpdateRequest) (*SecretPointer, error)
+	RestoreSecretVersion(ctx context.Context, req SecretRestoreRequest) (*SecretPointer, error)
+	CanaryServiceWithSecret(ctx context.Context, req SecretCanaryRequest) (*SecretCanaryResult, error)
+	RollConsumersWithSecret(ctx context.Context, req SecretRollConsumersRequest) (*SecretRollConsumersResult, error)
+	DisableOldCredential(ctx context.Context, req CredentialDisableRequest) (*CredentialDisableResult, error)
+}
+
 type Plan struct {
 	Provider  string          `json:"provider"`
 	Service   string          `json:"service"`
@@ -341,6 +351,126 @@ type DatabaseRetireResult struct {
 	ProviderID string    `json:"provider_id,omitempty"`
 	Status     string    `json:"status"`
 	RetiredAt  time.Time `json:"retired_at"`
+}
+
+type SecretVersionRequest struct {
+	SecretRef   string   `json:"secret_ref"`
+	Env         string   `json:"env,omitempty"`
+	Consumers   []string `json:"consumers,omitempty"`
+	Database    string   `json:"database,omitempty"`
+	OperationID string   `json:"operation_id,omitempty"`
+	SagaID      string   `json:"saga_id,omitempty"`
+	TraceID     string   `json:"trace_id,omitempty"`
+}
+
+type SecretVersion struct {
+	SecretRef       string    `json:"secret_ref"`
+	Provider        string    `json:"provider"`
+	VersionID       string    `json:"version_id"`
+	PreviousVersion string    `json:"previous_version,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+type SecretValidationRequest struct {
+	SecretRef string `json:"secret_ref"`
+	VersionID string `json:"version_id"`
+	Env       string `json:"env,omitempty"`
+	Database  string `json:"database,omitempty"`
+}
+
+type SecretValidationResult struct {
+	OK        bool   `json:"ok"`
+	SecretRef string `json:"secret_ref"`
+	VersionID string `json:"version_id"`
+	Summary   string `json:"summary,omitempty"`
+}
+
+type SecretUpdateRequest struct {
+	SecretRef       string   `json:"secret_ref"`
+	VersionID       string   `json:"version_id"`
+	PreviousVersion string   `json:"previous_version,omitempty"`
+	Env             string   `json:"env,omitempty"`
+	Database        string   `json:"database,omitempty"`
+	Consumers       []string `json:"consumers,omitempty"`
+	Scope           string   `json:"scope,omitempty"`
+	OperationID     string   `json:"operation_id,omitempty"`
+	SagaID          string   `json:"saga_id,omitempty"`
+	TraceID         string   `json:"trace_id,omitempty"`
+}
+
+type SecretPointer struct {
+	SecretRef       string    `json:"secret_ref"`
+	Provider        string    `json:"provider"`
+	VersionID       string    `json:"version_id"`
+	PreviousVersion string    `json:"previous_version,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type SecretRestoreRequest struct {
+	SecretRef       string   `json:"secret_ref"`
+	PreviousVersion string   `json:"previous_version"`
+	Env             string   `json:"env,omitempty"`
+	Database        string   `json:"database,omitempty"`
+	Consumers       []string `json:"consumers,omitempty"`
+	Scope           string   `json:"scope,omitempty"`
+	OperationID     string   `json:"operation_id,omitempty"`
+	SagaID          string   `json:"saga_id,omitempty"`
+	TraceID         string   `json:"trace_id,omitempty"`
+}
+
+type SecretCanaryRequest struct {
+	SecretRef   string `json:"secret_ref"`
+	VersionID   string `json:"version_id"`
+	Env         string `json:"env,omitempty"`
+	Database    string `json:"database,omitempty"`
+	Consumer    string `json:"consumer"`
+	OperationID string `json:"operation_id,omitempty"`
+	SagaID      string `json:"saga_id,omitempty"`
+	TraceID     string `json:"trace_id,omitempty"`
+}
+
+type SecretCanaryResult struct {
+	OK       bool   `json:"ok"`
+	Consumer string `json:"consumer"`
+	Summary  string `json:"summary,omitempty"`
+}
+
+type SecretRollConsumersRequest struct {
+	SecretRef   string   `json:"secret_ref"`
+	VersionID   string   `json:"version_id"`
+	Env         string   `json:"env,omitempty"`
+	Database    string   `json:"database,omitempty"`
+	Consumers   []string `json:"consumers"`
+	OperationID string   `json:"operation_id,omitempty"`
+	SagaID      string   `json:"saga_id,omitempty"`
+	TraceID     string   `json:"trace_id,omitempty"`
+}
+
+type SecretRollConsumersResult struct {
+	OK        bool     `json:"ok"`
+	Consumers []string `json:"consumers"`
+	Summary   string   `json:"summary,omitempty"`
+}
+
+type CredentialDisableRequest struct {
+	SecretRef       string   `json:"secret_ref"`
+	PreviousVersion string   `json:"previous_version"`
+	Env             string   `json:"env,omitempty"`
+	Database        string   `json:"database,omitempty"`
+	Consumers       []string `json:"consumers,omitempty"`
+	DisableAfter    string   `json:"disable_after,omitempty"`
+	OperationID     string   `json:"operation_id,omitempty"`
+	SagaID          string   `json:"saga_id,omitempty"`
+	TraceID         string   `json:"trace_id,omitempty"`
+}
+
+type CredentialDisableResult struct {
+	SecretRef       string    `json:"secret_ref"`
+	PreviousVersion string    `json:"previous_version"`
+	ScheduledFor    string    `json:"scheduled_for,omitempty"`
+	Provider        string    `json:"provider"`
+	Status          string    `json:"status"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type ErrorCode string

@@ -78,6 +78,23 @@ garbage collection require approval context unless the actor is explicit
 break-glass. Agents can request plans, but execution is denied until approval
 context is present.
 
+## Secret Rotation
+
+`skiff rotate secret` creates a `secret.rotation` saga. Dry-run mode returns the
+full graph without writing object state. Execution creates a new secret version,
+validates it, canaries one consumer, pauses at `approve-promotion`, promotes the
+pointer, rolls consumers, and schedules delayed disable of the old credential.
+No plaintext secret values are emitted.
+
+```bash
+skiff rotate secret secret://managed-database/orders-db/connection-url --consumers orders-api,orders-worker --database orders-db --dry-run --format json
+skiff --direct --state s3://skiff-state-prod rotate secret secret://managed-database/orders-db/connection-url --consumers orders-api,orders-worker --canary-consumer orders-api --database orders-db --disable-after 24h --approval-id approval_01J... --format json
+```
+
+If the canary fails, the saga restores the previous secret pointer and stops.
+Old credential deletion is not immediate; it is represented by the explicit
+`schedule-disable-old` step.
+
 ## Database Backup And Restore
 
 Managed database operations are explicit sagas. Backup creates a snapshot and

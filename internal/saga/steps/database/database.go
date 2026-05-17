@@ -22,7 +22,7 @@ const (
 	KindWaitAvailable         = "database.wait_available"
 	KindRunSmokeQuery         = "database.run_smoke_query"
 	KindShadowServiceTest     = "database.shadow_service_test"
-	KindSecretUpdatePointer   = "secret.update_pointer"
+	KindSecretUpdatePointer   = "database.secret_update_pointer"
 	KindServiceRolloutRestart = "service.rollout_restart"
 	KindRetireRestored        = "database.retire_restored_instance"
 )

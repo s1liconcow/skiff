@@ -27,6 +27,7 @@ type Clients struct {
 	Rollouts         ASGRolloutClient
 	ServiceResources ServiceResourceManager
 	Databases        DatabaseClient
+	Secrets          SecretClient
 }
 
 type AutoScalingClient interface {
@@ -51,6 +52,10 @@ type LogsClient interface {
 
 type DatabaseClient interface {
 	provider.DatabaseOperations
+}
+
+type SecretClient interface {
+	provider.SecretOperations
 }
 
 type DiscoveredResource struct {
@@ -121,7 +126,7 @@ func (p *Provider) DiscoverService(ctx context.Context, service, env string) ([]
 }
 
 func (c Clients) Empty() bool {
-	return c.AutoScaling == nil && c.EC2 == nil && c.ELBV2 == nil && c.IAM == nil && c.Logs == nil && c.LogQueries == nil && c.MetricQueries == nil && c.Rollouts == nil && c.ServiceResources == nil && c.Databases == nil
+	return c.AutoScaling == nil && c.EC2 == nil && c.ELBV2 == nil && c.IAM == nil && c.Logs == nil && c.LogQueries == nil && c.MetricQueries == nil && c.Rollouts == nil && c.ServiceResources == nil && c.Databases == nil && c.Secrets == nil
 }
 
 func appendKind(out []DiscoveredResource, kind string, resources []DiscoveredResource) []DiscoveredResource {

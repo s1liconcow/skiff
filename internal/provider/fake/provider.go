@@ -28,6 +28,7 @@ type Provider struct {
 	clock    func() time.Time
 	services map[string][]provider.ResourceInspection
 	rollouts map[string]provider.Rollout
+	secrets  map[string]string
 }
 
 func New(opts ...Option) *Provider {
@@ -35,6 +36,7 @@ func New(opts ...Option) *Provider {
 		clock:    func() time.Time { return time.Now().UTC() },
 		services: map[string][]provider.ResourceInspection{},
 		rollouts: map[string]provider.Rollout{},
+		secrets:  map[string]string{},
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -325,6 +327,94 @@ func (p *Provider) Rollback(ctx context.Context, req provider.RollbackRequest) (
 	p.rollouts[id] = rollout
 	p.mu.Unlock()
 	return &rollout, nil
+}
+
+func (p *Provider) CreateSecretVersion(ctx context.Context, req provider.SecretVersionRequest) (*provider.SecretVersion, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.SecretRef) == "" {
+		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "secret_create_version", Summary: "secret ref is required"}
+	}
+	now := p.now()
+	version := "ver-" + pathSafeResourceName(firstNonEmpty(req.OperationID, req.SecretRef))
+	p.mu.Lock()
+	previous := p.secrets[req.SecretRef]
+	if previous == "" {
+		previous = "current"
+	}
+	p.mu.Unlock()
+	return &provider.SecretVersion{SecretRef: req.SecretRef, Provider: Name, VersionID: version, PreviousVersion: previous, CreatedAt: now}, nil
+}
+
+func (p *Provider) ValidateSecretVersion(ctx context.Context, req provider.SecretValidationRequest) (*provider.SecretValidationResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.SecretRef) == "" || strings.TrimSpace(req.VersionID) == "" {
+		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "secret_validate_version", Summary: "secret ref and version ID are required"}
+	}
+	return &provider.SecretValidationResult{OK: true, SecretRef: req.SecretRef, VersionID: req.VersionID, Summary: "fake secret version validated"}, nil
+}
+
+func (p *Provider) UpdateSecretVersionPointer(ctx context.Context, req provider.SecretUpdateRequest) (*provider.SecretPointer, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.SecretRef) == "" || strings.TrimSpace(req.VersionID) == "" {
+		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "secret_update_pointer", Summary: "secret ref and version ID are required"}
+	}
+	now := p.now()
+	p.mu.Lock()
+	previous := firstNonEmpty(req.PreviousVersion, p.secrets[req.SecretRef], "current")
+	p.secrets[req.SecretRef] = req.VersionID
+	p.mu.Unlock()
+	return &provider.SecretPointer{SecretRef: req.SecretRef, Provider: Name, VersionID: req.VersionID, PreviousVersion: previous, UpdatedAt: now}, nil
+}
+
+func (p *Provider) RestoreSecretVersion(ctx context.Context, req provider.SecretRestoreRequest) (*provider.SecretPointer, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.SecretRef) == "" || strings.TrimSpace(req.PreviousVersion) == "" {
+		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "secret_restore_version", Summary: "secret ref and previous version are required"}
+	}
+	now := p.now()
+	p.mu.Lock()
+	current := p.secrets[req.SecretRef]
+	p.secrets[req.SecretRef] = req.PreviousVersion
+	p.mu.Unlock()
+	return &provider.SecretPointer{SecretRef: req.SecretRef, Provider: Name, VersionID: req.PreviousVersion, PreviousVersion: current, UpdatedAt: now}, nil
+}
+
+func (p *Provider) CanaryServiceWithSecret(ctx context.Context, req provider.SecretCanaryRequest) (*provider.SecretCanaryResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.SecretRef) == "" || strings.TrimSpace(req.VersionID) == "" || strings.TrimSpace(req.Consumer) == "" {
+		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "service_canary_with_secret", Summary: "secret ref, version ID, and consumer are required"}
+	}
+	return &provider.SecretCanaryResult{OK: true, Consumer: req.Consumer, Summary: "fake consumer accepted secret version"}, nil
+}
+
+func (p *Provider) RollConsumersWithSecret(ctx context.Context, req provider.SecretRollConsumersRequest) (*provider.SecretRollConsumersResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.SecretRef) == "" || strings.TrimSpace(req.VersionID) == "" || len(req.Consumers) == 0 {
+		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "service_roll_consumers", Summary: "secret ref, version ID, and consumers are required"}
+	}
+	return &provider.SecretRollConsumersResult{OK: true, Consumers: append([]string(nil), req.Consumers...), Summary: "fake consumers rolled to secret version"}, nil
+}
+
+func (p *Provider) DisableOldCredential(ctx context.Context, req provider.CredentialDisableRequest) (*provider.CredentialDisableResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.SecretRef) == "" || strings.TrimSpace(req.PreviousVersion) == "" {
+		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "credential_disable_old", Summary: "secret ref and previous version are required"}
+	}
+	return &provider.CredentialDisableResult{SecretRef: req.SecretRef, PreviousVersion: req.PreviousVersion, ScheduledFor: req.DisableAfter, Provider: Name, Status: "scheduled", UpdatedAt: p.now()}, nil
 }
 
 func (p *Provider) now() time.Time {

@@ -470,6 +470,50 @@ func (b *resultBuilder) checkRecentEvents(service servicestatus.Service) {
 			})
 			b.addAction(inspectStatusAction(b.binary, service.Service))
 		}
+		if containsAny(lower, "secret", "credential") && containsAny(lower, "stale", "old version", "previous version", "version mismatch", "not rolled", "still using") {
+			finding := Finding{
+				ID:         findingID(service.Service, "SECRET_CONSUMER_STALE"),
+				Code:       "SECRET_CONSUMER_STALE",
+				Severity:   SeverityHigh,
+				Service:    service.Service,
+				Summary:    "recent events show a consumer may still be using an old secret or credential version",
+				Confidence: 0.82,
+				Evidence:   eventEvidence,
+			}
+			b.addFinding(finding)
+			b.addHypothesis(Hypothesis{
+				ID:         hypothesisID(service.Service, "secret_consumer_stale"),
+				FindingID:  finding.ID,
+				Service:    service.Service,
+				Message:    "the secret pointer may have promoted before all consumers rolled, or a consumer may cache credentials too long",
+				Confidence: 0.72,
+				Evidence:   eventEvidence,
+			})
+			b.addAction(inspectEventsAction(b.binary, service.Service))
+			b.addAction(inspectLogsAction(b.binary, service.Service))
+		}
+		if containsAny(lower, "secret", "credential", "rotation") && containsAny(lower, "canary failed", "rotation failed", "restore previous", "restored previous", "disable failed") {
+			finding := Finding{
+				ID:         findingID(service.Service, "SECRET_ROTATION_FAILED"),
+				Code:       "SECRET_ROTATION_FAILED",
+				Severity:   SeverityHigh,
+				Service:    service.Service,
+				Summary:    "recent events show a secret rotation failed or restored the previous version",
+				Confidence: 0.84,
+				Evidence:   eventEvidence,
+			}
+			b.addFinding(finding)
+			b.addHypothesis(Hypothesis{
+				ID:         hypothesisID(service.Service, "secret_rotation_failed"),
+				FindingID:  finding.ID,
+				Service:    service.Service,
+				Message:    "the canary consumer may have rejected the new version, or credential disable scheduling may have failed",
+				Confidence: 0.74,
+				Evidence:   eventEvidence,
+			})
+			b.addAction(inspectEventsAction(b.binary, service.Service))
+			b.addAction(inspectLogsAction(b.binary, service.Service))
+		}
 	}
 }
 

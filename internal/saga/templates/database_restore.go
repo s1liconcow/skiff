@@ -249,10 +249,10 @@ func databaseRestoreGraph(params databaseParams) ([]schema.SagaNode, []schema.Sa
 		},
 		schema.SagaNode{
 			ID:            "update-secret-pointer",
-			Kind:          "secret.update_pointer",
+			Kind:          "database.secret_update_pointer",
 			Requires:      []string{"approve-cutover"},
 			Params:        mustJSON(params),
-			Compensate:    &schema.CompensationSpec{Kind: "secret.update_pointer", Params: mustJSON(params)},
+			Compensate:    &schema.CompensationSpec{Kind: "database.secret_update_pointer", Params: mustJSON(params)},
 			Risk:          schema.RiskHigh,
 			Reversibility: schema.Compensatable,
 		},

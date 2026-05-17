@@ -50,7 +50,7 @@ func (p *Provider) RunShadowServiceTest(ctx context.Context, req provider.Shadow
 
 func (p *Provider) UpdateSecretPointer(ctx context.Context, req provider.SecretPointerRequest) (*provider.SecretPointerUpdate, error) {
 	if p.clients.Databases == nil {
-		return nil, provider.Unsupported(Name, "secret.update_pointer")
+		return nil, provider.Unsupported(Name, "database.secret_update_pointer")
 	}
 	return p.clients.Databases.UpdateSecretPointer(ctx, req)
 }
