@@ -1542,6 +1542,7 @@ type objectStateRunnerSink struct {
 	inner runner.EventSink
 	actor schema.Actor
 	seed  string
+	seq   int
 }
 
 func (s *objectStateRunnerSink) EmitRunnerEvent(ctx context.Context, event runner.StateEvent) error {
@@ -1559,7 +1560,8 @@ func (s *objectStateRunnerSink) EmitRunnerEvent(ctx context.Context, event runne
 			observedAt = parsed
 		}
 	}
-	id := skiffevents.NewID(observedAt, s.seed+event.Service+event.Env+event.ReleaseID+string(event.State)+event.Summary)
+	s.seq++
+	id := skiffevents.NewID(observedAt, fmt.Sprintf("%s:%06d:%s:%s:%s:%s:%s", s.seed, s.seq, event.Service, event.Env, event.ReleaseID, event.State, event.Summary))
 	key, err := paths.ServiceEvent(event.Service, id)
 	if err != nil {
 		return err
