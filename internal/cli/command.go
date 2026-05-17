@@ -67,6 +67,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 	}
 
 	switch root.Command {
+	case "adopt":
+		return runAdopt(binary, root.Args, root, stdout, stderr)
 	case "authz":
 		return runAuthz(binary, root.Args, root, stdout, stderr)
 	case "bootstrap":
@@ -133,6 +135,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runStatus(binary, root.Args, root, stdout, stderr)
 	case "tui":
 		return runTUI(binary, root.Args, root, stdout, stderr)
+	case "terraform":
+		return runTerraform(binary, root.Args, root, stdout, stderr)
 	case "validate":
 		return runValidate(binary, root.Args, stdout, stderr)
 	case "version":
@@ -229,6 +233,7 @@ func runVersion(binary string, args []string, root rootOptions, stdout, stderr i
 func printUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s <command> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  adopt      Record externally managed resources in object state")
 	fmt.Fprintln(w, "  authz      Explain authorization and approval decisions")
 	fmt.Fprintln(w, "  bootstrap  Bootstrap initial cloud state substrate")
 	fmt.Fprintln(w, "  compile    Compile a Skiff spec to provider-neutral IR")
@@ -264,6 +269,7 @@ func printUsage(w io.Writer, binary string) {
 	}
 	fmt.Fprintln(w, "  state      Inspect object-state paths and developer helpers")
 	fmt.Fprintln(w, "  status     Show service status through direct or API mode")
+	fmt.Fprintln(w, "  terraform  Generate Terraform modules for Skiff specs")
 	fmt.Fprintln(w, "  tui        Open the terminal operations dashboard")
 	fmt.Fprintln(w, "  validate   Parse, default, and validate a Skiff spec")
 	fmt.Fprintln(w, "  version    Print version, commit, and build date")

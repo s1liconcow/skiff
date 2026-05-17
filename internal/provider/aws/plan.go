@@ -50,6 +50,12 @@ type AppliedResource struct {
 	Fingerprint string            `json:"fingerprint,omitempty"`
 }
 
+const (
+	resourceOwnershipDirect                     = "direct"
+	resourceOwnershipTerraformInfraSkiffRelease = "terraform-infra-skiff-release"
+	resourceOwnershipExternal                   = "external"
+)
+
 func desiredServiceResources(resources *ServiceResources) ([]DesiredServiceResource, error) {
 	if resources == nil {
 		return nil, nil
@@ -136,6 +142,51 @@ func desiredServiceResource(kind, logicalID, name string, tags map[string]string
 		Fingerprint: hex.EncodeToString(sum[:]),
 		Desired:     append(json.RawMessage(nil), body...),
 	}, nil
+}
+
+func (p *Provider) adoptedPlannedChange(ctx context.Context, change provider.PlannedChange) (provider.PlannedChange, bool, error) {
+	if p.stateStore == nil || strings.TrimSpace(change.LogicalID) == "" {
+		return change, false, nil
+	}
+	key, err := paths.LogicalResource(change.Kind, pathSafeResourceName(change.LogicalID))
+	if err != nil {
+		return change, false, err
+	}
+	obj, err := p.stateStore.Get(ctx, key)
+	if err != nil {
+		if errors.Is(err, objstore.ErrNotFound) {
+			return change, false, nil
+		}
+		return change, false, err
+	}
+	var record schema.ResourceRecord
+	if err := canonical.UnmarshalStrict(obj.Body, &record); err != nil {
+		return change, false, err
+	}
+	if record.Ownership == nil || record.Ownership.Mode == "" || record.Ownership.Mode == resourceOwnershipDirect {
+		return change, false, nil
+	}
+	switch record.Ownership.Mode {
+	case resourceOwnershipTerraformInfraSkiffRelease, resourceOwnershipExternal:
+	default:
+		return change, false, nil
+	}
+	if record.Provider.Provider != "" && record.Provider.Provider != Name {
+		return change, false, nil
+	}
+	if record.Provider.Kind != "" && record.Provider.Kind != change.Kind {
+		return change, false, nil
+	}
+	if record.Provider.ID == "" {
+		return change, false, nil
+	}
+	change.Action = provider.ActionNoop
+	change.ProviderID = record.Provider.ID
+	change.Summary = fmt.Sprintf("use %s-owned %s %s", record.Ownership.Source, change.Kind, record.Provider.ID)
+	if len(record.Tags) > 0 {
+		change.Tags = cloneTags(record.Tags)
+	}
+	return change, true, nil
 }
 
 func plannedChangeFromDesired(resource DesiredServiceResource, plan *ResourcePlan) provider.PlannedChange {

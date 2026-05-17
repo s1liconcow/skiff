@@ -172,7 +172,7 @@ type ReleaseManifest struct {
 	Artifact              ArtifactRef `json:"artifact"`
 	RuntimeManifestKey    string      `json:"runtime_manifest_key"`
 	RuntimeManifestDigest string      `json:"runtime_manifest_digest,omitempty"`
-	MinRunnerVersion     string      `json:"min_runner_version,omitempty"`
+	MinRunnerVersion      string      `json:"min_runner_version,omitempty"`
 	Digest                string      `json:"digest,omitempty"`
 	CreatedAt             string      `json:"created_at"`
 	ExpiresAt             string      `json:"expires_at,omitempty"`
@@ -317,8 +317,16 @@ type ResourceRecord struct {
 	Provider      ResourceProviderRef `json:"provider"`
 	Service       string              `json:"service,omitempty"`
 	Env           string              `json:"env,omitempty"`
+	Ownership     *ResourceOwnership  `json:"ownership,omitempty"`
 	Tags          map[string]string   `json:"tags,omitempty"`
 	ObservedAt    string              `json:"observed_at"`
+}
+
+type ResourceOwnership struct {
+	Mode      string `json:"mode"`
+	Source    string `json:"source,omitempty"`
+	ManagedBy string `json:"managed_by,omitempty"`
+	AdoptedAt string `json:"adopted_at,omitempty"`
 }
 
 type ResourceLogicalRef struct {

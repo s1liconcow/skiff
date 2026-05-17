@@ -140,7 +140,15 @@ func (p *Provider) Plan(ctx context.Context, graph *ir.Graph) (*provider.Plan, e
 				return nil, err
 			}
 		}
-		changes = append(changes, plannedChangeFromDesired(resource, resourcePlan))
+		change := plannedChangeFromDesired(resource, resourcePlan)
+		adopted, ok, err := p.adoptedPlannedChange(ctx, change)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			change = adopted
+		}
+		changes = append(changes, change)
 	}
 	return &provider.Plan{
 		Provider:  Name,
@@ -155,7 +163,38 @@ func (p *Provider) Apply(ctx context.Context, plan *provider.Plan) (*provider.Ap
 		return nil, err
 	}
 	if p.clients.ServiceResources == nil {
-		return nil, provider.Unsupported(Name, "apply")
+		if err := validatePlanForApply(plan); err != nil {
+			return nil, provider.Unsupported(Name, "apply")
+		}
+		result := &provider.ApplyResult{
+			Provider:  Name,
+			Service:   plan.Service,
+			Env:       plan.Env,
+			AppliedAt: time.Now().UTC(),
+		}
+		for _, change := range plan.Resources {
+			if change.Action == provider.ActionDeleteNotSupported {
+				continue
+			}
+			if change.Action != provider.ActionNoop || change.ProviderID == "" {
+				return nil, provider.Unsupported(Name, "apply")
+			}
+			applied := AppliedResource{
+				Kind:        change.Kind,
+				LogicalID:   change.LogicalID,
+				Name:        change.Name,
+				ProviderID:  change.ProviderID,
+				Status:      "terraform-owned",
+				Tags:        cloneTags(change.Tags),
+				Fingerprint: change.Fingerprint,
+			}
+			if err := p.recordAppliedResource(ctx, plan, change, applied); err != nil {
+				return nil, err
+			}
+			result.ResourceIDs = append(result.ResourceIDs, applied.ProviderID)
+			result.Resources = append(result.Resources, appliedInspection(change, applied))
+		}
+		return result, nil
 	}
 	if err := validatePlanForApply(plan); err != nil {
 		return nil, err
