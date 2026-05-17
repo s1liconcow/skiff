@@ -1,6 +1,7 @@
 name: e2e
 
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       mode:
@@ -13,12 +14,17 @@ on:
           - apple
           - aws
           - all
+      aws_live_apply:
+        description: "Run the live AWS apply path when AWS mode is selected"
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: "17 9 * * *"
 
 jobs:
   local:
-    if: github.event_name == 'schedule' || inputs.mode == 'local' || inputs.mode == 'all'
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || inputs.mode == 'local' || inputs.mode == 'all'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +54,12 @@ jobs:
       SKIFF_AWS_E2E_STATE: ${{ secrets.SKIFF_AWS_E2E_STATE }}
       SKIFF_AWS_E2E_REGION: ${{ secrets.SKIFF_AWS_E2E_REGION }}
       SKIFF_AWS_E2E_PREFIX: skiff-e2e-${{ github.run_id }}
+      SKIFF_AWS_E2E_LIVE_APPLY: ${{ inputs.aws_live_apply && '1' || secrets.SKIFF_AWS_E2E_LIVE_APPLY }}
+      SKIFF_AWS_VPC_ID: ${{ secrets.SKIFF_AWS_VPC_ID }}
+      SKIFF_AWS_SUBNET_IDS: ${{ secrets.SKIFF_AWS_SUBNET_IDS }}
+      SKIFF_AWS_AMI_ID: ${{ secrets.SKIFF_AWS_AMI_ID }}
+      SKIFF_AWS_ALB_LISTENER_ARN: ${{ secrets.SKIFF_AWS_ALB_LISTENER_ARN }}
+      SKIFF_AWS_LOAD_BALANCER_SECURITY_GROUP_REF: ${{ secrets.SKIFF_AWS_LOAD_BALANCER_SECURITY_GROUP_REF }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}

@@ -4,7 +4,7 @@ Skiff has three e2e modes:
 
 - Local: mandatory, deterministic, no cloud credentials. Uses file object state and the fake provider.
 - Apple silicon: optional. Uses Apple `container`, RustFS as S3-compatible object state, and Caddy as a digest-pinned OCI workload.
-- AWS: optional and explicitly gated. Current coverage proves AWS plan/explain lowering and records the live-apply gap until real AWS apply/discovery adapters are linked.
+- AWS: optional and explicitly gated. The default smoke gate proves plan/explain lowering without mutation; `SKIFF_AWS_E2E_LIVE_APPLY=1` uses SDK-backed live adapters to create/update core AWS primitives.
 
 Run the mandatory suite:
 
@@ -21,14 +21,19 @@ SKIFF_AWS_E2E=1 SKIFF_AWS_E2E_STATE=s3://skiff-e2e-state SKIFF_AWS_E2E_REGION=us
 SKIFF_AWS_E2E=1 SKIFF_AWS_E2E_LIVE_APPLY=1 SKIFF_AWS_E2E_STATE=s3://skiff-e2e-state SKIFF_AWS_E2E_REGION=us-west-2 SKIFF_AWS_E2E_PREFIX=skiff-e2e-$(date +%s) SKIFF_AWS_VPC_ID=vpc-... SKIFF_AWS_SUBNET_IDS=subnet-a,subnet-b SKIFF_AWS_AMI_ID=ami-... make e2e-aws
 ```
 
+CI runs `make e2e-local` on pull requests. The `e2e` workflow also exposes
+manual `apple`, `aws`, and `all` modes, plus the scheduled AWS smoke gate. Use
+the `aws_live_apply` workflow input, or set the matching live-apply secrets, to
+turn the AWS smoke gate into a live primitive deployment.
+
 | Capability | Local | Apple silicon | AWS | Evidence |
 |---|---|---|---|---|
 | validate | covered | not_applicable | not_applicable | `TestLocalCLIEndToEndCapabilityMatrix` runs `skiff validate`. |
 | compile | covered | not_applicable | not_applicable | `TestLocalCLIEndToEndCapabilityMatrix` runs `skiff compile`. |
 | plan | covered | not_applicable | gated | Local and AWS smoke use AWS lowering without credentials or mutation. |
 | explain | covered | not_applicable | gated | Local and AWS smoke explain visible AWS primitives. |
-| release signing and verification | covered | covered | gated | Local verifies release/runtime manifests; Apple publishes signed runtime manifests into RustFS and verifies the fetched release through the CLI. |
-| deploy | covered | optional | gated | Local deploys twice through the fake provider; Apple proves runner-side rollout. |
+| release signing and verification | covered | covered | gated | Local verifies release/runtime manifests; Apple publishes signed runtime manifests into RustFS and verifies the fetched release through the CLI; AWS live apply publishes signed release/runtime objects before provider mutation. |
+| deploy | covered | optional | gated | Local deploys twice through the fake provider; Apple proves runner-side rollout; AWS live apply deploys core IAM, security group, log group, target group, launch template, and ASG primitives when live gates are present. |
 | rollout watch | covered | optional | gated | Local starts and watches provider rollout IDs; Apple rolls to a second release. |
 | status | covered | optional | gated | Local reads direct-mode status from object state; Apple reads direct status and local `skiffd` API status from RustFS-backed S3 state. |
 | events | covered | optional | gated | Local reads service events and writes report object paths; Apple writes runner, operation, and saga events into RustFS and replays canary saga events through local `skiffd`. |
@@ -64,12 +69,12 @@ The test creates unique Apple container names and RustFS buckets and registers c
 - `SKIFF_AWS_E2E_STATE` names the S3 object-state bucket URI.
 - `SKIFF_AWS_E2E_REGION` or `AWS_REGION` selects the region.
 - `SKIFF_AWS_E2E_PREFIX` must be unique for the run and is recorded in reports.
-- `SKIFF_AWS_E2E_LIVE_APPLY=1` requests live apply. Until real adapters are linked, the test records the adapter gap after preflighting live-shape inputs.
+- `SKIFF_AWS_E2E_LIVE_APPLY=1` requests SDK-backed live apply after the non-mutating plan/explain gate passes.
 - `SKIFF_AWS_VPC_ID`, `SKIFF_AWS_SUBNET_IDS`, and `SKIFF_AWS_AMI_ID` are required live-shape inputs for target groups/security groups, ASGs, and launch templates.
 - `SKIFF_AWS_ALB_LISTENER_ARN` is required for services with listener rules.
 - `SKIFF_AWS_LOAD_BALANCER_SECURITY_GROUP_REF` is required when VM ingress uses the `load-balancer` source.
 
-AWS tests must remain optional for PRs. They should tag or name every resource with the run prefix, record provider IDs, and clean up even after failed assertions once live apply exists.
+AWS tests must remain optional for PRs. Live runs use a prefix-derived service name, Skiff tags, and JSON reports with provider IDs, operation IDs, durable object paths, trace IDs, cleanup status, and follow-up cleanup/status commands. Automatic destructive cleanup is intentionally not performed by the current smoke test; cleanup status and tag-discovery commands are recorded so operators can remove isolated test resources explicitly.
 
 ## Failure Triage
 

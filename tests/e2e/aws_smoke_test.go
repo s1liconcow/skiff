@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/s1liconcow/skiff/internal/state/paths"
 )
 
 func TestAWSE2ESmokeGatesAndReport(t *testing.T) {
@@ -68,6 +70,8 @@ func TestAWSE2ESmokeGatesAndReport(t *testing.T) {
 		"skiff status "+service+" --direct --state "+stateURI+" --env "+env+" --provider aws --region "+region+" --aws-live-apply --format json --trace-id "+traceID,
 	)
 
+	releaseID := "rel-" + awsE2EID(prefix)
+	operationID := "op-" + awsE2EID(prefix)
 	signingSeed := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("A", ed25519.SeedSize)))
 	var deployed localDeployOutput
 	decodeCLIJSON(t, runSkiffCLI(t, report,
@@ -77,8 +81,8 @@ func TestAWSE2ESmokeGatesAndReport(t *testing.T) {
 		"--aws-vpc-id", strings.TrimSpace(os.Getenv("SKIFF_AWS_VPC_ID")),
 		"--aws-subnet-ids", strings.TrimSpace(os.Getenv("SKIFF_AWS_SUBNET_IDS")),
 		"--aws-ami-id", strings.TrimSpace(os.Getenv("SKIFF_AWS_AMI_ID")),
-		"--release-id", "rel-"+awsE2EID(prefix),
-		"--operation-id", "op-"+awsE2EID(prefix),
+		"--release-id", releaseID,
+		"--operation-id", operationID,
 		"--key-id", "aws-e2e",
 		"--signing-seed-base64", signingSeed,
 		"--format", "json",
@@ -88,6 +92,7 @@ func TestAWSE2ESmokeGatesAndReport(t *testing.T) {
 		t.Fatalf("unexpected AWS live deploy output: %+v", deployed)
 	}
 	report.addOperationID(deployed.Result.OperationID)
+	reportAWSDeployObjectPaths(t, report, service, releaseID, operationID)
 	for _, resource := range deployed.Result.Plan.Resources {
 		report.addProviderID(resource.ProviderID)
 	}
@@ -107,6 +112,7 @@ func TestAWSE2ESmokeGatesAndReport(t *testing.T) {
 		report.addProviderID(resource.ProviderID)
 	}
 	report.fact("aws_live_apply", "live AWS apply completed and direct status observed resource records")
+	report.fact("aws_saga", "not exercised by the stateless live deploy smoke; operation ID and object paths are recorded")
 }
 
 func missingAWSLiveShapeEnv() []string {
@@ -122,6 +128,23 @@ func missingAWSLiveShapeEnv() []string {
 		}
 	}
 	return missing
+}
+
+func reportAWSDeployObjectPaths(t *testing.T, report *e2eReport, service, releaseID, operationID string) {
+	t.Helper()
+	for _, makeKey := range []func() (string, error){
+		func() (string, error) { return paths.ServiceControl(service) },
+		func() (string, error) { return paths.ReleaseManifest(service, releaseID) },
+		func() (string, error) { return paths.RuntimeManifest(service, releaseID) },
+		func() (string, error) { return paths.OperationIntent(service, operationID) },
+		func() (string, error) { return paths.OperationControl(service, operationID) },
+	} {
+		key, err := makeKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		report.addObjectPath(key)
+	}
 }
 
 type awsLiveStatusOutput struct {

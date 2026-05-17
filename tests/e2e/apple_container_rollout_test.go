@@ -163,6 +163,7 @@ func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 
 	localSkiffd := startLocalSkiffd(t, ctx, store, stateURI, env, traceID)
 	assertSkiffdStatusViaAPI(t, report, localSkiffd.url, stateURI, service, env, nextReleaseID, secondOperationID, traceID)
+	createFakeCanaryResourceRecords(t, ctx, store, report, service, env)
 	canary := runRollingCanaryDeployViaDirectCLI(t, report, stateURI, service, env, secondImage, canaryReleaseID, canaryOperationID, traceID)
 	report.addOperationID(canary.Result.OperationID)
 	report.addSagaID(canary.Result.SagaID)
@@ -608,6 +609,33 @@ func createAppleResourceRecords(t *testing.T, ctx context.Context, store objstor
 		report.addObjectPath(key)
 		report.addProviderID(resource.id)
 	}
+}
+
+func createFakeCanaryResourceRecords(t *testing.T, ctx context.Context, store objstore.ObjectStore, report *e2eReport, service, env string) {
+	t.Helper()
+	id := "fake-target-group-" + service
+	record := schema.ResourceRecord{
+		SchemaVersion: schema.Version,
+		Logical:       schema.ResourceLogicalRef{Kind: "target-group", Name: "target-group:" + service},
+		Provider:      schema.ResourceProviderRef{Provider: fakeprovider.Name, Kind: "target-group", ID: id},
+		Service:       service,
+		Env:           env,
+		Ownership:     &schema.ResourceOwnership{Mode: "managed", ManagedBy: "skiff-e2e"},
+		Tags: map[string]string{
+			"skiff.dev/service": service,
+			"skiff.dev/env":     env,
+			"skiff.dev/managed": "true",
+			"skiff.dev/graph":   "apple-container-canary-e2e",
+		},
+		ObservedAt: canonical.Time(fixedNow()),
+	}
+	key, err := paths.ProviderResource(fakeprovider.Name, "target-group", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createJSON(t, ctx, store, key, record)
+	report.addObjectPath(key)
+	report.addProviderID(id)
 }
 
 func createAppleOperation(t *testing.T, ctx context.Context, store objstore.ObjectStore, report *e2eReport, service, env, operationID, releaseID string, status schema.OperationStatus, traceID, providerID string) {

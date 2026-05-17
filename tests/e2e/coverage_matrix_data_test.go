@@ -56,7 +56,7 @@ func e2eCoverageMatrix() []capabilityCoverage {
 			Local:        coverageCovered,
 			AppleSilicon: coverageCovered,
 			AWS:          coverageGated,
-			Evidence:     "Local e2e verifies release/runtime manifests; Apple publishes signed runtime manifests to RustFS and verifies the fetched release through the CLI.",
+			Evidence:     "Local e2e verifies release/runtime manifests; Apple publishes signed runtime manifests to RustFS and verifies the fetched release through the CLI; AWS live apply publishes signed release/runtime objects before provider mutation.",
 			Command:      "go test ./tests/e2e",
 		},
 		{
@@ -64,7 +64,7 @@ func e2eCoverageMatrix() []capabilityCoverage {
 			Local:        coverageCovered,
 			AppleSilicon: coverageOptional,
 			AWS:          coverageGated,
-			Evidence:     "Local e2e deploys twice with the fake provider and file object state.",
+			Evidence:     "Local e2e deploys twice with the fake provider and file object state; AWS live apply deploys core service primitives when live gates are present.",
 			Command:      "make e2e-local",
 		},
 		{
