@@ -9,15 +9,17 @@ import (
 
 	"github.com/s1liconcow/skiff/internal/compiler"
 	"github.com/s1liconcow/skiff/internal/config"
+	skiffcost "github.com/s1liconcow/skiff/internal/cost"
 	"github.com/s1liconcow/skiff/internal/provider"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
 	"github.com/s1liconcow/skiff/internal/spec"
 )
 
 type planOutput struct {
-	OK      bool          `json:"ok"`
-	TraceID string        `json:"trace_id,omitempty"`
-	Plan    provider.Plan `json:"plan"`
+	OK              bool                       `json:"ok"`
+	TraceID         string                     `json:"trace_id,omitempty"`
+	Plan            provider.Plan              `json:"plan"`
+	AdvisorWarnings []skiffcost.Recommendation `json:"advisor_warnings,omitempty"`
 }
 
 func runPlan(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
@@ -75,6 +77,7 @@ func runPlan(binary string, args []string, root rootOptions, stdout, stderr io.W
 	if err != nil {
 		return writeSpecError(binary, "PLAN_FAILED", *format, *traceID, err, nil, stdout, stderr)
 	}
+	advisorWarnings := skiffcost.PlanWarnings(skiffcost.InputFromGraph(graph))
 
 	switch *format {
 	case "human", "text":
@@ -82,9 +85,15 @@ func runPlan(binary string, args []string, root rootOptions, stdout, stderr io.W
 		for _, resource := range plan.Resources {
 			fmt.Fprintf(stdout, "- %s %s %s: %s\n", resource.Action, resource.Kind, resource.Name, resource.Summary)
 		}
+		if len(advisorWarnings) > 0 {
+			fmt.Fprintln(stdout, "advisor warnings:")
+			for _, warning := range advisorWarnings {
+				fmt.Fprintf(stdout, "- %s [%s confidence]: %s\n", warning.ID, warning.Confidence, warning.Summary)
+			}
+		}
 		return ExitSuccess
 	case "json":
-		if err := json.NewEncoder(stdout).Encode(planOutput{OK: true, TraceID: *traceID, Plan: *plan}); err != nil {
+		if err := json.NewEncoder(stdout).Encode(planOutput{OK: true, TraceID: *traceID, Plan: *plan, AdvisorWarnings: advisorWarnings}); err != nil {
 			fmt.Fprintf(stderr, "%s plan: %v\n", binary, err)
 			return ExitInternalError
 		}

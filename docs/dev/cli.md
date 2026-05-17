@@ -150,6 +150,16 @@ skiff gc plan --service payments-api --direct --state s3://skiff-state-prod --en
 skiff gc apply --service payments-api --direct --state s3://skiff-state-prod --env prod --approval-id approval_01J... --yes --format json
 ```
 
+## Cost Advisor
+
+`skiff cost explain` is read-only. It explains service shape, replica,
+warm-capacity, and log-volume recommendations from the spec plus supplied
+observed metrics. Confidence and evidence are included in JSON output.
+
+```bash
+skiff cost explain payments-api --file examples/service/http-hello/skiff.yaml --cpu-p95 18 --memory-p95 41 --warm-capacity 4 --format json
+```
+
 Completion scripts are generated with:
 
 ```bash
@@ -180,7 +190,7 @@ The built-in mTLS capability plugin is documented in `docs/dev/mtls-plugin.md` a
 
 ## Plan
 
-`skiff plan` renders the dry-run provider changes for a spec. JSON output includes the action, cloud kind, provider name, fingerprint, and desired payload for each resource so agents can inspect create/update/no-op decisions before any mutating deploy path runs.
+`skiff plan` renders the dry-run provider changes for a spec. JSON output includes the action, cloud kind, provider name, fingerprint, desired payload, and static `advisor_warnings` for expensive desired capacity so agents can inspect create/update/no-op decisions before any mutating deploy path runs.
 
 ```bash
 skiff plan examples/service/skiff.yaml --provider aws --region us-west-2 --state s3://skiff-state-prod

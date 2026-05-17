@@ -83,6 +83,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runCI(binary, root.Args, root, stdout, stderr)
 	case "contract":
 		return runContract(binary, root.Args, root, stdout, stderr)
+	case "cost":
+		return runCost(binary, root.Args, root, stdout, stderr)
 	case "cutover":
 		return runCutover(binary, root.Args, root, stdout, stderr)
 	case "deploy":
@@ -247,6 +249,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  completion Generate shell completions")
 	fmt.Fprintln(w, "  ci         Generate CI/CD templates")
 	fmt.Fprintln(w, "  contract   Run CI contract checks")
+	fmt.Fprintln(w, "  cost       Explain service shape and capacity recommendations")
 	fmt.Fprintln(w, "  cutover    Create a weighted traffic cutover saga")
 	fmt.Fprintln(w, "  database   Run managed database backup and restore sagas")
 	fmt.Fprintln(w, "  debug      Collect scoped diagnostic bundles")
