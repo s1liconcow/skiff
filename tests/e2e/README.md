@@ -38,7 +38,9 @@ Real AWS stateless-service smoke coverage must be explicitly gated before it is
 added to CI. The current AWS test proves the explicit gates plus plan/explain
 lowering and records the live-apply gap until real AWS apply/discovery adapters
 are linked. Use `SKIFF_AWS_E2E=1`, `SKIFF_AWS_E2E_STATE`,
-`SKIFF_AWS_E2E_REGION`, and a unique `SKIFF_AWS_E2E_PREFIX`.
+`SKIFF_AWS_E2E_REGION`, and a unique `SKIFF_AWS_E2E_PREFIX`. Live apply is
+further gated by `SKIFF_AWS_E2E_LIVE_APPLY=1` plus provider-shape inputs such
+as `SKIFF_AWS_VPC_ID`, `SKIFF_AWS_SUBNET_IDS`, and `SKIFF_AWS_AMI_ID`.
 
 See `docs/dev/e2e-matrix.md` for the full capability matrix, run modes, cleanup
 expectations, and failure triage commands.

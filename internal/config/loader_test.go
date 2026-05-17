@@ -52,6 +52,59 @@ logLevel: warn
 	}
 }
 
+func TestLoadAWSLiveApplyInputs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "skiff.yaml")
+	if err := os.WriteFile(path, []byte(`
+env: prod
+provider: aws
+region: us-west-2
+stateBucket: s3://from-file
+mode: direct
+awsLiveApply: true
+awsVpcId: vpc-file
+awsSubnetIds: subnet-a, subnet-b
+awsAmiId: ami-file
+awsAlbListenerArn: arn:aws:elasticloadbalancing:us-west-2:123456789012:listener/app/skiff/abc/def
+awsLoadBalancerSecurityGroupRef: sg-file
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Load(LoadOptions{
+		ConfigPath: path,
+		Env: map[string]string{
+			"SKIFF_AWS_VPC_ID":     "vpc-env",
+			"SKIFF_AWS_SUBNET_IDS": "subnet-env-a,subnet-env-b",
+		},
+		Overrides: map[string]string{
+			FieldAWSAMIID: "ami-flag",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	if !loaded.Config.AWSLiveApply {
+		t.Fatalf("aws live apply should be enabled: %+v", loaded.Config)
+	}
+	if loaded.Config.AWSVPCID != "vpc-env" {
+		t.Fatalf("aws vpc id = %q, want env override", loaded.Config.AWSVPCID)
+	}
+	if got := loaded.Config.AWSSubnetIDs; len(got) != 2 || got[0] != "subnet-env-a" || got[1] != "subnet-env-b" {
+		t.Fatalf("aws subnet ids = %+v, want env split list", got)
+	}
+	if loaded.Config.AWSAMIID != "ami-flag" {
+		t.Fatalf("aws ami id = %q, want flag override", loaded.Config.AWSAMIID)
+	}
+	if loaded.Config.AWSALBListenerARN == "" || loaded.Config.AWSLoadBalancerSecurityGroupRef != "sg-file" {
+		t.Fatalf("aws live fields not loaded: %+v", loaded.Config)
+	}
+}
+
 func TestValidateModes(t *testing.T) {
 	tests := []struct {
 		name string

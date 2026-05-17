@@ -45,6 +45,12 @@ SKIFF_MODE
 SKIFF_API_URL
 SKIFF_SERVICE
 SKIFF_CONTROL_KEY
+SKIFF_AWS_LIVE_APPLY
+SKIFF_AWS_VPC_ID
+SKIFF_AWS_SUBNET_IDS
+SKIFF_AWS_AMI_ID
+SKIFF_AWS_ALB_LISTENER_ARN
+SKIFF_AWS_LOAD_BALANCER_SECURITY_GROUP_REF
 ```
 
 Mode-specific required fields:
@@ -55,6 +61,13 @@ Mode-specific required fields:
 | `direct` | `env`, `provider`, `region`, `stateBucket` |
 | `skiffd` | `env`, `provider`, `region`, `stateBucket` |
 | `runner` | `env`, `provider`, `region`, `stateBucket`, `service`, `controlKey` |
+
+AWS live-apply inputs are provider configuration, not service-spec fields. Set
+`awsLiveApply: true` only when requesting SDK-backed live apply. `awsVpcId`,
+`awsSubnetIds`, and `awsAmiId` are required for live target groups, Auto
+Scaling Groups, and launch templates. `awsAlbListenerArn` is required only when
+the service has an ingress listener rule. `awsLoadBalancerSecurityGroupRef` is
+required when service VM ingress uses the `load-balancer` source.
 
 Runner user-data is strict JSON under a top-level `skiff` object:
 

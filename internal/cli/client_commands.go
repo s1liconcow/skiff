@@ -34,38 +34,50 @@ var (
 )
 
 type clientFlagSet struct {
-	format      *string
-	noColor     *bool
-	traceID     *string
-	yes         *bool
-	configPath  *string
-	env         *string
-	provider    *string
-	region      *string
-	state       *string
-	stateBucket *string
-	apiURL      *string
-	mode        *string
-	direct      *bool
-	api         *bool
+	format                          *string
+	noColor                         *bool
+	traceID                         *string
+	yes                             *bool
+	configPath                      *string
+	env                             *string
+	provider                        *string
+	region                          *string
+	state                           *string
+	stateBucket                     *string
+	awsLiveApply                    *bool
+	awsVPCID                        *string
+	awsSubnetIDs                    *string
+	awsAMIID                        *string
+	awsALBListenerARN               *string
+	awsLoadBalancerSecurityGroupRef *string
+	apiURL                          *string
+	mode                            *string
+	direct                          *bool
+	api                             *bool
 }
 
 func addClientFlags(fs *flag.FlagSet, root rootOptions) clientFlagSet {
 	return clientFlagSet{
-		format:      fs.String("format", root.Format, "output format: human or json"),
-		noColor:     fs.Bool("no-color", root.NoColor, "disable ANSI color output"),
-		traceID:     fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output"),
-		yes:         fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation"),
-		configPath:  fs.String("config", root.ConfigPath, "path to Skiff config file"),
-		env:         fs.String("env", root.Env, "Skiff environment name"),
-		provider:    fs.String("provider", root.Provider, "cloud provider name"),
-		region:      fs.String("region", root.Region, "cloud provider region"),
-		state:       fs.String("state", root.State, "object-state bucket URI"),
-		stateBucket: fs.String("state-bucket", root.State, "object-state bucket URI"),
-		apiURL:      fs.String("api-url", root.APIURL, "skiffd API URL"),
-		mode:        fs.String("mode", string(root.Mode), "client mode: api or direct"),
-		direct:      fs.Bool("direct", root.directSet, "use direct object-state mode"),
-		api:         fs.Bool("api", root.apiSet, "use skiffd API mode"),
+		format:                          fs.String("format", root.Format, "output format: human or json"),
+		noColor:                         fs.Bool("no-color", root.NoColor, "disable ANSI color output"),
+		traceID:                         fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output"),
+		yes:                             fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation"),
+		configPath:                      fs.String("config", root.ConfigPath, "path to Skiff config file"),
+		env:                             fs.String("env", root.Env, "Skiff environment name"),
+		provider:                        fs.String("provider", root.Provider, "cloud provider name"),
+		region:                          fs.String("region", root.Region, "cloud provider region"),
+		state:                           fs.String("state", root.State, "object-state bucket URI"),
+		stateBucket:                     fs.String("state-bucket", root.State, "object-state bucket URI"),
+		awsLiveApply:                    fs.Bool("aws-live-apply", false, "validate AWS live apply provider inputs"),
+		awsVPCID:                        fs.String("aws-vpc-id", "", "AWS VPC ID for live apply resources"),
+		awsSubnetIDs:                    fs.String("aws-subnet-ids", "", "comma-separated AWS subnet IDs for live apply Auto Scaling Groups"),
+		awsAMIID:                        fs.String("aws-ami-id", "", "AWS AMI ID for live apply launch templates"),
+		awsALBListenerARN:               fs.String("aws-alb-listener-arn", "", "AWS ALB listener ARN for live apply listener rules"),
+		awsLoadBalancerSecurityGroupRef: fs.String("aws-load-balancer-security-group-ref", "", "AWS load balancer security group ID/ref for live apply instance ingress"),
+		apiURL:                          fs.String("api-url", root.APIURL, "skiffd API URL"),
+		mode:                            fs.String("mode", string(root.Mode), "client mode: api or direct"),
+		direct:                          fs.Bool("direct", root.directSet, "use direct object-state mode"),
+		api:                             fs.Bool("api", root.apiSet, "use skiffd API mode"),
 	}
 }
 
@@ -75,13 +87,19 @@ func (f clientFlagSet) load(binary string, root rootOptions, fs *flag.FlagSet) (
 	}
 	overrides := root.configOverrides()
 	flagToField := map[string]string{
-		"env":          config.FieldEnv,
-		"provider":     config.FieldProvider,
-		"region":       config.FieldRegion,
-		"state":        config.FieldStateBucket,
-		"state-bucket": config.FieldStateBucket,
-		"api-url":      config.FieldAPIURL,
-		"mode":         config.FieldMode,
+		"env":                                  config.FieldEnv,
+		"provider":                             config.FieldProvider,
+		"region":                               config.FieldRegion,
+		"state":                                config.FieldStateBucket,
+		"state-bucket":                         config.FieldStateBucket,
+		"aws-live-apply":                       config.FieldAWSLiveApply,
+		"aws-vpc-id":                           config.FieldAWSVPCID,
+		"aws-subnet-ids":                       config.FieldAWSSubnetIDs,
+		"aws-ami-id":                           config.FieldAWSAMIID,
+		"aws-alb-listener-arn":                 config.FieldAWSALBListenerARN,
+		"aws-load-balancer-security-group-ref": config.FieldAWSLoadBalancerSecurityGroupRef,
+		"api-url":                              config.FieldAPIURL,
+		"mode":                                 config.FieldMode,
 	}
 	fs.Visit(func(flag *flag.Flag) {
 		if field := flagToField[flag.Name]; field != "" {

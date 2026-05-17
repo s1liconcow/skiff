@@ -56,6 +56,27 @@ func TestAWSE2ESmokeGatesAndReport(t *testing.T) {
 		report.fact("aws_live_apply", "skipped because SKIFF_AWS_E2E_LIVE_APPLY is not 1")
 		t.Skip("AWS live apply is gated by SKIFF_AWS_E2E_LIVE_APPLY=1; plan/explain smoke gates passed")
 	}
+	missing := missingAWSLiveShapeEnv()
+	if len(missing) > 0 {
+		report.fact("aws_live_apply_preflight", "missing AWS live-shape inputs: "+strings.Join(missing, ", "))
+		t.Skip("AWS live apply requires " + strings.Join(missing, ", "))
+	}
+	report.fact("aws_live_apply_preflight", "AWS live-shape inputs are present")
 	report.fact("aws_live_apply", "requested but real AWS apply adapters are not linked into this provider build")
 	t.Skip("real AWS apply/discovery adapters are not available in this build; tracked as an explicit matrix gap")
+}
+
+func missingAWSLiveShapeEnv() []string {
+	required := []string{
+		"SKIFF_AWS_VPC_ID",
+		"SKIFF_AWS_SUBNET_IDS",
+		"SKIFF_AWS_AMI_ID",
+	}
+	var missing []string
+	for _, name := range required {
+		if strings.TrimSpace(os.Getenv(name)) == "" {
+			missing = append(missing, name)
+		}
+	}
+	return missing
 }

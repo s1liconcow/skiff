@@ -2,6 +2,7 @@ package aws_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -100,6 +101,96 @@ func TestLowerServiceInternalHTTP(t *testing.T) {
 	}
 	if got := lowered.SecurityGroups[0].Ingress[0].SourceSecurityGroupRef; got != "sg-internal-alb" {
 		t.Fatalf("ingress source SG = %q, want sg-internal-alb", got)
+	}
+}
+
+func TestLowerServiceCarriesAWSLiveShapeInputs(t *testing.T) {
+	graph := compileSpec(t, publicHTTPSpec)
+	lowered, err := aws.LowerService(graph, aws.LowerOptions{
+		Region:                       "us-west-2",
+		StateBucket:                  "s3://skiff-state-prod",
+		VPCID:                        "vpc-123",
+		SubnetIDs:                    []string{"subnet-a", " subnet-b "},
+		AMIID:                        "ami-123",
+		ALBListenerARN:               "arn:aws:elasticloadbalancing:us-west-2:123456789012:listener/app/skiff/abc/def",
+		LoadBalancerSecurityGroupRef: "sg-alb",
+	})
+	if err != nil {
+		t.Fatalf("lower service: %v", err)
+	}
+	if lowered.SecurityGroups[0].VPCID != "vpc-123" {
+		t.Fatalf("security group VPC ID = %q", lowered.SecurityGroups[0].VPCID)
+	}
+	if lowered.TargetGroups[0].VPCID != "vpc-123" {
+		t.Fatalf("target group VPC ID = %q", lowered.TargetGroups[0].VPCID)
+	}
+	if lowered.LaunchTemplates[0].AMIID != "ami-123" {
+		t.Fatalf("launch template AMI ID = %q", lowered.LaunchTemplates[0].AMIID)
+	}
+	if got := lowered.AutoScalingGroups[0].SubnetIDs; len(got) != 2 || got[0] != "subnet-a" || got[1] != "subnet-b" {
+		t.Fatalf("ASG subnet IDs = %+v", got)
+	}
+	if lowered.ListenerRules[0].ListenerARN == "" {
+		t.Fatalf("listener ARN was not carried: %+v", lowered.ListenerRules[0])
+	}
+	if got := lowered.SecurityGroups[0].Ingress[0].SourceSecurityGroupRef; got != "sg-alb" {
+		t.Fatalf("load balancer SG ref = %q, want sg-alb", got)
+	}
+	if err := aws.ValidateLiveApplyInputs(lowered); err != nil {
+		t.Fatalf("live apply inputs should validate: %v", err)
+	}
+}
+
+func TestValidateLiveApplyInputsReportsMissingFields(t *testing.T) {
+	graph := compileSpec(t, publicHTTPSpec)
+	lowered, err := aws.LowerService(graph, aws.LowerOptions{
+		Region:      "us-west-2",
+		StateBucket: "s3://skiff-state-prod",
+	})
+	if err != nil {
+		t.Fatalf("lower service: %v", err)
+	}
+	err = aws.ValidateLiveApplyInputs(lowered)
+	var validation aws.LiveApplyValidationError
+	if !errors.As(err, &validation) {
+		t.Fatalf("ValidateLiveApplyInputs() error = %T %[1]v, want LiveApplyValidationError", err)
+	}
+	want := map[string]bool{
+		"aws_vpc_id":                           false,
+		"aws_subnet_ids":                       false,
+		"aws_ami_id":                           false,
+		"aws_alb_listener_arn":                 false,
+		"aws_load_balancer_security_group_ref": false,
+	}
+	for _, missing := range validation.Missing {
+		if _, ok := want[missing.Field]; ok {
+			want[missing.Field] = true
+		}
+		if missing.EnvVar == "" || missing.Kind == "" || missing.LogicalID == "" || missing.Reason == "" {
+			t.Fatalf("missing input should be actionable: %+v", missing)
+		}
+	}
+	for field, found := range want {
+		if !found {
+			t.Fatalf("missing field %s not reported: %+v", field, validation.Missing)
+		}
+	}
+}
+
+func TestProviderPlanPreflightsAWSLiveApplyInputs(t *testing.T) {
+	graph := compileSpec(t, publicHTTPSpec)
+	p, err := aws.New(aws.Config{
+		Region:      "us-west-2",
+		StateBucket: "s3://skiff-state-prod",
+		LiveApply:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Plan(context.Background(), graph)
+	var validation aws.LiveApplyValidationError
+	if !errors.As(err, &validation) {
+		t.Fatalf("plan error = %T %[1]v, want LiveApplyValidationError", err)
 	}
 }
 

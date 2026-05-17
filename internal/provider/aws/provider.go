@@ -21,6 +21,16 @@ type Config struct {
 	Endpoint       string
 	ForcePathStyle bool
 	Credentials    baseaws.Credentials
+	LiveApply      bool
+	Live           LiveConfig
+}
+
+type LiveConfig struct {
+	VPCID                        string
+	SubnetIDs                    []string
+	AMIID                        string
+	ALBListenerARN               string
+	LoadBalancerSecurityGroupRef string
 }
 
 type Option func(*Provider)
@@ -48,7 +58,18 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 }
 
 func NewFromConfig(cfg config.Config, opts ...Option) (*Provider, error) {
-	awsCfg := Config{Region: cfg.Region, StateBucket: cfg.StateBucket}
+	awsCfg := Config{
+		Region:      cfg.Region,
+		StateBucket: cfg.StateBucket,
+		LiveApply:   cfg.AWSLiveApply,
+		Live: LiveConfig{
+			VPCID:                        cfg.AWSVPCID,
+			SubnetIDs:                    append([]string(nil), cfg.AWSSubnetIDs...),
+			AMIID:                        cfg.AWSAMIID,
+			ALBListenerARN:               cfg.AWSALBListenerARN,
+			LoadBalancerSecurityGroupRef: cfg.AWSLoadBalancerSecurityGroupRef,
+		},
+	}
 	return New(awsCfg, opts...)
 }
 
@@ -91,6 +112,18 @@ func (p *Provider) Config() Config {
 	return p.cfg
 }
 
+func (p *Provider) lowerOptions() LowerOptions {
+	return LowerOptions{
+		Region:                       p.cfg.Region,
+		StateBucket:                  p.cfg.StateBucket,
+		VPCID:                        p.cfg.Live.VPCID,
+		SubnetIDs:                    append([]string(nil), p.cfg.Live.SubnetIDs...),
+		AMIID:                        p.cfg.Live.AMIID,
+		ALBListenerARN:               p.cfg.Live.ALBListenerARN,
+		LoadBalancerSecurityGroupRef: p.cfg.Live.LoadBalancerSecurityGroupRef,
+	}
+}
+
 func (p *Provider) Plan(ctx context.Context, graph *ir.Graph) (*provider.Plan, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -104,10 +137,7 @@ func (p *Provider) Plan(ctx context.Context, graph *ir.Graph) (*provider.Plan, e
 		}
 	}
 
-	resources, err := LowerService(graph, LowerOptions{
-		Region:      p.cfg.Region,
-		StateBucket: p.cfg.StateBucket,
-	})
+	resources, err := LowerService(graph, p.lowerOptions())
 	if err != nil {
 		return nil, &provider.Error{
 			Code:     provider.CodeValidation,
@@ -115,6 +145,17 @@ func (p *Provider) Plan(ctx context.Context, graph *ir.Graph) (*provider.Plan, e
 			Op:       "plan",
 			Summary:  err.Error(),
 			Cause:    err,
+		}
+	}
+	if p.cfg.LiveApply {
+		if err := ValidateLiveApplyInputs(resources); err != nil {
+			return nil, &provider.Error{
+				Code:     provider.CodeValidation,
+				Provider: Name,
+				Op:       "plan",
+				Summary:  err.Error(),
+				Cause:    err,
+			}
 		}
 	}
 	desired, err := desiredServiceResources(resources)

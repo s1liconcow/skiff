@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -57,18 +58,24 @@ func Load(opts LoadOptions) (Loaded, error) {
 
 func applyConfig(loaded *Loaded, cfg Config, source string) {
 	values := map[string]string{
-		FieldEnv:         cfg.Env,
-		FieldProvider:    cfg.Provider,
-		FieldRegion:      cfg.Region,
-		FieldStateBucket: cfg.StateBucket,
-		FieldKMSKey:      cfg.KMSKey,
-		FieldAuthMode:    cfg.AuthMode,
-		FieldLogLevel:    cfg.LogLevel,
-		FieldMode:        string(cfg.Mode),
-		FieldAPIURL:      cfg.APIURL,
-		FieldService:     cfg.Service,
-		FieldControlKey:  cfg.ControlKey,
-		FieldReleaseID:   cfg.ReleaseID,
+		FieldEnv:                             cfg.Env,
+		FieldProvider:                        cfg.Provider,
+		FieldRegion:                          cfg.Region,
+		FieldStateBucket:                     cfg.StateBucket,
+		FieldKMSKey:                          cfg.KMSKey,
+		FieldAuthMode:                        cfg.AuthMode,
+		FieldLogLevel:                        cfg.LogLevel,
+		FieldMode:                            string(cfg.Mode),
+		FieldAPIURL:                          cfg.APIURL,
+		FieldService:                         cfg.Service,
+		FieldControlKey:                      cfg.ControlKey,
+		FieldReleaseID:                       cfg.ReleaseID,
+		FieldAWSLiveApply:                    boolConfigValue(cfg.AWSLiveApply),
+		FieldAWSVPCID:                        cfg.AWSVPCID,
+		FieldAWSSubnetIDs:                    strings.Join(cfg.AWSSubnetIDs, ","),
+		FieldAWSAMIID:                        cfg.AWSAMIID,
+		FieldAWSALBListenerARN:               cfg.AWSALBListenerARN,
+		FieldAWSLoadBalancerSecurityGroupRef: cfg.AWSLoadBalancerSecurityGroupRef,
 	}
 	applyValues(loaded, values, source)
 	if cfg.Logs != nil {
@@ -112,6 +119,21 @@ func applyValues(loaded *Loaded, values map[string]string, source string) {
 			loaded.Config.ControlKey = value
 		case FieldReleaseID:
 			loaded.Config.ReleaseID = value
+		case FieldAWSLiveApply:
+			parsed, err := strconv.ParseBool(value)
+			if err == nil {
+				loaded.Config.AWSLiveApply = parsed
+			}
+		case FieldAWSVPCID:
+			loaded.Config.AWSVPCID = strings.TrimSpace(value)
+		case FieldAWSSubnetIDs:
+			loaded.Config.AWSSubnetIDs = splitCommaValues(value)
+		case FieldAWSAMIID:
+			loaded.Config.AWSAMIID = strings.TrimSpace(value)
+		case FieldAWSALBListenerARN:
+			loaded.Config.AWSALBListenerARN = strings.TrimSpace(value)
+		case FieldAWSLoadBalancerSecurityGroupRef:
+			loaded.Config.AWSLoadBalancerSecurityGroupRef = strings.TrimSpace(value)
 		default:
 			continue
 		}
@@ -224,6 +246,18 @@ func normalizeFileField(key string) (string, error) {
 		return FieldControlKey, nil
 	case "release_id", "releaseID", "releaseId":
 		return FieldReleaseID, nil
+	case "aws_live_apply", "awsLiveApply":
+		return FieldAWSLiveApply, nil
+	case "aws_vpc_id", "awsVPCID", "awsVpcID", "awsVpcId":
+		return FieldAWSVPCID, nil
+	case "aws_subnet_ids", "awsSubnetIDs", "awsSubnetIds":
+		return FieldAWSSubnetIDs, nil
+	case "aws_ami_id", "awsAMIID", "awsAmiID", "awsAmiId":
+		return FieldAWSAMIID, nil
+	case "aws_alb_listener_arn", "awsALBListenerARN", "awsAlbListenerARN", "awsAlbListenerArn":
+		return FieldAWSALBListenerARN, nil
+	case "aws_load_balancer_security_group_ref", "awsLoadBalancerSecurityGroupRef":
+		return FieldAWSLoadBalancerSecurityGroupRef, nil
 	default:
 		return "", fmt.Errorf("unknown field %q", key)
 	}
@@ -231,19 +265,44 @@ func normalizeFileField(key string) (string, error) {
 
 func valuesFromEnv(env map[string]string) map[string]string {
 	return map[string]string{
-		FieldEnv:         env["SKIFF_ENV"],
-		FieldProvider:    env["SKIFF_PROVIDER"],
-		FieldRegion:      env["SKIFF_REGION"],
-		FieldStateBucket: env["SKIFF_STATE_BUCKET"],
-		FieldKMSKey:      env["SKIFF_KMS_KEY"],
-		FieldAuthMode:    env["SKIFF_AUTH_MODE"],
-		FieldLogLevel:    env["SKIFF_LOG_LEVEL"],
-		FieldMode:        env["SKIFF_MODE"],
-		FieldAPIURL:      env["SKIFF_API_URL"],
-		FieldService:     env["SKIFF_SERVICE"],
-		FieldControlKey:  env["SKIFF_CONTROL_KEY"],
-		FieldReleaseID:   env["SKIFF_RELEASE_ID"],
+		FieldEnv:                             env["SKIFF_ENV"],
+		FieldProvider:                        env["SKIFF_PROVIDER"],
+		FieldRegion:                          env["SKIFF_REGION"],
+		FieldStateBucket:                     env["SKIFF_STATE_BUCKET"],
+		FieldKMSKey:                          env["SKIFF_KMS_KEY"],
+		FieldAuthMode:                        env["SKIFF_AUTH_MODE"],
+		FieldLogLevel:                        env["SKIFF_LOG_LEVEL"],
+		FieldMode:                            env["SKIFF_MODE"],
+		FieldAPIURL:                          env["SKIFF_API_URL"],
+		FieldService:                         env["SKIFF_SERVICE"],
+		FieldControlKey:                      env["SKIFF_CONTROL_KEY"],
+		FieldReleaseID:                       env["SKIFF_RELEASE_ID"],
+		FieldAWSLiveApply:                    env["SKIFF_AWS_LIVE_APPLY"],
+		FieldAWSVPCID:                        env["SKIFF_AWS_VPC_ID"],
+		FieldAWSSubnetIDs:                    env["SKIFF_AWS_SUBNET_IDS"],
+		FieldAWSAMIID:                        env["SKIFF_AWS_AMI_ID"],
+		FieldAWSALBListenerARN:               env["SKIFF_AWS_ALB_LISTENER_ARN"],
+		FieldAWSLoadBalancerSecurityGroupRef: env["SKIFF_AWS_LOAD_BALANCER_SECURITY_GROUP_REF"],
 	}
+}
+
+func boolConfigValue(value bool) string {
+	if value {
+		return "true"
+	}
+	return ""
+}
+
+func splitCommaValues(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func environ() map[string]string {

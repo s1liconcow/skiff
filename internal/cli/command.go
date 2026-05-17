@@ -451,6 +451,12 @@ func runConfigShow(binary string, args []string, root rootOptions, stdout, stder
 	fs.String("region", root.Region, "cloud provider region")
 	fs.String("state-bucket", root.State, "object-state bucket URI")
 	fs.String("kms-key", "", "KMS key ID or alias")
+	fs.Bool("aws-live-apply", false, "validate AWS live apply provider inputs")
+	fs.String("aws-vpc-id", "", "AWS VPC ID for live apply resources")
+	fs.String("aws-subnet-ids", "", "comma-separated AWS subnet IDs for live apply Auto Scaling Groups")
+	fs.String("aws-ami-id", "", "AWS AMI ID for live apply launch templates")
+	fs.String("aws-alb-listener-arn", "", "AWS ALB listener ARN for live apply listener rules")
+	fs.String("aws-load-balancer-security-group-ref", "", "AWS load balancer security group ID/ref for live apply instance ingress")
 	fs.String("auth-mode", "", "auth mode")
 	fs.String("log-level", "", "log level")
 	fs.String("mode", string(root.Mode), "config mode: api, direct, skiffd, or runner")
@@ -472,18 +478,24 @@ func runConfigShow(binary string, args []string, root rootOptions, stdout, stder
 
 	overrides := root.configOverrides()
 	flagToField := map[string]string{
-		"env":          config.FieldEnv,
-		"provider":     config.FieldProvider,
-		"region":       config.FieldRegion,
-		"state-bucket": config.FieldStateBucket,
-		"state":        config.FieldStateBucket,
-		"kms-key":      config.FieldKMSKey,
-		"auth-mode":    config.FieldAuthMode,
-		"log-level":    config.FieldLogLevel,
-		"mode":         config.FieldMode,
-		"api-url":      config.FieldAPIURL,
-		"service":      config.FieldService,
-		"control-key":  config.FieldControlKey,
+		"env":                                  config.FieldEnv,
+		"provider":                             config.FieldProvider,
+		"region":                               config.FieldRegion,
+		"state-bucket":                         config.FieldStateBucket,
+		"state":                                config.FieldStateBucket,
+		"kms-key":                              config.FieldKMSKey,
+		"aws-live-apply":                       config.FieldAWSLiveApply,
+		"aws-vpc-id":                           config.FieldAWSVPCID,
+		"aws-subnet-ids":                       config.FieldAWSSubnetIDs,
+		"aws-ami-id":                           config.FieldAWSAMIID,
+		"aws-alb-listener-arn":                 config.FieldAWSALBListenerARN,
+		"aws-load-balancer-security-group-ref": config.FieldAWSLoadBalancerSecurityGroupRef,
+		"auth-mode":                            config.FieldAuthMode,
+		"log-level":                            config.FieldLogLevel,
+		"mode":                                 config.FieldMode,
+		"api-url":                              config.FieldAPIURL,
+		"service":                              config.FieldService,
+		"control-key":                          config.FieldControlKey,
 	}
 	fs.Visit(func(f *flag.Flag) {
 		if field := flagToField[f.Name]; field != "" {
@@ -2080,6 +2092,21 @@ func configValue(cfg config.Config, field string) string {
 		return cfg.Service
 	case config.FieldControlKey:
 		return cfg.ControlKey
+	case config.FieldAWSLiveApply:
+		if cfg.AWSLiveApply {
+			return "true"
+		}
+		return ""
+	case config.FieldAWSVPCID:
+		return cfg.AWSVPCID
+	case config.FieldAWSSubnetIDs:
+		return strings.Join(cfg.AWSSubnetIDs, ",")
+	case config.FieldAWSAMIID:
+		return cfg.AWSAMIID
+	case config.FieldAWSALBListenerARN:
+		return cfg.AWSALBListenerARN
+	case config.FieldAWSLoadBalancerSecurityGroupRef:
+		return cfg.AWSLoadBalancerSecurityGroupRef
 	default:
 		return ""
 	}

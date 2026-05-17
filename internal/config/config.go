@@ -17,35 +17,47 @@ const (
 )
 
 const (
-	FieldEnv         = "env"
-	FieldProvider    = "provider"
-	FieldRegion      = "region"
-	FieldStateBucket = "state_bucket"
-	FieldKMSKey      = "kms_key"
-	FieldAuthMode    = "auth_mode"
-	FieldLogLevel    = "log_level"
-	FieldMode        = "mode"
-	FieldAPIURL      = "api_url"
-	FieldService     = "service"
-	FieldControlKey  = "control_key"
-	FieldReleaseID   = "release_id"
-	FieldLogs        = "logs"
+	FieldEnv                             = "env"
+	FieldProvider                        = "provider"
+	FieldRegion                          = "region"
+	FieldStateBucket                     = "state_bucket"
+	FieldKMSKey                          = "kms_key"
+	FieldAuthMode                        = "auth_mode"
+	FieldLogLevel                        = "log_level"
+	FieldMode                            = "mode"
+	FieldAPIURL                          = "api_url"
+	FieldService                         = "service"
+	FieldControlKey                      = "control_key"
+	FieldReleaseID                       = "release_id"
+	FieldAWSLiveApply                    = "aws_live_apply"
+	FieldAWSVPCID                        = "aws_vpc_id"
+	FieldAWSSubnetIDs                    = "aws_subnet_ids"
+	FieldAWSAMIID                        = "aws_ami_id"
+	FieldAWSALBListenerARN               = "aws_alb_listener_arn"
+	FieldAWSLoadBalancerSecurityGroupRef = "aws_load_balancer_security_group_ref"
+	FieldLogs                            = "logs"
 )
 
 type Config struct {
-	Env         string `json:"env,omitempty"`
-	Provider    string `json:"provider,omitempty"`
-	Region      string `json:"region,omitempty"`
-	StateBucket string `json:"state_bucket,omitempty"`
-	KMSKey      string `json:"kms_key,omitempty"`
-	AuthMode    string `json:"auth_mode,omitempty"`
-	LogLevel    string `json:"log_level,omitempty"`
-	Mode        Mode   `json:"mode,omitempty"`
-	APIURL      string `json:"api_url,omitempty"`
-	Service     string `json:"service,omitempty"`
-	ControlKey  string `json:"control_key,omitempty"`
-	ReleaseID   string `json:"release_id,omitempty"`
-	Logs        *Logs  `json:"logs,omitempty"`
+	Env                             string   `json:"env,omitempty"`
+	Provider                        string   `json:"provider,omitempty"`
+	Region                          string   `json:"region,omitempty"`
+	StateBucket                     string   `json:"state_bucket,omitempty"`
+	KMSKey                          string   `json:"kms_key,omitempty"`
+	AuthMode                        string   `json:"auth_mode,omitempty"`
+	LogLevel                        string   `json:"log_level,omitempty"`
+	Mode                            Mode     `json:"mode,omitempty"`
+	APIURL                          string   `json:"api_url,omitempty"`
+	Service                         string   `json:"service,omitempty"`
+	ControlKey                      string   `json:"control_key,omitempty"`
+	ReleaseID                       string   `json:"release_id,omitempty"`
+	AWSLiveApply                    bool     `json:"aws_live_apply,omitempty"`
+	AWSVPCID                        string   `json:"aws_vpc_id,omitempty"`
+	AWSSubnetIDs                    []string `json:"aws_subnet_ids,omitempty"`
+	AWSAMIID                        string   `json:"aws_ami_id,omitempty"`
+	AWSALBListenerARN               string   `json:"aws_alb_listener_arn,omitempty"`
+	AWSLoadBalancerSecurityGroupRef string   `json:"aws_load_balancer_security_group_ref,omitempty"`
+	Logs                            *Logs    `json:"logs,omitempty"`
 }
 
 type Logs struct {
@@ -89,6 +101,7 @@ func (l Loaded) Redacted() Loaded {
 		logs.Labels = cloneStringMap(logs.Labels)
 		out.Config.Logs = &logs
 	}
+	out.Config.AWSSubnetIDs = append([]string(nil), l.Config.AWSSubnetIDs...)
 	for field, source := range l.Sources {
 		out.Sources[field] = source
 	}
@@ -289,6 +302,12 @@ func FieldNames() []string {
 		FieldAPIURL,
 		FieldService,
 		FieldControlKey,
+		FieldAWSLiveApply,
+		FieldAWSVPCID,
+		FieldAWSSubnetIDs,
+		FieldAWSAMIID,
+		FieldAWSALBListenerARN,
+		FieldAWSLoadBalancerSecurityGroupRef,
 	}
 	sort.Strings(names)
 	return names

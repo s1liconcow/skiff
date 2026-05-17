@@ -25,6 +25,10 @@ type LowerOptions struct {
 	ReleaseID                    string
 	ControlKey                   string
 	LoadBalancerSecurityGroupRef string
+	VPCID                        string
+	SubnetIDs                    []string
+	AMIID                        string
+	ALBListenerARN               string
 }
 
 type ServiceResources struct {
@@ -78,6 +82,7 @@ type SecurityGroupAWS struct {
 	LogicalID   string              `json:"logical_id"`
 	Name        string              `json:"name"`
 	Description string              `json:"description"`
+	VPCID       string              `json:"vpc_id,omitempty"`
 	Ingress     []SecurityGroupRule `json:"ingress,omitempty"`
 	Egress      []SecurityGroupRule `json:"egress,omitempty"`
 	Tags        map[string]string   `json:"tags,omitempty"`
@@ -114,6 +119,7 @@ type MetricConfigAWS struct {
 type TargetGroupAWS struct {
 	LogicalID   string            `json:"logical_id"`
 	Name        string            `json:"name"`
+	VPCID       string            `json:"vpc_id,omitempty"`
 	Protocol    string            `json:"protocol"`
 	Port        int               `json:"port"`
 	TargetType  string            `json:"target_type"`
@@ -128,6 +134,7 @@ type ListenerRule struct {
 	Visibility            string            `json:"visibility"`
 	Protocol              string            `json:"protocol"`
 	Port                  int               `json:"port"`
+	ListenerARN           string            `json:"listener_arn,omitempty"`
 	Host                  string            `json:"host,omitempty"`
 	CertificateRef        string            `json:"certificate_ref,omitempty"`
 	ClientCertificateMode string            `json:"client_certificate_mode,omitempty"`
@@ -172,6 +179,7 @@ type SecretAWS struct {
 type LaunchTemplate struct {
 	LogicalID          string            `json:"logical_id"`
 	Name               string            `json:"name"`
+	AMIID              string            `json:"ami_id,omitempty"`
 	InstanceType       string            `json:"instance_type"`
 	Architecture       string            `json:"architecture"`
 	IAMInstanceProfile string            `json:"iam_instance_profile"`
@@ -188,6 +196,7 @@ type AutoScalingGroup struct {
 	MaxSize           int               `json:"max_size"`
 	DesiredCapacity   int               `json:"desired_capacity"`
 	LaunchTemplateRef string            `json:"launch_template_ref"`
+	SubnetIDs         []string          `json:"subnet_ids,omitempty"`
 	TargetGroupRefs   []string          `json:"target_group_refs,omitempty"`
 	HealthCheckType   string            `json:"health_check_type"`
 	Tags              map[string]string `json:"tags,omitempty"`
@@ -257,6 +266,7 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 			LogicalID:   sg.Meta.LogicalID,
 			Name:        name,
 			Description: securityGroupDescription(graph.Service, sg.Meta.Tags),
+			VPCID:       strings.TrimSpace(opts.VPCID),
 			Ingress:     ingress,
 			Egress:      egress,
 			Tags:        TagsMap(sg.Meta, nil),
@@ -299,6 +309,7 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 		out.TargetGroups = append(out.TargetGroups, TargetGroupAWS{
 			LogicalID:   tg.Meta.LogicalID,
 			Name:        name,
+			VPCID:       strings.TrimSpace(opts.VPCID),
 			Protocol:    tg.Protocol,
 			Port:        tg.Port,
 			TargetType:  "instance",
@@ -318,6 +329,7 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 			Visibility:     listener.Visibility,
 			Protocol:       listener.Protocol,
 			Port:           listener.Port,
+			ListenerARN:    strings.TrimSpace(opts.ALBListenerARN),
 			Host:           listener.Host,
 			CertificateRef: listener.TLS.CertRef,
 			TargetGroupRef: listener.TargetGroupRef,
@@ -380,6 +392,7 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 		out.LaunchTemplates = append(out.LaunchTemplates, LaunchTemplate{
 			LogicalID:          tmpl.Meta.LogicalID,
 			Name:               name,
+			AMIID:              strings.TrimSpace(opts.AMIID),
 			InstanceType:       instanceTypeForMachine(tmpl.Machine),
 			Architecture:       tmpl.Machine.Arch,
 			IAMInstanceProfile: roleNames[tmpl.IAMRoleRef],
@@ -401,6 +414,7 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 			MaxSize:           asg.Max,
 			DesiredCapacity:   asg.Min,
 			LaunchTemplateRef: asg.InstanceTemplateRef,
+			SubnetIDs:         cleanStringSlice(opts.SubnetIDs),
 			TargetGroupRefs:   append([]string(nil), asg.TargetGroupRefs...),
 			HealthCheckType:   healthCheckType(asg.TargetGroupRefs),
 			Tags:              TagsMap(asg.Meta, nil),
@@ -505,6 +519,17 @@ func securityGroupSummary(group SecurityGroupAWS) string {
 		return "Security group allowing bound service traffic to managed database " + database
 	}
 	return "Security group for workload VM ingress and egress"
+}
+
+func cleanStringSlice(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func ec2AssumeRolePolicy() PolicyDocument {

@@ -18,6 +18,7 @@ Run optional modes:
 ```bash
 make e2e-apple-container
 SKIFF_AWS_E2E=1 SKIFF_AWS_E2E_STATE=s3://skiff-e2e-state SKIFF_AWS_E2E_REGION=us-west-2 SKIFF_AWS_E2E_PREFIX=skiff-e2e-$(date +%s) make e2e-aws
+SKIFF_AWS_E2E=1 SKIFF_AWS_E2E_LIVE_APPLY=1 SKIFF_AWS_E2E_STATE=s3://skiff-e2e-state SKIFF_AWS_E2E_REGION=us-west-2 SKIFF_AWS_E2E_PREFIX=skiff-e2e-$(date +%s) SKIFF_AWS_VPC_ID=vpc-... SKIFF_AWS_SUBNET_IDS=subnet-a,subnet-b SKIFF_AWS_AMI_ID=ami-... make e2e-aws
 ```
 
 | Capability | Local | Apple silicon | AWS | Evidence |
@@ -63,7 +64,10 @@ The test creates unique Apple container names and RustFS buckets and registers c
 - `SKIFF_AWS_E2E_STATE` names the S3 object-state bucket URI.
 - `SKIFF_AWS_E2E_REGION` or `AWS_REGION` selects the region.
 - `SKIFF_AWS_E2E_PREFIX` must be unique for the run and is recorded in reports.
-- `SKIFF_AWS_E2E_LIVE_APPLY=1` is reserved for future live apply once real AWS provider adapters are available.
+- `SKIFF_AWS_E2E_LIVE_APPLY=1` requests live apply. Until real adapters are linked, the test records the adapter gap after preflighting live-shape inputs.
+- `SKIFF_AWS_VPC_ID`, `SKIFF_AWS_SUBNET_IDS`, and `SKIFF_AWS_AMI_ID` are required live-shape inputs for target groups/security groups, ASGs, and launch templates.
+- `SKIFF_AWS_ALB_LISTENER_ARN` is required for services with listener rules.
+- `SKIFF_AWS_LOAD_BALANCER_SECURITY_GROUP_REF` is required when VM ingress uses the `load-balancer` source.
 
 AWS tests must remain optional for PRs. They should tag or name every resource with the run prefix, record provider IDs, and clean up even after failed assertions once live apply exists.
 
