@@ -52,6 +52,112 @@ logLevel: warn
 	}
 }
 
+func TestLoadSkiffConfigContextFromEnv(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".skiffconfig")
+	if err := os.WriteFile(path, []byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: SkiffConfig
+current-context: local
+contexts:
+  - name: local
+    context:
+      mode: direct
+      env: prod
+      provider: fake
+      region: local
+      state: file:///tmp/skiff-state
+  - name: prod
+    context:
+      mode: direct
+      env: prod
+      provider: aws
+      region: us-west-2
+      state: s3://skiff-state-prod
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Load(LoadOptions{
+		ConfigPath: path,
+		Env: map[string]string{
+			"SKIFF_CONTEXT": "prod",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(loaded); err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Context != "prod" || loaded.ConfigPath != path {
+		t.Fatalf("context/path = %q/%q, want prod/%s", loaded.Context, loaded.ConfigPath, path)
+	}
+	if loaded.Config.Provider != "aws" || loaded.Config.StateBucket != "s3://skiff-state-prod" {
+		t.Fatalf("unexpected selected config: %+v", loaded.Config)
+	}
+	if loaded.Sources[FieldProvider] != "file:"+path+"#context:prod" {
+		t.Fatalf("provider source = %q", loaded.Sources[FieldProvider])
+	}
+}
+
+func TestSkiffConfigUseContextRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".skiffconfig")
+	file := &SkiffConfigFile{
+		CurrentContext: "local",
+		Contexts: []NamedContext{
+			{
+				Name: "local",
+				Context: ContextConfig{
+					Mode:     ModeDirect,
+					Env:      "prod",
+					Provider: "fake",
+					Region:   "local",
+					State:    "file:///tmp/skiff-state",
+				},
+			},
+			{
+				Name: "prod",
+				Context: ContextConfig{
+					Mode:     ModeDirect,
+					Env:      "prod",
+					Provider: "aws",
+					Region:   "us-west-2",
+					State:    "s3://skiff-state-prod",
+				},
+			},
+		},
+	}
+	if err := WriteSkiffConfigFile(path, file); err != nil {
+		t.Fatal(err)
+	}
+	loadedFile, err := LoadSkiffConfigFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := loadedFile.SetCurrentContext("prod"); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSkiffConfigFile(path, loadedFile); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := LoadSkiffConfigFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Current() != "prod" {
+		t.Fatalf("current context = %q, want prod", reloaded.Current())
+	}
+	_, values, err := reloaded.SelectContext("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values[FieldStateBucket] != "s3://skiff-state-prod" {
+		t.Fatalf("state = %q", values[FieldStateBucket])
+	}
+}
+
 func TestLoadAWSLiveApplyInputs(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "skiff.yaml")

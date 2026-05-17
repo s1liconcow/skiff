@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +19,32 @@ import (
 	"github.com/s1liconcow/skiff/internal/state/canonical"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 )
+
+func TestCanarySagaHumanOutputIncludesGeneratedIdentifiers(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := writeCanarySagaResult("skiff", "deploy --canary", "human", "tr_canary", canarySagaResult{
+		SagaID:      "saga_generated",
+		OperationID: "op_generated",
+		ReleaseID:   "rel_generated",
+		Status:      schema.SagaSucceeded,
+		Stage:       100,
+		Gate:        "request_count",
+		NextAction:  "complete",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"canary saga saga_generated status=succeeded",
+		"release: rel_generated",
+		"operation: op_generated",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}
 
 func TestSagaInspectJSONReadsDirectObjectState(t *testing.T) {
 	clearSkiffEnv(t)

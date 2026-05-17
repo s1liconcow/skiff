@@ -468,6 +468,7 @@ func addDatabaseClientFlags(fs *flag.FlagSet, root rootOptions) clientFlagSet {
 		traceID:     fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output"),
 		yes:         fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation"),
 		configPath:  fs.String("config", root.ConfigPath, "path to Skiff config file"),
+		context:     fs.String("context", root.Context, "Skiff config context name"),
 		env:         fs.String("env", root.Env, "Skiff environment name"),
 		provider:    fs.String("provider", root.Provider, "cloud provider name"),
 		region:      fs.String("region", root.Region, "cloud provider region"),

@@ -39,6 +39,7 @@ type clientFlagSet struct {
 	traceID                         *string
 	yes                             *bool
 	configPath                      *string
+	context                         *string
 	env                             *string
 	provider                        *string
 	region                          *string
@@ -63,6 +64,7 @@ func addClientFlags(fs *flag.FlagSet, root rootOptions) clientFlagSet {
 		traceID:                         fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output"),
 		yes:                             fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation"),
 		configPath:                      fs.String("config", root.ConfigPath, "path to Skiff config file"),
+		context:                         fs.String("context", root.Context, "Skiff config context name"),
 		env:                             fs.String("env", root.Env, "Skiff environment name"),
 		provider:                        fs.String("provider", root.Provider, "cloud provider name"),
 		region:                          fs.String("region", root.Region, "cloud provider region"),
@@ -112,9 +114,14 @@ func (f clientFlagSet) load(binary string, root rootOptions, fs *flag.FlagSet) (
 	if *f.api {
 		overrides[config.FieldMode] = string(config.ModeAPI)
 	}
+	contextName := root.Context
+	if f.context != nil {
+		contextName = *f.context
+	}
 	loaded, err := config.Load(config.LoadOptions{
 		ModeDefault: defaultMode(binary),
 		ConfigPath:  *f.configPath,
+		Context:     contextName,
 		Overrides:   overrides,
 	})
 	if err != nil {
@@ -184,6 +191,7 @@ func splitStatusArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
 		"api-url":      true,
 		"config":       true,
+		"context":      true,
 		"env":          true,
 		"format":       true,
 		"mode":         true,

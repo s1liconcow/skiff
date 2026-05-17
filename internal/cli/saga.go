@@ -488,6 +488,9 @@ func writeCanarySagaResult(binary, command, format, traceID string, result canar
 	case "human", "text":
 		fmt.Fprintf(stdout, "canary saga %s status=%s\n", result.SagaID, result.Status)
 		fmt.Fprintf(stdout, "release: %s\n", result.ReleaseID)
+		if result.OperationID != "" {
+			fmt.Fprintf(stdout, "operation: %s\n", result.OperationID)
+		}
 		if result.Stage > 0 {
 			fmt.Fprintf(stdout, "stage: %d%%\n", result.Stage)
 		}

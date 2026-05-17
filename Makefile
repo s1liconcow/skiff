@@ -6,8 +6,11 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X '$(MODULE)/internal/buildinfo.Version=$(VERSION)' -X '$(MODULE)/internal/buildinfo.Commit=$(COMMIT)' -X '$(MODULE)/internal/buildinfo.BuildDate=$(BUILD_DATE)'
+INSTALL ?= install
+PREFIX ?= $(HOME)/.local
+BINDIR ?= $(PREFIX)/bin
 
-.PHONY: build test readiness e2e-local e2e-apple-container e2e-aws codex-apple-sandbox vet fmt lint generate smoke clean
+.PHONY: build install test readiness e2e-local e2e-apple-container e2e-aws demo-local demo-test demo-apple-container codex-apple-sandbox codex-apple-sandbox-playwright vet fmt lint generate smoke clean
 
 build:
 	mkdir -p bin
@@ -15,6 +18,10 @@ build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/skiffd ./cmd/skiffd
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/skiff-runner ./cmd/skiff-runner
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/skiff-mtls-plugin ./cmd/skiff-mtls-plugin
+
+install: build
+	$(INSTALL) -d "$(DESTDIR)$(BINDIR)"
+	$(INSTALL) -m 0755 bin/skiff "$(DESTDIR)$(BINDIR)/skiff"
 
 test:
 	$(GO_TEST_ENV) $(GO) test ./...
@@ -31,8 +38,20 @@ e2e-apple-container:
 e2e-aws:
 	SKIFF_AWS_E2E=1 $(GO_TEST_ENV) $(GO) test ./tests/e2e -run TestAWSE2E -count=1 -v
 
+demo-local:
+	./demos/quickstart-fake.sh
+
+demo-test:
+	./demos/test-local-demo.sh
+
+demo-apple-container:
+	./demos/apple-container-caddy.sh
+
 codex-apple-sandbox:
 	./scripts/codex-apple-sandbox.sh
+
+codex-apple-sandbox-playwright:
+	./scripts/codex-apple-sandbox.sh --playwright --memory 4G
 
 vet:
 	$(GO) vet ./...

@@ -44,7 +44,7 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 	operationID := fs.String("operation-id", "", "operation ID to use")
 	approvalID := fs.String("approval-id", "", "approval ID for policy-gated production operations")
 	keyID := fs.String("key-id", "local-deploy", "signing key ID")
-	signingSeed := fs.String("signing-seed-base64", "", "base64 Ed25519 seed for release signing")
+	signingSeed := fs.String("signing-seed-base64", "", "base64 Ed25519 seed for release signing; required for non-fake providers")
 	shadow := fs.Bool("shadow", false, "deploy Skiff infrastructure without attaching public or internal ingress listeners")
 	canary := fs.Bool("canary", false, "create and run a staged canary deployment saga")
 	canaryStages := fs.String("canary-stages", "5,25,100", "comma-separated canary stages by percent")
@@ -132,7 +132,7 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 		if err != nil {
 			return writeClientError(binary, "deploy", *flags.format, *flags.traceID, err, stdout, stderr)
 		}
-		signer, err := signerFromSeed(*keyID, *signingSeed)
+		signer, err := signerForDeploy(loaded.Config, *keyID, *signingSeed)
 		if err != nil {
 			return writeSpecError(binary, "DEPLOY_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 		}
@@ -170,7 +170,7 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 	}
 	var signer signing.Signer
 	if storeNeeded {
-		signer, err = signerFromSeed(*keyID, *signingSeed)
+		signer, err = signerForDeploy(loaded.Config, *keyID, *signingSeed)
 		if err != nil {
 			return writeSpecError(binary, "DEPLOY_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 		}
@@ -207,6 +207,10 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 		}
 		fmt.Fprintf(stdout, "deploy %s succeeded\n", result.OperationID)
 		fmt.Fprintf(stdout, "release: %s\n", result.ReleaseID)
+		if result.ReleaseManifest != nil && len(result.ReleaseManifest.Signatures) > 0 {
+			signature := result.ReleaseManifest.Signatures[0]
+			fmt.Fprintf(stdout, "signature: %s %s\n", signature.KeyID, signature.Algorithm)
+		}
 		return ExitSuccess
 	case "json":
 		if err := json.NewEncoder(stdout).Encode(deployOutput{OK: result.OK, TraceID: *flags.traceID, Result: *result}); err != nil {
@@ -235,6 +239,7 @@ func splitDeployArgs(args []string) ([]string, []string, error) {
 		"canary-stages":                        true,
 		"canary-threshold":                     true,
 		"config":                               true,
+		"context":                              true,
 		"env":                                  true,
 		"file":                                 true,
 		"format":                               true,
@@ -263,9 +268,12 @@ func shadowDeployGraph(graph *ir.Graph) *ir.Graph {
 	return &copyGraph
 }
 
-func signerFromSeed(keyID, seedValue string) (signing.Signer, error) {
+func signerForDeploy(cfg config.Config, keyID, seedValue string) (signing.Signer, error) {
 	if seedValue == "" {
-		return nil, errors.New("--signing-seed-base64 is required for deploy")
+		if isFakeProvider(cfg.Provider) {
+			return signing.GenerateLocalSigner(keyID, nil)
+		}
+		return nil, fmt.Errorf("--signing-seed-base64 is required for deploy with provider %q", cfg.Provider)
 	}
 	seed, err := base64.StdEncoding.DecodeString(seedValue)
 	if err != nil {

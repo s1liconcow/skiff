@@ -354,6 +354,7 @@ func splitOpsArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
 		"api-url":        true,
 		"config":         true,
+		"context":        true,
 		"env":            true,
 		"format":         true,
 		"lease-duration": true,
@@ -375,6 +376,7 @@ func splitOpsWatchArgs(args []string) ([]string, []string, error) {
 		"after":        true,
 		"api-url":      true,
 		"config":       true,
+		"context":      true,
 		"env":          true,
 		"format":       true,
 		"limit":        true,

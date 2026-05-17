@@ -69,8 +69,10 @@ type Logs struct {
 }
 
 type Loaded struct {
-	Config  Config            `json:"config"`
-	Sources map[string]string `json:"sources,omitempty"`
+	Config     Config            `json:"config"`
+	Sources    map[string]string `json:"sources,omitempty"`
+	ConfigPath string            `json:"config_path,omitempty"`
+	Context    string            `json:"context,omitempty"`
 }
 
 func Defaults(mode Mode) Loaded {
@@ -93,8 +95,10 @@ func Defaults(mode Mode) Loaded {
 
 func (l Loaded) Redacted() Loaded {
 	out := Loaded{
-		Config:  l.Config,
-		Sources: make(map[string]string, len(l.Sources)),
+		Config:     l.Config,
+		Sources:    make(map[string]string, len(l.Sources)),
+		ConfigPath: l.ConfigPath,
+		Context:    l.Context,
 	}
 	if l.Config.Logs != nil {
 		logs := *l.Config.Logs

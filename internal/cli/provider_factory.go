@@ -11,7 +11,7 @@ import (
 )
 
 func newCLIProvider(cfg config.Config, store objstore.ObjectStore) (provider.Provider, error) {
-	if strings.EqualFold(strings.TrimSpace(cfg.Provider), fakeprovider.Name) {
+	if isFakeProvider(cfg.Provider) {
 		opts := []fakeprovider.Option{}
 		if store != nil {
 			opts = append(opts, fakeprovider.WithStateStore(store))
@@ -27,4 +27,8 @@ func newCLIProvider(cfg config.Config, store objstore.ObjectStore) (provider.Pro
 
 func newCLIProviderNoStore(cfg config.Config) (provider.Provider, error) {
 	return newCLIProvider(cfg, nil)
+}
+
+func isFakeProvider(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), fakeprovider.Name)
 }

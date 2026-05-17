@@ -184,6 +184,7 @@ func runVersion(binary string, args []string, root rootOptions, stdout, stderr i
 		loaded, err := config.Load(config.LoadOptions{
 			ModeDefault: defaultMode(binary),
 			ConfigPath:  root.ConfigPath,
+			Context:     root.Context,
 			Overrides:   root.configOverrides(),
 		})
 		if err != nil {
@@ -287,7 +288,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  version    Print version, commit, and build date")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Global flags:")
-	fmt.Fprintln(w, "  --config <path> --env <env> --provider <provider> --region <region>")
+	fmt.Fprintln(w, "  --config <path> --context <name> --env <env> --provider <provider> --region <region>")
 	fmt.Fprintln(w, "  --state <uri> --api --direct --format human|json --no-color --yes --trace-id <id>")
 }
 
@@ -296,6 +297,23 @@ type configShowOutput struct {
 	TraceID string            `json:"trace_id,omitempty"`
 	Config  config.Config     `json:"config"`
 	Sources map[string]string `json:"sources,omitempty"`
+	Context string            `json:"context,omitempty"`
+	Path    string            `json:"path,omitempty"`
+}
+
+type configContextsOutput struct {
+	OK             bool                    `json:"ok"`
+	TraceID        string                  `json:"trace_id,omitempty"`
+	Path           string                  `json:"path,omitempty"`
+	CurrentContext string                  `json:"current_context,omitempty"`
+	Contexts       []config.ContextSummary `json:"contexts,omitempty"`
+}
+
+type configUseContextOutput struct {
+	OK      bool   `json:"ok"`
+	TraceID string `json:"trace_id,omitempty"`
+	Path    string `json:"path,omitempty"`
+	Context string `json:"context"`
 }
 
 type commandErrorOutput struct {
@@ -425,6 +443,12 @@ func runConfig(binary string, args []string, root rootOptions, stdout, stderr io
 	switch args[0] {
 	case "show":
 		return runConfigShow(binary, args[1:], root, stdout, stderr)
+	case "get-contexts", "contexts":
+		return runConfigGetContexts(binary, args[1:], root, stdout, stderr)
+	case "current-context":
+		return runConfigCurrentContext(binary, args[1:], root, stdout, stderr)
+	case "use-context":
+		return runConfigUseContext(binary, args[1:], root, stdout, stderr)
 	case "help", "-h", "--help":
 		printConfigUsage(stdout, binary)
 		return ExitSuccess
@@ -444,6 +468,7 @@ func runConfigShow(binary string, args []string, root rootOptions, stdout, stder
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
 	configPath := fs.String("config", root.ConfigPath, "path to Skiff config file")
+	contextName := fs.String("context", root.Context, "Skiff config context name")
 	userDataPath := fs.String("user-data", "", "path to runner cloud-init/user-data JSON")
 
 	fs.String("env", root.Env, "Skiff environment name")
@@ -515,6 +540,7 @@ func runConfigShow(binary string, args []string, root rootOptions, stdout, stder
 	loaded, err := config.Load(config.LoadOptions{
 		ModeDefault:  defaultMode(binary),
 		ConfigPath:   *configPath,
+		Context:      *contextName,
 		UserDataPath: *userDataPath,
 		Overrides:    overrides,
 	})
@@ -537,6 +563,8 @@ func runConfigShow(binary string, args []string, root rootOptions, stdout, stder
 			TraceID: *traceID,
 			Config:  redacted.Config,
 			Sources: redacted.Sources,
+			Context: redacted.Context,
+			Path:    redacted.ConfigPath,
 		}); err != nil {
 			fmt.Fprintf(stderr, "%s config show: %v\n", binary, err)
 			return ExitUserError
@@ -547,7 +575,181 @@ func runConfigShow(binary string, args []string, root rootOptions, stdout, stder
 	}
 }
 
+func runConfigGetContexts(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" config get-contexts", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	format := fs.String("format", root.Format, "output format: human or json")
+	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
+	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
+	configPath := fs.String("config", root.ConfigPath, "path to Skiff config file")
+	contextName := fs.String("context", root.Context, "Skiff config context name")
+	if err := fs.Parse(args); err != nil {
+		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
+	}
+	if fs.NArg() != 0 {
+		return writeConfigError(binary, *format, *traceID, fmt.Errorf("unexpected argument %q", fs.Arg(0)), nil, stdout, stderr)
+	}
+	_ = noColor
+	path := config.ResolveConfigPath(*configPath, nil)
+	if path == "" {
+		path = config.DefaultConfigFilename
+	}
+	file, err := config.LoadSkiffConfigFile(path)
+	if err != nil {
+		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
+	}
+	effective := config.ResolveContext(*contextName, nil)
+	if effective == "" {
+		effective = file.Current()
+	}
+	summaries := file.Summaries(effective)
+	switch *format {
+	case "human", "text":
+		fmt.Fprintf(stdout, "config: %s\n", path)
+		if effective != "" {
+			fmt.Fprintf(stdout, "current-context: %s\n", effective)
+		}
+		fmt.Fprintln(stdout, "contexts:")
+		for _, summary := range summaries {
+			marker := " "
+			if summary.Current {
+				marker = "*"
+			}
+			fmt.Fprintf(stdout, "%s %s", marker, summary.Name)
+			if summary.Mode != "" {
+				fmt.Fprintf(stdout, " mode=%s", summary.Mode)
+			}
+			if summary.Env != "" {
+				fmt.Fprintf(stdout, " env=%s", summary.Env)
+			}
+			if summary.Provider != "" || summary.Region != "" {
+				fmt.Fprintf(stdout, " provider=%s region=%s", summary.Provider, summary.Region)
+			}
+			if summary.StateBucket != "" {
+				fmt.Fprintf(stdout, " state=%s", summary.StateBucket)
+			}
+			if summary.APIURL != "" {
+				fmt.Fprintf(stdout, " api=%s", summary.APIURL)
+			}
+			fmt.Fprintln(stdout)
+		}
+		return ExitSuccess
+	case "json":
+		if err := json.NewEncoder(stdout).Encode(configContextsOutput{OK: true, TraceID: *traceID, Path: path, CurrentContext: effective, Contexts: summaries}); err != nil {
+			fmt.Fprintf(stderr, "%s config get-contexts: %v\n", binary, err)
+			return ExitUserError
+		}
+		return ExitSuccess
+	default:
+		return writeConfigError(binary, *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), nil, stdout, stderr)
+	}
+}
+
+func runConfigCurrentContext(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" config current-context", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	format := fs.String("format", root.Format, "output format: human or json")
+	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
+	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
+	configPath := fs.String("config", root.ConfigPath, "path to Skiff config file")
+	contextName := fs.String("context", root.Context, "Skiff config context name")
+	if err := fs.Parse(args); err != nil {
+		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
+	}
+	if fs.NArg() != 0 {
+		return writeConfigError(binary, *format, *traceID, fmt.Errorf("unexpected argument %q", fs.Arg(0)), nil, stdout, stderr)
+	}
+	_ = noColor
+	path := config.ResolveConfigPath(*configPath, nil)
+	if path == "" {
+		path = config.DefaultConfigFilename
+	}
+	file, err := config.LoadSkiffConfigFile(path)
+	if err != nil {
+		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
+	}
+	effective := config.ResolveContext(*contextName, nil)
+	if effective == "" {
+		effective = file.Current()
+	}
+	if effective == "" {
+		return writeConfigError(binary, *format, *traceID, errors.New("current-context is not set"), nil, stdout, stderr)
+	}
+	switch *format {
+	case "human", "text":
+		fmt.Fprintln(stdout, effective)
+		return ExitSuccess
+	case "json":
+		if err := json.NewEncoder(stdout).Encode(configUseContextOutput{OK: true, TraceID: *traceID, Path: path, Context: effective}); err != nil {
+			fmt.Fprintf(stderr, "%s config current-context: %v\n", binary, err)
+			return ExitUserError
+		}
+		return ExitSuccess
+	default:
+		return writeConfigError(binary, *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), nil, stdout, stderr)
+	}
+}
+
+func runConfigUseContext(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" config use-context", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	format := fs.String("format", root.Format, "output format: human or json")
+	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
+	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
+	configPath := fs.String("config", root.ConfigPath, "path to Skiff config file")
+	flagArgs, positionals, err := splitArgs(args, map[string]bool{
+		"config":   true,
+		"format":   true,
+		"no-color": false,
+		"trace-id": true,
+	})
+	if err != nil {
+		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
+	}
+	if len(positionals) != 1 {
+		return writeConfigError(binary, *format, *traceID, errors.New("context name is required"), nil, stdout, stderr)
+	}
+	_ = noColor
+	path := config.ResolveConfigPath(*configPath, nil)
+	if path == "" {
+		path = config.DefaultConfigFilename
+	}
+	file, err := config.LoadSkiffConfigFile(path)
+	if err != nil {
+		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
+	}
+	name := positionals[0]
+	if err := file.SetCurrentContext(name); err != nil {
+		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
+	}
+	if err := config.WriteSkiffConfigFile(path, file); err != nil {
+		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
+	}
+	switch *format {
+	case "human", "text":
+		fmt.Fprintf(stdout, "switched to context %s\n", name)
+		return ExitSuccess
+	case "json":
+		if err := json.NewEncoder(stdout).Encode(configUseContextOutput{OK: true, TraceID: *traceID, Path: path, Context: name}); err != nil {
+			fmt.Fprintf(stderr, "%s config use-context: %v\n", binary, err)
+			return ExitUserError
+		}
+		return ExitSuccess
+	default:
+		return writeConfigError(binary, *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), nil, stdout, stderr)
+	}
+}
+
 func printConfigHuman(w io.Writer, loaded config.Loaded) {
+	if loaded.ConfigPath != "" {
+		fmt.Fprintf(w, "config_path: %s\n", loaded.ConfigPath)
+	}
+	if loaded.Context != "" {
+		fmt.Fprintf(w, "context: %s\n", loaded.Context)
+	}
 	for _, field := range config.FieldNames() {
 		value := configValue(loaded.Config, field)
 		if value == "" {
@@ -1323,7 +1525,10 @@ func writeSpecError(binary, code, format, traceID string, err error, fields []sp
 func printConfigUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s config <command> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Commands:")
-	fmt.Fprintln(w, "  show       Print effective configuration")
+	fmt.Fprintln(w, "  show             Print effective configuration")
+	fmt.Fprintln(w, "  get-contexts     List contexts in a .skiffconfig file")
+	fmt.Fprintln(w, "  current-context  Print the active context")
+	fmt.Fprintln(w, "  use-context      Switch current-context in a .skiffconfig file")
 }
 
 func printBootstrapUsage(w io.Writer, binary string) {

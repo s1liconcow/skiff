@@ -61,6 +61,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
 	configPath := fs.String("config", "", "path to Skiff config file")
+	contextName := fs.String("context", "", "Skiff config context name")
 	env := fs.String("env", "", "Skiff environment name")
 	providerName := fs.String("provider", "", "cloud provider name")
 	region := fs.String("region", "", "cloud provider region")
@@ -97,6 +98,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	loaded, err := config.Load(config.LoadOptions{
 		ModeDefault: config.ModeDirect,
 		ConfigPath:  *configPath,
+		Context:     *contextName,
 		Overrides:   overrides,
 	})
 	if err == nil {

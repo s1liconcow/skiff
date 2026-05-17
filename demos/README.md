@@ -1,0 +1,52 @@
+# Skiff Demos
+
+These scripts are meant for a user who wants to touch Skiff without cloud
+credentials first, then optionally run the local Apple Container workload path.
+
+## Fast Local Operator Demo
+
+```bash
+demos/quickstart-fake.sh --reset
+```
+
+This builds `bin/skiff` if needed, writes a local `.skiffconfig`, validates
+`examples/service/http-hello`, plans provider-visible primitives, deploys a
+signed base release, runs a two-stage canary release through the fake provider,
+prints human status/logs/metrics/doctor/events/ops output, and renders a
+read-only TUI frame.
+
+Open the interactive TUI over the generated state:
+
+```bash
+demos/quickstart-fake.sh --tui
+```
+
+The local demo writes durable object state under `.skiff-demo-state` by default.
+It writes config contexts to `.skiffconfig` by default.
+It does not create cloud resources or run a real workload process; the fake
+provider lets the CLI, saga, status, and TUI flows run safely on any machine.
+Because the workload is simulated, some diagnostic output is synthetic rather
+than live target health.
+
+## Demo Smoke Test
+
+```bash
+demos/test-local-demo.sh
+```
+
+This runs the fast demo against an isolated temporary object-state directory and
+exits non-zero if any command fails.
+
+## Real Local Workload Demo
+
+On Apple silicon with Apple Container available:
+
+```bash
+demos/apple-container-caddy.sh
+```
+
+This wraps `make e2e-apple-container`. It starts RustFS, launches Caddy in a
+local Linux VM, verifies signed OCI release/runtime manifests, rolls to a second
+release, starts a local `skiffd` against the RustFS state, and runs a rolling
+canary saga. It is slower and pulls OCI images, but it shows the runner/workload
+path rather than only the fake provider.

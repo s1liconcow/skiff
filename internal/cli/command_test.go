@@ -56,6 +56,70 @@ func TestConfigShowJSONDirectMode(t *testing.T) {
 	}
 }
 
+func TestConfigContextsCommands(t *testing.T) {
+	clearSkiffEnv(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".skiffconfig")
+	if err := os.WriteFile(path, []byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: SkiffConfig
+current-context: local
+contexts:
+  - name: local
+    context:
+      mode: direct
+      env: prod
+      provider: fake
+      region: local
+      state: file:///tmp/skiff-state
+  - name: prod
+    context:
+      mode: direct
+      env: prod
+      provider: aws
+      region: us-west-2
+      state: s3://skiff-state-prod
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{"config", "use-context", "prod", "--config", path, "--format", "json"}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("use-context exit = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Run("skiff", []string{"config", "current-context", "--config", path, "--format", "human"}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("current-context exit = %d, stderr = %s", code, stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "prod" {
+		t.Fatalf("current-context output = %q", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Run("skiff", []string{"config", "show", "--config", path, "--format", "json"}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("show exit = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	var got struct {
+		OK      bool   `json:"ok"`
+		Context string `json:"context"`
+		Config  struct {
+			Provider    string `json:"provider"`
+			StateBucket string `json:"state_bucket"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("config show output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.Context != "prod" || got.Config.Provider != "aws" || got.Config.StateBucket != "s3://skiff-state-prod" {
+		t.Fatalf("unexpected config show: %+v", got)
+	}
+}
+
 func TestConfigShowJSONValidationError(t *testing.T) {
 	clearSkiffEnv(t)
 
@@ -830,6 +894,7 @@ func clearSkiffEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"SKIFF_CONFIG",
+		"SKIFF_CONTEXT",
 		"SKIFF_ENV",
 		"SKIFF_PROVIDER",
 		"SKIFF_REGION",

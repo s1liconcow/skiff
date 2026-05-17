@@ -4,7 +4,7 @@ Skiff loads runtime configuration from four sources, with later sources taking
 precedence:
 
 1. compiled defaults
-2. config file
+2. config file or selected config context
 3. environment variables
 4. command-line flags
 
@@ -14,9 +14,11 @@ Use `skiff config show` to inspect the effective values and their sources:
 skiff config show --mode direct --config ./skiff.yaml --format json
 ```
 
-Supported file formats are strict flat JSON and flat YAML. Unknown fields are
-rejected so operators do not accidentally believe unsupported configuration is
-active.
+Supported file formats are strict flat JSON/YAML and kubeconfig-style
+`.skiffconfig` files. Unknown fields are rejected so operators do not
+accidentally believe unsupported configuration is active.
+
+Flat config:
 
 ```yaml
 env: prod
@@ -30,10 +32,47 @@ logLevel: info
 apiURL: https://skiff.example.com
 ```
 
+Context config:
+
+```yaml
+apiVersion: skiff.dev/v1alpha1
+kind: SkiffConfig
+current-context: prod
+contexts:
+  - name: prod
+    context:
+      mode: direct
+      env: prod
+      provider: aws
+      region: us-west-2
+      state: s3://skiff-state-prod
+  - name: local
+    context:
+      mode: direct
+      env: prod
+      provider: fake
+      region: local
+      state: file:///tmp/skiff-state
+```
+
+Context commands:
+
+```bash
+skiff config get-contexts --config .skiffconfig
+skiff config current-context --config .skiffconfig
+skiff config use-context local --config .skiffconfig
+```
+
+Selection works like kubeconfig: `SKIFF_CONFIG` chooses the config file,
+`SKIFF_CONTEXT` chooses a context without modifying the file, and `--context`
+overrides both for one command. If no config path is provided and `.skiffconfig`
+exists in the current working directory, Skiff uses it.
+
 Environment variable equivalents:
 
 ```text
 SKIFF_CONFIG
+SKIFF_CONTEXT
 SKIFF_ENV
 SKIFF_PROVIDER
 SKIFF_REGION

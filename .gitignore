@@ -7,3 +7,9 @@
 # Local build and sandboxed Go caches
 bin/
 .cache/
+
+# Local demo state and generated demo artifacts
+.skiffconfig
+.skiff-demo-state/
+.skiff-demo-reports/
+demos/out/

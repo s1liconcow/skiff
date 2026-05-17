@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	skiffevents "github.com/s1liconcow/skiff/internal/events"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
 	"github.com/s1liconcow/skiff/internal/state/schema"
@@ -287,8 +288,8 @@ func eventsFromObjectStore(ctx context.Context, store objstore.ObjectStore, rece
 		if err != nil {
 			return nil, nil, err
 		}
-		var event schema.Event
-		if err := canonical.UnmarshalStrict(obj.Body, &event); err != nil {
+		event, err := decodeIndexedEvent(obj.Body)
+		if err != nil {
 			findings = append(findings, Finding{Code: "MALFORMED_EVENT", Summary: err.Error(), Key: meta.Key})
 			continue
 		}
@@ -304,6 +305,41 @@ func eventsFromObjectStore(ctx context.Context, store objstore.ObjectStore, rece
 		events = events[len(events)-recentLimit:]
 	}
 	return events, findings, nil
+}
+
+func decodeIndexedEvent(body []byte) (schema.Event, error) {
+	var event schema.Event
+	if err := canonical.UnmarshalStrict(body, &event); err == nil {
+		return event, nil
+	}
+	var logged skiffevents.Event
+	if err := canonical.UnmarshalStrict(body, &logged); err != nil {
+		return schema.Event{}, err
+	}
+	return schema.Event{
+		SchemaVersion: logged.SchemaVersion,
+		ID:            logged.ID,
+		Time:          logged.Time,
+		TraceID:       logged.TraceID,
+		Subject:       subjectFromIndexedEventScope(logged.Scope),
+		Type:          logged.Type,
+		Severity:      logged.Severity,
+		Actor:         logged.Actor,
+		Summary:       logged.Summary,
+		Facts:         logged.Facts,
+		Data:          logged.Data,
+	}, nil
+}
+
+func subjectFromIndexedEventScope(scope skiffevents.Scope) schema.Target {
+	switch scope.Kind {
+	case skiffevents.ScopeOperation:
+		return schema.Target{Kind: "operation", Name: scope.Operation}
+	case skiffevents.ScopeSaga:
+		return schema.Target{Kind: "saga", Name: scope.Saga}
+	default:
+		return schema.Target{Kind: "service", Name: scope.Service}
+	}
 }
 
 func sortSnapshot(snapshot *Snapshot) {

@@ -14,6 +14,7 @@ import (
 type LoadOptions struct {
 	ModeDefault  Mode
 	ConfigPath   string
+	Context      string
 	UserDataPath string
 	Env          map[string]string
 	Overrides    map[string]string
@@ -25,18 +26,22 @@ func Load(opts LoadOptions) (Loaded, error) {
 		env = environ()
 	}
 
-	configPath := opts.ConfigPath
-	if configPath == "" {
-		configPath = env["SKIFF_CONFIG"]
-	}
+	configPath := ResolveConfigPath(opts.ConfigPath, env)
+	contextName := ResolveContext(opts.Context, env)
 
 	loaded := Defaults(opts.ModeDefault)
 	if configPath != "" {
-		values, err := parseConfigFile(configPath)
+		loaded.ConfigPath = configPath
+		values, selectedContext, err := parseConfigFile(configPath, contextName)
 		if err != nil {
 			return Loaded{}, err
 		}
-		applyValues(&loaded, values, "file:"+configPath)
+		source := "file:" + configPath
+		if selectedContext != "" {
+			source += "#context:" + selectedContext
+			loaded.Context = selectedContext
+		}
+		applyValues(&loaded, values, source)
 	}
 	if opts.UserDataPath != "" {
 		data, err := os.ReadFile(opts.UserDataPath)
@@ -141,18 +146,31 @@ func applyValues(loaded *Loaded, values map[string]string, source string) {
 	}
 }
 
-func parseConfigFile(path string) (map[string]string, error) {
+func parseConfigFile(path, contextName string) (map[string]string, string, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read config %q: %w", path, err)
+		return nil, "", fmt.Errorf("read config %q: %w", path, err)
+	}
+	if looksLikeSkiffConfig(body) {
+		file, err := ParseSkiffConfigFile(body, "config "+path)
+		if err != nil {
+			return nil, "", err
+		}
+		selected, values, err := file.SelectContext(contextName)
+		if err != nil {
+			return nil, "", fmt.Errorf("config %q: %w", path, err)
+		}
+		return values, selected, nil
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".json":
-		return parseJSONMap(body, "config "+path)
+		values, err := parseJSONMap(body, "config "+path)
+		return values, "", err
 	case ".yaml", ".yml", "":
-		return parseFlatYAML(body, "config "+path)
+		values, err := parseFlatYAML(body, "config "+path)
+		return values, "", err
 	default:
-		return nil, fmt.Errorf("config %q: unsupported extension; expected .json, .yaml, or .yml", path)
+		return nil, "", fmt.Errorf("config %q: unsupported extension; expected .json, .yaml, or .yml", path)
 	}
 }
 

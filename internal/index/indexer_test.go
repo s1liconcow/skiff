@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	skiffevents "github.com/s1liconcow/skiff/internal/events"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/objstore/memory"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
@@ -57,6 +58,14 @@ func TestRebuildFromMemoryStoreIndexesDurableState(t *testing.T) {
 		Type:          "service.updated",
 		Summary:       "service updated",
 	})
+	createJSON(t, store, "services/payments-api/operations/op_01JABC/events/01JOP.json", skiffevents.Event{
+		SchemaVersion: skiffevents.SchemaVersion,
+		ID:            "01JOP",
+		Time:          "2026-05-16T21:05:00Z",
+		Scope:         skiffevents.Scope{Kind: skiffevents.ScopeOperation, Service: "payments-api", Operation: "op_01JABC"},
+		Type:          "deploy.succeeded",
+		Summary:       "deploy succeeded",
+	})
 
 	idx, err := New(store, Options{Clock: fixedClock})
 	if err != nil {
@@ -81,9 +90,18 @@ func TestRebuildFromMemoryStoreIndexesDurableState(t *testing.T) {
 	if len(snapshot.Resources) != 1 || snapshot.Resources[0].ID != "asg-123" {
 		t.Fatalf("unexpected resources: %+v", snapshot.Resources)
 	}
-	if len(snapshot.RecentEvents) != 1 || snapshot.RecentEvents[0].ID != "01JROOT" {
+	if !hasRecentEvent(snapshot.RecentEvents, "01JROOT") || !hasRecentEvent(snapshot.RecentEvents, "01JOP") {
 		t.Fatalf("unexpected recent events: %+v", snapshot.RecentEvents)
 	}
+}
+
+func hasRecentEvent(events []schema.Event, id string) bool {
+	for _, event := range events {
+		if event.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func TestMalformedObjectsBecomeFindings(t *testing.T) {

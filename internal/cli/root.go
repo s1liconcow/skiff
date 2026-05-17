@@ -18,6 +18,7 @@ type rootOptions struct {
 	Args    []string
 
 	ConfigPath string
+	Context    string
 	Env        string
 	Provider   string
 	Region     string
@@ -30,6 +31,7 @@ type rootOptions struct {
 	TraceID    string
 
 	configSet   bool
+	contextSet  bool
 	envSet      bool
 	providerSet bool
 	regionSet   bool
@@ -77,6 +79,16 @@ func parseRootArgs(args []string) (rootOptions, error) {
 			}
 			root.ConfigPath = value
 			root.configSet = true
+		case "context":
+			if !hasValue {
+				i++
+				if i >= len(args) {
+					return root, fmt.Errorf("missing value for --%s", name)
+				}
+				value = args[i]
+			}
+			root.Context = value
+			root.contextSet = true
 		case "env":
 			if !hasValue {
 				i++

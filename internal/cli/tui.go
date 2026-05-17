@@ -101,6 +101,7 @@ func splitTUIArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
 		"api-url":      true,
 		"config":       true,
+		"context":      true,
 		"env":          true,
 		"format":       true,
 		"mode":         true,

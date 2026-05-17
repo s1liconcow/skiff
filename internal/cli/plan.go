@@ -30,8 +30,10 @@ func runPlan(binary string, args []string, root rootOptions, stdout, stderr io.W
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
+	configPath := fs.String("config", root.ConfigPath, "path to Skiff config file")
+	contextName := fs.String("context", root.Context, "Skiff config context name")
 	filePath := fs.String("file", "", "Skiff YAML or JSON spec file")
-	providerName := fs.String("provider", defaultString(root.Provider, "aws"), "provider to plan")
+	providerName := fs.String("provider", root.Provider, "provider to plan")
 	region := fs.String("region", root.Region, "cloud provider region")
 	stateBucket := fs.String("state", root.State, "object-state bucket URI")
 
@@ -53,6 +55,30 @@ func runPlan(binary string, args []string, root rootOptions, stdout, stderr io.W
 	}
 	_ = noColor
 	_ = yes
+
+	overrides := root.configOverrides()
+	flagToField := map[string]string{
+		"provider": config.FieldProvider,
+		"region":   config.FieldRegion,
+		"state":    config.FieldStateBucket,
+	}
+	fs.Visit(func(flag *flag.Flag) {
+		if field := flagToField[flag.Name]; field != "" {
+			overrides[field] = flag.Value.String()
+		}
+	})
+	loaded, err := config.Load(config.LoadOptions{
+		ModeDefault: defaultMode(binary),
+		ConfigPath:  *configPath,
+		Context:     *contextName,
+		Overrides:   overrides,
+	})
+	if err != nil {
+		return writeSpecError(binary, "PLAN_INVALID", *format, *traceID, err, nil, stdout, stderr)
+	}
+	*providerName = firstNonEmptyString(*providerName, loaded.Config.Provider, aws.Name)
+	*region = firstNonEmptyString(*region, loaded.Config.Region)
+	*stateBucket = firstNonEmptyString(*stateBucket, loaded.Config.StateBucket)
 
 	doc, err := spec.LoadFile(*filePath, spec.DecodeOptions{})
 	if err != nil {
@@ -107,6 +133,8 @@ func splitPlanArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
 		"file":     true,
 		"format":   true,
+		"config":   true,
+		"context":  true,
 		"provider": true,
 		"region":   true,
 		"state":    true,
