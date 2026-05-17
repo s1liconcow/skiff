@@ -353,6 +353,38 @@ func (p *Provider) Rollback(ctx context.Context, req provider.RollbackRequest) (
 	return &rollout, nil
 }
 
+func (p *Provider) ShiftTraffic(ctx context.Context, req provider.TrafficShiftRequest) (*provider.TrafficShiftResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.Service) == "" || strings.TrimSpace(req.Env) == "" {
+		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "shift_traffic", Summary: "service and env are required"}
+	}
+	if strings.TrimSpace(req.From) == "" || strings.TrimSpace(req.To) == "" {
+		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "shift_traffic", Summary: "from and to targets are required"}
+	}
+	if req.Percent < 0 || req.Percent > 100 {
+		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "shift_traffic", Summary: "percent must be between 0 and 100"}
+	}
+	now := p.now()
+	id := "traffic-shift-" + pathSafeResourceName(firstNonEmpty(req.OperationID, req.SagaID, req.Service))
+	return &provider.TrafficShiftResult{
+		Provider:   Name,
+		Service:    req.Service,
+		Env:        req.Env,
+		From:       req.From,
+		To:         req.To,
+		Percent:    req.Percent,
+		ProviderID: id,
+		Status:     "shifted",
+		UpdatedAt:  now,
+		Facts: map[string]string{
+			"trace_id": req.TraceID,
+			"saga_id":  req.SagaID,
+		},
+	}, nil
+}
+
 func (p *Provider) CreateSecretVersion(ctx context.Context, req provider.SecretVersionRequest) (*provider.SecretVersion, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

@@ -14,6 +14,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/config"
 	"github.com/s1liconcow/skiff/internal/deploy"
 	"github.com/s1liconcow/skiff/internal/events"
+	"github.com/s1liconcow/skiff/internal/ir"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/provider"
 	"github.com/s1liconcow/skiff/internal/saga/templates"
@@ -44,6 +45,7 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 	approvalID := fs.String("approval-id", "", "approval ID for policy-gated production operations")
 	keyID := fs.String("key-id", "local-deploy", "signing key ID")
 	signingSeed := fs.String("signing-seed-base64", "", "base64 Ed25519 seed for release signing")
+	shadow := fs.Bool("shadow", false, "deploy Skiff infrastructure without attaching public or internal ingress listeners")
 	canary := fs.Bool("canary", false, "create and run a staged canary deployment saga")
 	canaryStages := fs.String("canary-stages", "5,25,100", "comma-separated canary stages by percent")
 	canaryBake := fs.String("canary-bake", templates.DefaultCanaryBake, "canary bake duration")
@@ -89,6 +91,9 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 			return writeSpecError(binary, "SPEC_INVALID", *flags.format, *flags.traceID, errors.New("spec validation failed"), validation.Diagnostics, stdout, stderr)
 		}
 		return writeSpecError(binary, "SPEC_COMPILE_FAILED", *flags.format, *flags.traceID, err, nil, stdout, stderr)
+	}
+	if *shadow {
+		graph = shadowDeployGraph(graph)
 	}
 	if *canary {
 		stages, err := parseCanaryStages(*canaryStages)
@@ -182,6 +187,7 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 		ApprovalID:  *approvalID,
 		DryRun:      *dryRun,
 		PlanOnly:    *planOnly,
+		Shadow:      *shadow,
 	})
 	if err != nil {
 		return writeSpecError(binary, "DEPLOY_FAILED", *flags.format, *flags.traceID, err, nil, stdout, stderr)
@@ -191,6 +197,9 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 	case "human", "text":
 		if result.DryRun || result.PlanOnly {
 			fmt.Fprintf(stdout, "deploy plan for %s/%s:\n", result.Plan.Env, result.Plan.Service)
+			if result.Shadow {
+				fmt.Fprintln(stdout, "shadow: ingress listeners omitted")
+			}
 			for _, resource := range result.Plan.Resources {
 				fmt.Fprintf(stdout, "- %s %s %s\n", resource.Action, resource.Kind, resource.Name)
 			}
@@ -229,12 +238,23 @@ func splitDeployArgs(args []string) ([]string, []string, error) {
 		"provider":            true,
 		"region":              true,
 		"release-id":          true,
+		"shadow":              false,
 		"signing-seed-base64": true,
 		"state":               true,
 		"state-bucket":        true,
 		"trace-id":            true,
 	}
 	return splitArgs(args, valueFlags)
+}
+
+func shadowDeployGraph(graph *ir.Graph) *ir.Graph {
+	if graph == nil {
+		return nil
+	}
+	copyGraph := *graph
+	copyGraph.Resources = graph.Resources
+	copyGraph.Resources.Listeners = nil
+	return &copyGraph
 }
 
 func signerFromSeed(keyID, seedValue string) (signing.Signer, error) {

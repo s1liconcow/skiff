@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: privileged-api
+  namespace: staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: privileged-api
+  template:
+    metadata:
+      labels:
+        app: privileged-api
+    spec:
+      volumes:
+        - name: host-logs
+          hostPath:
+            path: /var/log
+      containers:
+        - name: app
+          image: registry.example.com/privileged-api:latest
+          ports:
+            - containerPort: 8080
+          securityContext:
+            privileged: true
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: privileged-api
+  namespace: staging
+spec:
+  selector:
+    app: privileged-api
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: database
+  namespace: staging
+spec:
+  serviceName: database
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.example.com
+spec:
+  group: example.com

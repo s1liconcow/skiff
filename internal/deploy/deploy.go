@@ -37,6 +37,7 @@ type Request struct {
 	ApprovalID    string        `json:"approval_id,omitempty"`
 	DryRun        bool          `json:"dry_run,omitempty"`
 	PlanOnly      bool          `json:"plan_only,omitempty"`
+	Shadow        bool          `json:"shadow,omitempty"`
 	LeaseDuration time.Duration `json:"lease_duration,omitempty"`
 }
 
@@ -44,6 +45,7 @@ type Result struct {
 	OK              bool                    `json:"ok"`
 	DryRun          bool                    `json:"dry_run,omitempty"`
 	PlanOnly        bool                    `json:"plan_only,omitempty"`
+	Shadow          bool                    `json:"shadow,omitempty"`
 	OperationID     string                  `json:"operation_id,omitempty"`
 	ReleaseID       string                  `json:"release_id,omitempty"`
 	TraceID         string                  `json:"trace_id,omitempty"`
@@ -88,6 +90,7 @@ func (d Deployer) Deploy(ctx context.Context, graph *ir.Graph, req Request) (*Re
 		OK:          true,
 		DryRun:      req.DryRun,
 		PlanOnly:    req.PlanOnly,
+		Shadow:      req.Shadow,
 		OperationID: req.OperationID,
 		ReleaseID:   req.ReleaseID,
 		TraceID:     req.TraceID,

@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  namespace: staging
+  annotations:
+    sidecar.istio.io/inject: "true"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: checkout
+  template:
+    metadata:
+      labels:
+        app: checkout
+      annotations:
+        linkerd.io/inject: enabled
+    spec:
+      initContainers:
+        - name: migrate
+          image: registry.example.com/migrate:latest
+      containers:
+        - name: app
+          image: registry.example.com/checkout:latest
+          ports:
+            - containerPort: 9000
+          env:
+            - name: API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: checkout-secrets
+                  key: api-token
+          envFrom:
+            - secretRef:
+                name: checkout-env
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9000
+        - name: envoy
+          image: envoyproxy/envoy:v1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout
+  namespace: staging
+spec:
+  type: LoadBalancer
+  selector:
+    app: checkout
+  ports:
+    - name: http
+      port: 80
+      targetPort: 9000
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: checkout-secrets
+  namespace: staging
+data:
+  api-token: c2VjcmV0
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: checkout
+  namespace: staging
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: checkout

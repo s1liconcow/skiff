@@ -45,6 +45,10 @@ type SecretOperations interface {
 	DisableOldCredential(ctx context.Context, req CredentialDisableRequest) (*CredentialDisableResult, error)
 }
 
+type TrafficOperations interface {
+	ShiftTraffic(ctx context.Context, req TrafficShiftRequest) (*TrafficShiftResult, error)
+}
+
 type Plan struct {
 	Provider  string          `json:"provider"`
 	Service   string          `json:"service"`
@@ -209,6 +213,30 @@ type RolloutStatus struct {
 	Status     string    `json:"status"`
 	ProviderID string    `json:"provider_id,omitempty"`
 	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type TrafficShiftRequest struct {
+	Service     string `json:"service"`
+	Env         string `json:"env"`
+	From        string `json:"from"`
+	To          string `json:"to"`
+	Percent     int    `json:"percent"`
+	OperationID string `json:"operation_id,omitempty"`
+	SagaID      string `json:"saga_id,omitempty"`
+	TraceID     string `json:"trace_id,omitempty"`
+}
+
+type TrafficShiftResult struct {
+	Provider   string            `json:"provider"`
+	Service    string            `json:"service"`
+	Env        string            `json:"env"`
+	From       string            `json:"from"`
+	To         string            `json:"to"`
+	Percent    int               `json:"percent"`
+	ProviderID string            `json:"provider_id,omitempty"`
+	Status     string            `json:"status"`
+	UpdatedAt  time.Time         `json:"updated_at"`
+	Facts      map[string]string `json:"facts,omitempty"`
 }
 
 type DatabaseRef struct {

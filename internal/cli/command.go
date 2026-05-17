@@ -77,6 +77,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runConfig(binary, root.Args, root, stdout, stderr)
 	case "completion":
 		return runCompletion(binary, root.Args, stdout, stderr)
+	case "cutover":
+		return runCutover(binary, root.Args, root, stdout, stderr)
 	case "deploy":
 		return runDeploy(binary, root.Args, root, stdout, stderr)
 	case "database":
@@ -93,6 +95,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runFailover(binary, root.Args, root, stdout, stderr)
 	case "init":
 		return runInit(binary, root.Args, root, stdout, stderr)
+	case "import":
+		return runImport(binary, root.Args, root, stdout, stderr)
 	case "logs":
 		return runLogs(binary, root.Args, root, stdout, stderr)
 	case "gc":
@@ -230,8 +234,9 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  compile    Compile a Skiff spec to provider-neutral IR")
 	fmt.Fprintln(w, "  config     Inspect effective configuration")
 	fmt.Fprintln(w, "  completion Generate shell completions")
-	fmt.Fprintln(w, "  deploy     Publish and deploy a service release")
+	fmt.Fprintln(w, "  cutover    Create a weighted traffic cutover saga")
 	fmt.Fprintln(w, "  database   Run managed database backup and restore sagas")
+	fmt.Fprintln(w, "  deploy     Publish and deploy a service release")
 	fmt.Fprintln(w, "  doctor     Diagnose service health and recommend actions")
 	fmt.Fprintln(w, "  drift      Detect provider drift from Skiff resource records")
 	fmt.Fprintln(w, "  events     List local service, operation, or saga events")
@@ -239,6 +244,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  failover   Run a regional failover saga")
 	fmt.Fprintln(w, "  gc         Plan and apply conservative cleanup actions")
 	fmt.Fprintln(w, "  init       Generate starter Skiff specs and recipes")
+	fmt.Fprintln(w, "  import     Convert external workload manifests into Skiff specs")
 	fmt.Fprintln(w, "  logs       Query service logs through the cloud provider")
 	fmt.Fprintln(w, "  metrics    Query service metrics through the cloud provider")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
