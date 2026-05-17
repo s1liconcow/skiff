@@ -92,7 +92,7 @@ func TestMetricsProviderErrorJSONIsActionable(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("metrics error output is not valid JSON: %v\n%s", err, stdout.String())
 	}
-	if got.OK || got.Code != string(provider.CodeAccessDenied) || got.TraceID != "tr_metrics_error" || len(got.RecommendedActions) == 0 {
+	if got.OK || got.Code != "OBSERVABILITY_UNAVAILABLE" || got.TraceID != "tr_metrics_error" || len(got.RecommendedActions) == 0 {
 		t.Fatalf("unexpected metrics error output: %+v", got)
 	}
 }

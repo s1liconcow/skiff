@@ -131,7 +131,7 @@ func TestLogsMissingLogGroupJSONIsActionable(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("logs error output is not valid JSON: %v\n%s", err, stdout.String())
 	}
-	if got.OK || got.Code != string(provider.CodeNotFound) || got.TraceID != "tr_missing_logs" || len(got.RecommendedActions) == 0 {
+	if got.OK || got.Code != "OBSERVABILITY_UNAVAILABLE" || got.TraceID != "tr_missing_logs" || len(got.RecommendedActions) == 0 {
 		t.Fatalf("unexpected logs error output: %+v", got)
 	}
 }

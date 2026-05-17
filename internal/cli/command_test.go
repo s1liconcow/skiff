@@ -86,7 +86,7 @@ func TestConfigShowJSONValidationError(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("error output is not valid JSON: %v\n%s", err, stdout.String())
 	}
-	if got.OK || got.Code != "CONFIG_INVALID" || got.TraceID != "tr_bad" {
+	if got.OK || got.Code != "VALIDATION_FAILED" || got.TraceID != "tr_bad" {
 		t.Fatalf("unexpected error envelope: %+v", got)
 	}
 	found := false
@@ -202,7 +202,7 @@ func TestStatePathJSONValidationError(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("error output is not valid JSON: %v\n%s", err, stdout.String())
 	}
-	if got.OK || got.Code != "STATE_PATH_INVALID" || got.TraceID != "tr_bad_path" {
+	if got.OK || got.Code != "VALIDATION_FAILED" || got.TraceID != "tr_bad_path" {
 		t.Fatalf("unexpected error envelope: %+v", got)
 	}
 	if len(got.Fields) != 1 || got.Fields[0].Field != "service" || got.Fields[0].Code != "INVALID_NAME" {
@@ -666,7 +666,7 @@ network:
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("validate error output is not valid JSON: %v\n%s", err, stdout.String())
 	}
-	if got.OK || got.Code != "SPEC_INVALID" || got.TraceID != "tr_bad_spec" {
+	if got.OK || got.Code != "VALIDATION_FAILED" || got.TraceID != "tr_bad_spec" {
 		t.Fatalf("unexpected error envelope: %+v", got)
 	}
 	if !hasPathCode(got.Fields, "$.artifact.ref", "MUTABLE_ARTIFACT_REF") {

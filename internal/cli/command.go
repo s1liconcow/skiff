@@ -20,6 +20,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/client"
 	"github.com/s1liconcow/skiff/internal/compiler"
 	"github.com/s1liconcow/skiff/internal/config"
+	skifferrors "github.com/s1liconcow/skiff/internal/errors"
 	"github.com/s1liconcow/skiff/internal/events"
 	"github.com/s1liconcow/skiff/internal/ir"
 	"github.com/s1liconcow/skiff/internal/release"
@@ -227,9 +228,12 @@ type commandErrorOutput struct {
 }
 
 type recommendedAction struct {
-	ID       string `json:"id"`
-	Command  string `json:"command"`
-	Mutating bool   `json:"mutating"`
+	ID            string               `json:"id"`
+	Command       string               `json:"command"`
+	Mutating      bool                 `json:"mutating"`
+	Safety        string               `json:"safety,omitempty"`
+	Reversibility schema.Reversibility `json:"reversibility,omitempty"`
+	Risk          schema.Risk          `json:"risk,omitempty"`
 }
 
 type statePathOutput struct {
@@ -468,7 +472,7 @@ func writeConfigError(binary, format, traceID string, err error, sources map[str
 	if format == "json" {
 		out := commandErrorOutput{
 			OK:      false,
-			Code:    "CONFIG_LOAD_FAILED",
+			Code:    string(skifferrors.ValidationFailed),
 			Summary: err.Error(),
 			TraceID: traceID,
 			Sources: sources,
@@ -482,7 +486,6 @@ func writeConfigError(binary, format, traceID string, err error, sources map[str
 		}
 		var validation config.ValidationError
 		if errors.As(err, &validation) {
-			out.Code = "CONFIG_INVALID"
 			out.Fields = validation.Fields
 		}
 		enc := json.NewEncoder(stdout)
@@ -615,7 +618,7 @@ func writeBootstrapError(binary, format, traceID string, err error, stdout, stde
 		enc := json.NewEncoder(stdout)
 		if encErr := enc.Encode(commandErrorOutput{
 			OK:      false,
-			Code:    "BOOTSTRAP_INVALID",
+			Code:    string(skifferrors.ValidationFailed),
 			Summary: err.Error(),
 			TraceID: traceID,
 			RecommendedActions: []recommendedAction{
@@ -744,7 +747,7 @@ func writePolicyError(binary, format, traceID string, err error, stdout, stderr 
 		enc := json.NewEncoder(stdout)
 		if encErr := enc.Encode(commandErrorOutput{
 			OK:      false,
-			Code:    "POLICY_INVALID",
+			Code:    string(skifferrors.ValidationFailed),
 			Summary: err.Error(),
 			TraceID: traceID,
 			RecommendedActions: []recommendedAction{
@@ -969,7 +972,7 @@ func writeEventsError(binary, format, traceID string, err error, stdout, stderr 
 		enc := json.NewEncoder(stdout)
 		if encErr := enc.Encode(commandErrorOutput{
 			OK:      false,
-			Code:    "EVENTS_INVALID",
+			Code:    string(skifferrors.ValidationFailed),
 			Summary: err.Error(),
 			TraceID: traceID,
 			RecommendedActions: []recommendedAction{
@@ -1090,7 +1093,7 @@ func writeCompileError(binary, code, format, traceID string, err error, fields [
 		enc := json.NewEncoder(stdout)
 		if encErr := enc.Encode(specErrorOutput{
 			OK:      false,
-			Code:    code,
+			Code:    string(skifferrors.FromSpecCode(code)),
 			Summary: err.Error(),
 			TraceID: traceID,
 			Fields:  fields,
@@ -1201,7 +1204,7 @@ func writeSpecError(binary, code, format, traceID string, err error, fields []sp
 		enc := json.NewEncoder(stdout)
 		if encErr := enc.Encode(specErrorOutput{
 			OK:      false,
-			Code:    code,
+			Code:    string(skifferrors.FromSpecCode(code)),
 			Summary: err.Error(),
 			TraceID: traceID,
 			Fields:  fields,
@@ -1859,7 +1862,7 @@ func writeVerifyError(binary, code, format, traceID string, err error, stdout, s
 		enc := json.NewEncoder(stdout)
 		if encErr := enc.Encode(verifyErrorOutput{
 			OK:      false,
-			Code:    code,
+			Code:    string(skifferrors.FromVerifyCode(code)),
 			Summary: err.Error(),
 			TraceID: traceID,
 			RecommendedActions: []recommendedAction{
@@ -1905,7 +1908,7 @@ func writeStateError(binary, format, traceID string, err error, stdout, stderr i
 	if format == "json" {
 		out := stateErrorOutput{
 			OK:      false,
-			Code:    "STATE_PATH_INVALID",
+			Code:    string(skifferrors.ValidationFailed),
 			Summary: err.Error(),
 			TraceID: traceID,
 			RecommendedActions: []recommendedAction{

@@ -1,0 +1,1 @@
+{"ok":false,"code":"VALIDATION_FAILED","summary":"unknown global flag --bogus","trace_id":"tr_golden","recommended_actions":[{"id":"show_help","command":"skiff help","mutating":false}]}

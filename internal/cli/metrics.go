@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/s1liconcow/skiff/internal/config"
+	skifferrors "github.com/s1liconcow/skiff/internal/errors"
 	"github.com/s1liconcow/skiff/internal/provider"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
 )
@@ -121,12 +122,12 @@ func writeMetricsResult(binary, format, traceID string, series []provider.Metric
 }
 
 func writeMetricsError(binary, format, traceID, service string, err error, stdout, stderr io.Writer) int {
-	code := "METRICS_FAILED"
+	code := string(skifferrors.ObservabilityUnavailable)
 	summary := err.Error()
 	exitCode := ExitProviderError
 	var providerErr *provider.Error
 	if errors.As(err, &providerErr) {
-		code = string(providerErr.Code)
+		code = string(skifferrors.FromProviderCode(providerErr.Code, true))
 		if providerErr.Summary != "" {
 			summary = providerErr.Summary
 		}

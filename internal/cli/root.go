@@ -10,6 +10,7 @@ import (
 
 	"github.com/s1liconcow/skiff/internal/client"
 	"github.com/s1liconcow/skiff/internal/config"
+	skifferrors "github.com/s1liconcow/skiff/internal/errors"
 )
 
 type rootOptions struct {
@@ -244,7 +245,7 @@ func writeRootError(binary, format, traceID string, err error, stdout, stderr io
 	if format == "json" {
 		_ = json.NewEncoder(stdout).Encode(commandErrorOutput{
 			OK:      false,
-			Code:    "CLI_INVALID",
+			Code:    string(skifferrors.ValidationFailed),
 			Summary: err.Error(),
 			TraceID: traceID,
 			RecommendedActions: []recommendedAction{
@@ -258,7 +259,7 @@ func writeRootError(binary, format, traceID string, err error, stdout, stderr io
 }
 
 func writeClientError(binary, command, format, traceID string, err error, stdout, stderr io.Writer) int {
-	code := client.ErrorCode(err)
+	code := string(skifferrors.FromClientCode(client.ErrorCode(err)))
 	exitCode := client.ExitCode(err)
 	if format == "json" {
 		_ = json.NewEncoder(stdout).Encode(commandErrorOutput{

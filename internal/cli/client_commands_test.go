@@ -291,7 +291,7 @@ func TestStatusJSONConfigErrorIsAgentSafe(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("error output is not valid JSON: %v\n%s", err, stdout.String())
 	}
-	if got.OK || got.Code != "CONFIG_INVALID" || got.TraceID != "tr_bad_status" {
+	if got.OK || got.Code != "VALIDATION_FAILED" || got.TraceID != "tr_bad_status" {
 		t.Fatalf("unexpected error envelope: %+v", got)
 	}
 }
