@@ -23,12 +23,16 @@ const Name = "fake"
 type Option func(*Provider)
 
 type Provider struct {
-	mu       sync.Mutex
-	store    objstore.ObjectStore
-	clock    func() time.Time
-	services map[string][]provider.ResourceInspection
-	rollouts map[string]provider.Rollout
-	secrets  map[string]string
+	mu            sync.Mutex
+	store         objstore.ObjectStore
+	clock         func() time.Time
+	services      map[string][]provider.ResourceInspection
+	rollouts      map[string]provider.Rollout
+	secrets       map[string]string
+	rolloutStatus string
+	logsErr       error
+	metricsErr    error
+	debugErr      error
 }
 
 func New(opts ...Option) *Provider {
@@ -55,6 +59,30 @@ func WithClock(clock func() time.Time) Option {
 		if clock != nil {
 			p.clock = clock
 		}
+	}
+}
+
+func WithRolloutStatus(status string) Option {
+	return func(p *Provider) {
+		p.rolloutStatus = strings.TrimSpace(status)
+	}
+}
+
+func WithLogsError(err error) Option {
+	return func(p *Provider) {
+		p.logsErr = err
+	}
+}
+
+func WithMetricsError(err error) Option {
+	return func(p *Provider) {
+		p.metricsErr = err
+	}
+}
+
+func WithDebugError(err error) Option {
+	return func(p *Provider) {
+		p.debugErr = err
 	}
 }
 
@@ -218,6 +246,9 @@ func (p *Provider) Logs(ctx context.Context, req provider.LogsRequest) (*provide
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if p.logsErr != nil {
+		return nil, p.logsErr
+	}
 	if strings.TrimSpace(req.Service) == "" || strings.TrimSpace(req.Env) == "" {
 		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "logs", Summary: "service and env are required"}
 	}
@@ -240,6 +271,9 @@ func (p *Provider) Logs(ctx context.Context, req provider.LogsRequest) (*provide
 func (p *Provider) Metrics(ctx context.Context, req provider.MetricsRequest) (*provider.MetricsResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if p.metricsErr != nil {
+		return nil, p.metricsErr
 	}
 	if strings.TrimSpace(req.Service) == "" || strings.TrimSpace(req.Env) == "" {
 		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "metrics", Summary: "service and env are required"}
@@ -269,6 +303,9 @@ func (p *Provider) Metrics(ctx context.Context, req provider.MetricsRequest) (*p
 func (p *Provider) Debug(ctx context.Context, req provider.DebugRequest) (*provider.DebugSession, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if p.debugErr != nil {
+		return nil, p.debugErr
 	}
 	if strings.TrimSpace(req.Service) == "" || strings.TrimSpace(req.Env) == "" {
 		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "debug", Summary: "service and env are required"}
@@ -328,14 +365,14 @@ func (p *Provider) WatchRollout(ctx context.Context, req provider.WatchRolloutRe
 	if !ok {
 		return &provider.RolloutStatus{
 			RolloutID:  req.RolloutID,
-			Status:     "succeeded",
+			Status:     firstNonEmpty(p.rolloutStatus, "succeeded"),
 			ProviderID: firstNonEmpty(req.ProviderID, req.RolloutID),
 			UpdatedAt:  p.now(),
 		}, nil
 	}
 	return &provider.RolloutStatus{
 		RolloutID:  rollout.ID,
-		Status:     "succeeded",
+		Status:     firstNonEmpty(p.rolloutStatus, "succeeded"),
 		ProviderID: firstNonEmpty(req.ProviderID, rollout.ProviderID),
 		UpdatedAt:  p.now(),
 	}, nil

@@ -7,7 +7,7 @@ COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X '$(MODULE)/internal/buildinfo.Version=$(VERSION)' -X '$(MODULE)/internal/buildinfo.Commit=$(COMMIT)' -X '$(MODULE)/internal/buildinfo.BuildDate=$(BUILD_DATE)'
 
-.PHONY: build test e2e-local e2e-apple-container e2e-aws codex-apple-sandbox vet fmt lint generate smoke clean
+.PHONY: build test readiness e2e-local e2e-apple-container e2e-aws codex-apple-sandbox vet fmt lint generate smoke clean
 
 build:
 	mkdir -p bin
@@ -18,6 +18,9 @@ build:
 
 test:
 	$(GO_TEST_ENV) $(GO) test ./...
+
+readiness:
+	$(GO_TEST_ENV) $(GO) test ./tests/readiness ./tests/chaos -count=1 -v
 
 e2e-local:
 	$(GO_TEST_ENV) $(GO) test ./tests/e2e ./tests/conformance/provider ./tests/conformance/plugin -count=1 -v
