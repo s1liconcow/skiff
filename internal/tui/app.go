@@ -6,8 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/s1liconcow/skiff/internal/client"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 )
@@ -30,6 +33,8 @@ type Model struct {
 	height   int
 	now      func() time.Time
 	keys     KeyMap
+	help     help.Model
+	spinner  spinner.Model
 
 	dashboard Dashboard
 	loading   bool
@@ -52,6 +57,7 @@ type KeyMap struct {
 	Rollback key.Binding
 	Approve  key.Binding
 	Saga     key.Binding
+	Help     key.Binding
 	Quit     key.Binding
 }
 
@@ -73,7 +79,20 @@ func DefaultKeyMap() KeyMap {
 		Rollback: key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "rollback")),
 		Approve:  key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "approve")),
 		Saga:     key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "saga")),
+		Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+	}
+}
+
+func (k KeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.NextPane, k.Up, k.Down, k.Refresh, k.Doctor, k.Logs, k.Help, k.Quit}
+}
+
+func (k KeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Up, k.Down, k.NextPane, k.Refresh, k.Help},
+		{k.Doctor, k.Logs, k.Metrics, k.Events, k.Saga},
+		{k.Rollback, k.Approve, k.Quit},
 	}
 }
 
@@ -96,6 +115,7 @@ func New(opts Options) Model {
 	if height <= 0 {
 		height = 34
 	}
+	keys := DefaultKeyMap()
 	return Model{
 		client:   opts.Client,
 		sagas:    sagas,
@@ -107,13 +127,16 @@ func New(opts Options) Model {
 		width:    width,
 		height:   height,
 		now:      now,
-		keys:     DefaultKeyMap(),
+		keys:     keys,
+		help:     newHelpModel(opts.NoColor, width),
+		spinner:  newSpinner(opts.NoColor),
+		loading:  true,
 		focus:    focusServices,
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.load
+	return tea.Batch(m.load, m.spinner.Tick)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -121,7 +144,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.help.Width = msg.Width
 		return m, nil
+	case spinner.TickMsg:
+		if !m.loading {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	case loadedMsg:
 		m.loading = false
 		m.err = msg.err
@@ -138,7 +169,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Refresh):
 			m.loading = true
 			m.action = nil
-			return m, m.load
+			return m, tea.Batch(m.load, m.spinner.Tick)
+		case key.Matches(msg, m.keys.Help):
+			m.help.ShowAll = !m.help.ShowAll
+			return m, nil
 		case key.Matches(msg, m.keys.NextPane):
 			m.nextFocus()
 			m.action = nil
@@ -174,10 +208,12 @@ func (m Model) Load(ctx context.Context) (Model, error) {
 	dashboard, err := m.fetch(ctx)
 	if err != nil {
 		m.err = err
+		m.loading = false
 		return m, err
 	}
 	m.dashboard = dashboard
 	m.err = nil
+	m.loading = false
 	m.clampSelection()
 	return m, nil
 }
@@ -338,4 +374,38 @@ func firstCurrentStep(saga client.SagaSummary) string {
 		return ""
 	}
 	return saga.CurrentSteps[0]
+}
+
+func newSpinner(noColor bool) spinner.Model {
+	style := lipgloss.NewStyle()
+	if !noColor {
+		style = style.Foreground(lipgloss.Color("45")).Bold(true)
+	}
+	return spinner.New(spinner.WithSpinner(spinner.Points), spinner.WithStyle(style))
+}
+
+func newHelpModel(noColor bool, width int) help.Model {
+	h := help.New()
+	h.Width = width
+	h.ShortSeparator = "  "
+	h.FullSeparator = "    "
+	if noColor {
+		plain := lipgloss.NewStyle()
+		h.Styles.ShortKey = plain
+		h.Styles.ShortDesc = plain
+		h.Styles.ShortSeparator = plain
+		h.Styles.FullKey = plain
+		h.Styles.FullDesc = plain
+		h.Styles.FullSeparator = plain
+		h.Styles.Ellipsis = plain
+		return h
+	}
+	h.Styles.ShortKey = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
+	h.Styles.ShortDesc = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	h.Styles.ShortSeparator = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	h.Styles.FullKey = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
+	h.Styles.FullDesc = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	h.Styles.FullSeparator = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	h.Styles.Ellipsis = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	return h
 }
