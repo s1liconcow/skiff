@@ -1,0 +1,170 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, for example v0.1.0"
+        required: true
+        type: string
+      draft:
+        description: "Create the GitHub Release as a draft"
+        required: false
+        default: false
+        type: boolean
+      prerelease:
+        description: "Mark the GitHub Release as a prerelease"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve release metadata
+        id: release
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+
+          case "$tag" in
+            v*) ;;
+            *)
+              echo "::error::Release tag must start with v, got '$tag'"
+              exit 1
+              ;;
+          esac
+
+          if ! git rev-parse --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::Release tag '$tag' does not exist"
+            exit 1
+          fi
+
+          tag_commit="$(git rev-parse "$tag^{commit}")"
+          head_commit="$(git rev-parse HEAD)"
+          if [ "$tag_commit" != "$head_commit" ]; then
+            echo "::error::Checked-out commit does not match tag '$tag'"
+            echo "tag commit:  $tag_commit"
+            echo "HEAD commit: $head_commit"
+            exit 1
+          fi
+
+          {
+            echo "tag=$tag"
+            echo "version=$tag"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l $(find cmd internal tests -name '*.go' -print))"
+
+      - name: Test
+        run: make test
+
+      - name: Vet
+        run: make vet
+
+      - name: Local e2e
+        run: make e2e-local
+
+      - name: Production readiness
+        run: make readiness
+        env:
+          SKIFF_READINESS_REPORT: artifacts/readiness/production-readiness.json
+
+      - name: Build release archives
+        run: scripts/build-release.sh "${{ steps.release.outputs.version }}"
+
+      - name: Verify release archives
+        shell: bash
+        run: |
+          version="${{ steps.release.outputs.version }}"
+          expected=(
+            "dist/skiff_${version}_linux_amd64.tar.gz"
+            "dist/skiff_${version}_linux_arm64.tar.gz"
+            "dist/skiff_${version}_darwin_amd64.tar.gz"
+            "dist/skiff_${version}_darwin_arm64.tar.gz"
+            "dist/checksums.txt"
+          )
+
+          for file in "${expected[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "::error::Missing release artifact: $file"
+              exit 1
+            fi
+          done
+
+          sha256sum -c dist/checksums.txt
+
+      - name: Upload readiness report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-readiness
+          path: artifacts/readiness/production-readiness.json
+          if-no-files-found: ignore
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: skiff-${{ steps.release.outputs.version }}-release-artifacts
+          path: |
+            dist/*.tar.gz
+            dist/checksums.txt
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          release_flags=()
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.draft }}" = "true" ]; then
+              release_flags+=(--draft)
+            fi
+            if [ "${{ inputs.prerelease }}" = "true" ]; then
+              release_flags+=(--prerelease)
+            fi
+          else
+            case "$TAG" in
+              *-*) release_flags+=(--prerelease) ;;
+            esac
+          fi
+
+          gh release create "$TAG" \
+            dist/*.tar.gz \
+            dist/checksums.txt \
+            --verify-tag \
+            --title "$TAG" \
+            --generate-notes \
+            "${release_flags[@]}"
