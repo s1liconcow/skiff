@@ -307,9 +307,9 @@
     .hero-motion-app {
       position: relative;
       z-index: 1;
-      min-height: 508px;
+      min-height: 648px;
       display: grid;
-      grid-template-rows: auto 1fr auto auto;
+      grid-template-rows: 36px 342px 96px 132px;
       gap: 14px;
     }
     .hero-motion-topline {
@@ -323,6 +323,9 @@
       display: inline-flex;
       align-items: center;
       gap: 9px;
+      flex: 0 0 268px;
+      width: 268px;
+      max-width: 100%;
       min-height: 36px;
       padding: 0 12px;
       border-radius: 999px;
@@ -333,11 +336,17 @@
       font-size: .78rem;
       white-space: nowrap;
     }
+    .hero-motion-command span:last-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
     .hero-motion-command span:first-child { color: var(--brand-2); }
     .hero-stage-pill {
       display: inline-flex;
       align-items: center;
       gap: 8px;
+      flex: 0 0 118px;
+      width: 118px;
       min-height: 34px;
       padding: 0 11px;
       border-radius: 999px;
@@ -357,6 +366,7 @@
     }
     .hero-flow-canvas {
       position: relative;
+      height: 342px;
       min-height: 342px;
       border-radius: 24px;
       border: 1px solid rgba(255,255,255,0.11);
@@ -500,7 +510,8 @@
       pointer-events: none;
     }
     .hero-live-note {
-      min-height: 72px;
+      height: 96px;
+      min-height: 96px;
       padding: 13px;
       border-radius: 18px;
       border: 1px solid rgba(255,255,255,0.11);
@@ -521,10 +532,12 @@
     .hero-value-row {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
+      height: 132px;
       gap: 8px;
     }
     .hero-value {
       min-height: 62px;
+      height: 62px;
       padding: 10px;
       border-radius: 14px;
       border: 1px solid rgba(255,255,255,0.10);
@@ -1260,10 +1273,11 @@
       .ledger-grid, .cloud-resource-grid { grid-template-columns: 1fr; }
       .deploy-timeline { grid-template-columns: 1fr; }
       .hero-motion-root { min-height: auto; }
-      .hero-motion-app { min-height: auto; }
+      .hero-motion-app { min-height: auto; height: auto; grid-template-rows: auto; }
       .hero-motion-topline { align-items: stretch; }
-      .hero-motion-command, .hero-stage-pill { width: 100%; justify-content: center; white-space: normal; text-align: center; }
+      .hero-motion-command, .hero-stage-pill { flex-basis: auto; width: 100%; justify-content: center; white-space: normal; text-align: center; }
       .hero-flow-canvas {
+        height: auto;
         min-height: auto;
         display: grid;
         gap: 10px;
@@ -1283,7 +1297,9 @@
       }
       .hero-node.bucket { text-align: left; }
       .hero-bucket-rings { display: none; }
-      .hero-value-row { grid-template-columns: 1fr; }
+      .hero-live-note { height: auto; min-height: 72px; }
+      .hero-value-row { grid-template-columns: 1fr; height: auto; }
+      .hero-value { height: auto; }
       .hero-actions .btn { width: 100%; }
       pre { font-size: .78rem; }
     }
@@ -1312,6 +1328,7 @@
         <a href="#recipes">Recipes</a>
       </nav>
       <div class="nav-cta">
+        <a class="btn small" href="https://github.com/s1liconcow/skiff" target="_blank" rel="noreferrer">Star on GitHub</a>
         <a class="btn small" href="#design">Implementation</a>
         <a class="btn primary small" href="#cta">Get the shape</a>
       </div>
@@ -1325,7 +1342,7 @@
           <div class="eyebrow"><span class="pulse"></span> Clusterless operations for native cloud teams</div>
           <h1><span class="gradient-text">The VM is the pod.</span><br/>The cloud is the control plane.</h1>
           <p class="hero-subtitle">
-            Skiff gives teams Kubernetes-class operational-leverage without Kubernetes-class cost or complexity.  Skiff provides a simple way to define and compile your service definition into cloud-native primitives, managed ops like canary rollouts or database restores, automatic observability via metrics and logs, and a harness for agentic infra remediation.   No need for a managed control planes, overlay networks, hidden controller state machines, kubernetes/cloud impedance mismatch, or thousands of lines of YAML.
+            Skiff gives teams Kubernetes-class operational-leverage without Kubernetes-class cost or complexity.  Skiff allows you to define and compile your service definition into cloud-native primitives, run managed ops like canary rollouts or database restores, debug with built-in observability, and act as a harness for agents for safe investigations and repairs.   No need for managed control planes, overlay networks, hidden controller state machines, Kubernetes/cloud impedance mismatch, or thousands of lines of YAML.
           </p>
           <div class="hero-actions">
             <a class="btn primary" href="#architecture">See how it works</a>
@@ -1794,6 +1811,7 @@
     <div class="wrap footer-line">
       <span>Skiff - the VM is the pod.</span>
       <span>Terraform for shape. Skiff for journeys.</span>
+      <span>I like solving SRE problems - hire me @ <a href="https://challoner.dev/consulting" target="_blank" rel="noreferrer">challoner.dev/consulting</a></span>
     </div>
   </footer>
 
@@ -1823,7 +1841,7 @@
         },
         {
           key: 'canary',
-          command: 'skiff canary payments-api --gate p95,error-rate',
+          command: 'skiff deploy skiff.yaml --canary',
           label: 'metric gate',
           title: 'Promote only when the canary earns it',
           detail: 'Traffic advances through 5%, 25%, 50%, and 100% only while latency, errors, and health stay inside policy.',
@@ -1833,7 +1851,7 @@
         },
         {
           key: 'status',
-          command: 'skiff status payments-api --fresh',
+          command: 'skiff status payments-api',
           label: 'live status',
           title: 'Pull status before guessing',
           detail: 'Operators get rollout state, target health, current traffic split, recent findings, and recommended next commands.',
@@ -1843,7 +1861,7 @@
         },
         {
           key: 'logs',
-          command: 'skiff logs payments-api --since 10m --errors',
+          command: 'skiff logs payments-api',
           label: 'logs linked',
           title: 'Jump from status to the logs that matter',
           detail: 'Skiff scopes logs to the rollout, unhealthy targets, and current trace so diagnosis starts at the failure.',
@@ -1853,7 +1871,7 @@
         },
         {
           key: 'agent',
-          command: 'skiff agent remediate payments-api --auto low-risk',
+          command: 'skiff solve payments-api',
           label: 'agent repair',
           title: 'Let an agent handle safe remediation',
           detail: 'The agent reads structured facts, pauses risky rollout movement, applies approved low-risk fixes, and reports the exact action trail.',
