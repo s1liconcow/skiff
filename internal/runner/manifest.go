@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/s1liconcow/skiff/internal/buildinfo"
 	"github.com/s1liconcow/skiff/internal/config"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/release"
@@ -171,11 +172,12 @@ func Bootstrap(ctx context.Context, req BootstrapRequest) (*BootstrapResult, err
 	}
 
 	fetched, err := release.Fetch(ctx, req.Store, release.FetchOptions{
-		Service:   req.Config.Service,
-		Env:       req.Config.Env,
-		ReleaseID: control.DesiredRelease,
-		Verifier:  req.Verifier,
-		Now:       now(),
+		Service:       req.Config.Service,
+		Env:           req.Config.Env,
+		ReleaseID:     control.DesiredRelease,
+		Verifier:      req.Verifier,
+		Now:           now(),
+		RunnerVersion: buildinfo.Version,
 	})
 	if err != nil {
 		var fetchErr *release.FetchError

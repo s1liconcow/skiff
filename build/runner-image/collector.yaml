@@ -1,0 +1,27 @@
+receivers:
+  filelog:
+    include:
+      - /var/log/skiff/*.log
+    include_file_path: true
+
+processors:
+  batch: {}
+  resource:
+    attributes:
+      - key: skiff.service
+        from_attribute: service
+        action: upsert
+      - key: skiff.env
+        from_attribute: env
+        action: upsert
+
+exporters:
+  logging:
+    verbosity: normal
+
+service:
+  pipelines:
+    logs:
+      receivers: [filelog]
+      processors: [resource, batch]
+      exporters: [logging]

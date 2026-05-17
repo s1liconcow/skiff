@@ -31,6 +31,7 @@ type FetchOptions struct {
 	Verifier              signing.Verifier
 	Now                   time.Time
 	RequireArtifactDigest bool
+	RunnerVersion         string
 }
 
 type FetchedRelease struct {
@@ -102,6 +103,7 @@ func Fetch(ctx context.Context, store objstore.ObjectStore, opts FetchOptions) (
 		Verifier:              opts.Verifier,
 		Now:                   opts.Now,
 		RequireArtifactDigest: opts.RequireArtifactDigest,
+		RunnerVersion:         opts.RunnerVersion,
 	})
 	if !result.OK {
 		return nil, &FetchError{

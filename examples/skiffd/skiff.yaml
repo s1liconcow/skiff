@@ -1,0 +1,46 @@
+apiVersion: skiff.dev/v1alpha1
+kind: Service
+metadata:
+  name: skiffd
+  env: prod
+  labels:
+    app: skiffd
+artifact:
+  type: oci
+  ref: ghcr.io/s1liconcow/skiffd@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+runtime:
+  port: 8585
+  command:
+    - /usr/local/bin/skiffd
+    - serve
+    - --config
+    - /etc/skiff/skiffd.yaml
+  env:
+    SKIFF_MODE: skiffd
+  health:
+    type: http
+    path: /healthz
+    port: 8585
+    interval: 10s
+    timeout: 2s
+  metrics:
+    enabled: true
+    path: /metrics
+machine:
+  size: small
+scale:
+  min: 2
+  max: 4
+network:
+  ingress:
+    type: private-http
+    host: skiffd.internal.example.com
+rollout:
+  strategy: rolling
+  batchSize: 1
+  healthGracePeriod: 60s
+secrets:
+  - name: SKIFFD_STATE_BUCKET
+    ref: secret://skiffd/state-bucket
+  - name: SKIFFD_SIGNING_PUBLIC_KEYS
+    ref: secret://skiffd/release-verifiers

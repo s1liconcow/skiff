@@ -18,6 +18,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/bootstrap"
 	"github.com/s1liconcow/skiff/internal/buildinfo"
 	"github.com/s1liconcow/skiff/internal/client"
+	"github.com/s1liconcow/skiff/internal/compat"
 	"github.com/s1liconcow/skiff/internal/compiler"
 	"github.com/s1liconcow/skiff/internal/config"
 	skifferrors "github.com/s1liconcow/skiff/internal/errors"
@@ -45,12 +46,14 @@ const (
 )
 
 type versionOutput struct {
-	OK        bool   `json:"ok"`
-	Binary    string `json:"binary"`
-	Version   string `json:"version"`
-	Commit    string `json:"commit"`
-	BuildDate string `json:"build_date"`
-	TraceID   string `json:"trace_id,omitempty"`
+	OK            bool             `json:"ok"`
+	Binary        string           `json:"binary"`
+	Version       string           `json:"version"`
+	Commit        string           `json:"commit"`
+	BuildDate     string           `json:"build_date"`
+	TraceID       string           `json:"trace_id,omitempty"`
+	Server        *client.Version  `json:"server,omitempty"`
+	Compatibility []compat.Finding `json:"compatibility,omitempty"`
 }
 
 func Run(binary string, args []string, stdout, stderr io.Writer) int {
@@ -154,20 +157,42 @@ func runVersion(binary string, args []string, root rootOptions, stdout, stderr i
 	_ = noColor
 	_ = yes
 
-	cfg := config.Config{Mode: config.ModeDirect, StateBucket: "memory://version"}
-	apiClient, err := client.NewDirect(cfg, client.DirectOptions{BuildInfo: buildinfo.Current(binary)})
-	if err != nil {
-		return writeClientError(binary, "version", *format, *traceID, err, stdout, stderr)
-	}
-	info, err := apiClient.Version(nilContext(), client.VersionOptions{Binary: binary, TraceID: *traceID})
-	if err != nil {
-		return writeClientError(binary, "version", *format, *traceID, err, stdout, stderr)
+	info := buildinfo.Current(binary)
+	var server *client.Version
+	var compatibility []compat.Finding
+	if root.apiSet || root.Mode == config.ModeAPI {
+		loaded, err := config.Load(config.LoadOptions{
+			ModeDefault: defaultMode(binary),
+			ConfigPath:  root.ConfigPath,
+			Overrides:   root.configOverrides(),
+		})
+		if err != nil {
+			return writeConfigError(binary, *format, *traceID, err, loaded.Redacted().Sources, stdout, stderr)
+		}
+		if err := config.Validate(loaded); err != nil {
+			return writeConfigError(binary, *format, *traceID, err, loaded.Redacted().Sources, stdout, stderr)
+		}
+		apiClient, err := client.New(loaded.Config, client.Options{})
+		if err != nil {
+			return writeClientError(binary, "version", *format, *traceID, err, stdout, stderr)
+		}
+		server, err = apiClient.Version(nilContext(), client.VersionOptions{Binary: "skiffd", TraceID: *traceID})
+		if err != nil {
+			return writeClientError(binary, "version", *format, *traceID, err, stdout, stderr)
+		}
+		compatibility = compat.CheckClientServer(info.Version, server.Version)
 	}
 	switch *format {
 	case "human", "text":
 		fmt.Fprintf(stdout, "%s version %s\n", info.Binary, info.Version)
 		fmt.Fprintf(stdout, "commit: %s\n", info.Commit)
 		fmt.Fprintf(stdout, "build_date: %s\n", info.BuildDate)
+		if server != nil {
+			fmt.Fprintf(stdout, "skiffd: %s\n", server.Version)
+		}
+		for _, finding := range compatibility {
+			fmt.Fprintf(stdout, "warning: %s: %s\n", finding.Code, finding.Summary)
+		}
 		if *traceID != "" {
 			fmt.Fprintf(stdout, "trace_id: %s\n", *traceID)
 		}
@@ -175,12 +200,14 @@ func runVersion(binary string, args []string, root rootOptions, stdout, stderr i
 	case "json":
 		enc := json.NewEncoder(stdout)
 		if err := enc.Encode(versionOutput{
-			OK:        true,
-			Binary:    info.Binary,
-			Version:   info.Version,
-			Commit:    info.Commit,
-			BuildDate: info.BuildDate,
-			TraceID:   *traceID,
+			OK:            true,
+			Binary:        info.Binary,
+			Version:       info.Version,
+			Commit:        info.Commit,
+			BuildDate:     info.BuildDate,
+			TraceID:       *traceID,
+			Server:        server,
+			Compatibility: compatibility,
 		}); err != nil {
 			fmt.Fprintf(stderr, "%s version: %v\n", binary, err)
 			return ExitInternalError

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/s1liconcow/skiff/internal/compat"
 	"github.com/s1liconcow/skiff/internal/security"
 	"github.com/s1liconcow/skiff/internal/security/signing"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
@@ -31,6 +32,7 @@ type VerifyOptions struct {
 	Verifier              signing.Verifier
 	Now                   time.Time
 	RequireArtifactDigest bool
+	RunnerVersion         string
 }
 
 type VerificationResult struct {
@@ -164,10 +166,30 @@ func VerifyManifest(ctx context.Context, manifest schema.ReleaseManifest, opts V
 	}
 
 	verifyExpiry(manifest, now, &result, addCheck)
+	verifyRunnerVersion(manifest, opts.RunnerVersion, &result, addCheck)
 	verifySignature(ctx, manifest, expectedDigest, opts.Verifier, &result, addCheck)
 
 	result.OK = len(result.Findings) == 0
 	return result
+}
+
+func verifyRunnerVersion(manifest schema.ReleaseManifest, runnerVersion string, result *VerificationResult, addCheck func(string, bool, string, string, string)) {
+	if manifest.MinRunnerVersion == "" {
+		result.Checks = append(result.Checks, Check{Name: "runner_version", OK: true, Summary: "release does not declare a minimum runner version"})
+		return
+	}
+	if runnerVersion == "" {
+		result.Checks = append(result.Checks, Check{Name: "runner_version", OK: true, Summary: "runner version was not provided; release minimum was not evaluated"})
+		return
+	}
+	findings := compat.CheckRunnerRelease(runnerVersion, manifest.MinRunnerVersion)
+	if len(findings) == 0 {
+		addCheck("runner_version", true, "runner version satisfies release minimum", "", "")
+		return
+	}
+	code := findings[0].Code
+	summary := findings[0].Summary
+	addCheck("runner_version", false, "", code, summary)
 }
 
 func verifyRuntimeManifest(manifest schema.ReleaseManifest, runtimeManifest schema.RuntimeManifest, result *VerificationResult, addCheck func(string, bool, string, string, string)) {

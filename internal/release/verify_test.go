@@ -146,6 +146,24 @@ func TestVerifyManifestRejectsRuntimeDigestMismatchAndUnsupportedSchema(t *testi
 	}
 }
 
+func TestVerifyManifestRejectsUnsupportedRunnerVersion(t *testing.T) {
+	manifest, runtimeManifest, verifier := signedReleaseFixture(t, "2026-06-16T17:00:00Z")
+	manifest.MinRunnerVersion = "1.2.0"
+	manifest = signManifest(t, release.UnsignedManifest(manifest))
+
+	result := release.VerifyManifest(context.Background(), manifest, release.VerifyOptions{
+		Service:         "payments-api",
+		Env:             "prod",
+		RuntimeManifest: &runtimeManifest,
+		Verifier:        verifier,
+		Now:             time.Date(2026, 5, 16, 18, 0, 0, 0, time.UTC),
+		RunnerVersion:   "1.1.9",
+	})
+	if !hasFinding(result.Findings, "RUNNER_VERSION_TOO_OLD") {
+		t.Fatalf("runner version findings = %+v", result.Findings)
+	}
+}
+
 func signedReleaseFixture(t *testing.T, expiresAt string) (schema.ReleaseManifest, schema.RuntimeManifest, *signing.LocalVerifier) {
 	t.Helper()
 	runtimeManifest := runtimeFixture()

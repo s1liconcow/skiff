@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/s1liconcow/skiff/internal/authz"
+	"github.com/s1liconcow/skiff/internal/buildinfo"
 	"github.com/s1liconcow/skiff/internal/events"
 	"github.com/s1liconcow/skiff/internal/ir"
 	"github.com/s1liconcow/skiff/internal/objstore"
@@ -391,6 +392,7 @@ func (d Deployer) publishRelease(ctx context.Context, graph *ir.Graph, req Reque
 		Artifact:              artifactRef(compiled.Artifact),
 		RuntimeManifestKey:    runtimeKey,
 		RuntimeManifestDigest: runtimeDigest,
+		MinRunnerVersion:      buildinfo.Version,
 		CreatedAt:             canonical.Time(now),
 	}
 	signedManifest, err := release.SignManifest(ctx, releaseManifest, d.Signer, req.Actor, now)

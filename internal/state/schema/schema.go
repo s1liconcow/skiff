@@ -172,6 +172,7 @@ type ReleaseManifest struct {
 	Artifact              ArtifactRef `json:"artifact"`
 	RuntimeManifestKey    string      `json:"runtime_manifest_key"`
 	RuntimeManifestDigest string      `json:"runtime_manifest_digest,omitempty"`
+	MinRunnerVersion     string      `json:"min_runner_version,omitempty"`
 	Digest                string      `json:"digest,omitempty"`
 	CreatedAt             string      `json:"created_at"`
 	ExpiresAt             string      `json:"expires_at,omitempty"`
