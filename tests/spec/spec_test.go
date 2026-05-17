@@ -93,6 +93,77 @@ secrets:
 	assertDiagnostic(t, result.Diagnostics, "$.secrets[0].ref", "INVALID_SECRET_REF")
 }
 
+func TestStackValidationRequiresDatabaseBinding(t *testing.T) {
+	doc, err := spec.Decode([]byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: Stack
+metadata:
+  name: orders
+  env: prod
+stack:
+  services:
+    - name: api
+      artifact:
+        type: oci
+        ref: registry.example.com/orders-api@sha256:abc123
+      runtime:
+        port: 8080
+        health:
+          path: /healthz
+  databases:
+    - name: db
+      engine: postgres
+      version: "16"
+      size: small
+`), spec.DecodeOptions{})
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	result := spec.Validate(*doc)
+	if result.OK {
+		t.Fatal("Validate returned OK, want missing binding diagnostic")
+	}
+	assertDiagnostic(t, result.Diagnostics, "$.stack.bindings", "REQUIRED")
+}
+
+func TestStackValidationRejectsBadBindingTarget(t *testing.T) {
+	doc, err := spec.Decode([]byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: Stack
+metadata:
+  name: orders
+  env: prod
+stack:
+  services:
+    - name: api
+      artifact:
+        type: oci
+        ref: registry.example.com/orders-api@sha256:abc123
+      runtime:
+        port: 8080
+        health:
+          path: /healthz
+  databases:
+    - name: db
+      engine: postgres
+      version: "16"
+      size: small
+  bindings:
+    - from: api
+      to: missing
+      as: database-url
+`), spec.DecodeOptions{})
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	result := spec.Validate(*doc)
+	if result.OK {
+		t.Fatal("Validate returned OK, want binding diagnostics")
+	}
+	assertDiagnostic(t, result.Diagnostics, "$.stack.bindings[0].to", "UNKNOWN_STACK_DATABASE")
+	assertDiagnostic(t, result.Diagnostics, "$.stack.bindings[0].as", "INVALID_ENV_NAME")
+}
+
 func TestMarshalYAMLShowsDefaultedFields(t *testing.T) {
 	doc, err := spec.Decode([]byte(validServiceYAML), spec.DecodeOptions{})
 	if err != nil {

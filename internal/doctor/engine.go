@@ -134,6 +134,9 @@ func (b *resultBuilder) addServiceFacts(service servicestatus.Service) {
 	}
 	addDependencyFact("capacity", service.Capacity)
 	addDependencyFact("target_health", service.TargetHealth)
+	if service.Database.Status != "" {
+		addDependencyFact("database", service.Database)
+	}
 	addDependencyFact("logs", service.Logs)
 	addDependencyFact("metrics", service.Metrics)
 	for _, resource := range service.Resources {
@@ -199,6 +202,28 @@ func (b *resultBuilder) checkDependencies(service servicestatus.Service) {
 			Service:    service.Service,
 			Message:    "load balancer target group wiring may be missing or misconfigured",
 			Confidence: 0.66,
+			Evidence:   finding.Evidence,
+		})
+		b.addAction(inspectStatusAction(b.binary, service.Service))
+		b.addAction(inspectEventsAction(b.binary, service.Service))
+	}
+	if strings.EqualFold(service.Database.Status, "unknown") && serviceHasDatabaseEvidence(service) {
+		finding := Finding{
+			ID:         findingID(service.Service, "DATABASE_AVAILABILITY_UNKNOWN"),
+			Code:       "DATABASE_AVAILABILITY_UNKNOWN",
+			Severity:   SeverityHigh,
+			Service:    service.Service,
+			Summary:    "managed database availability has not been observed for this service",
+			Confidence: 0.8,
+			Evidence:   dependencyEvidence(service.Service, "database", service.Database),
+		}
+		b.addFinding(finding)
+		b.addHypothesis(Hypothesis{
+			ID:         hypothesisID(service.Service, "database_unavailable"),
+			FindingID:  finding.ID,
+			Service:    service.Service,
+			Message:    "the managed database may not be provisioned, may be unavailable, or the service binding is missing",
+			Confidence: 0.68,
 			Evidence:   finding.Evidence,
 		})
 		b.addAction(inspectStatusAction(b.binary, service.Service))
@@ -608,6 +633,24 @@ func providerID(service servicestatus.Service) string {
 		}
 	}
 	return ""
+}
+
+func serviceHasDatabaseEvidence(service servicestatus.Service) bool {
+	for _, resource := range service.Resources {
+		if resource.Kind == "rds-db-instance" || resource.LogicalKind == "rds-db-instance" {
+			return true
+		}
+		if resource.Kind == "secretsmanager-secret" || resource.LogicalKind == "secretsmanager-secret" {
+			return true
+		}
+	}
+	for _, event := range service.RecentEvents {
+		text := strings.ToLower(eventText(event))
+		if containsAny(text, "database", "postgres", "mysql", "rds") {
+			return true
+		}
+	}
+	return false
 }
 
 func inspectStatusAction(binary, service string) RecommendedAction {

@@ -69,12 +69,14 @@ func Validate(doc Document) Result {
 
 	switch doc.Kind {
 	case KindService, KindWorker, KindJob:
-		validateArtifact(&diagnostics, doc)
-		validateRuntime(&diagnostics, doc)
-		validateScale(&diagnostics, doc)
+		validateArtifactAt(&diagnostics, doc.Artifact, doc.Metadata.Env, "$.artifact")
+		validateRuntimeAt(&diagnostics, doc.Kind, doc.Runtime, "$.runtime")
+		validateScaleAt(&diagnostics, doc.Kind, doc.Scale, "$.scale")
 	case KindManagedDatabase:
 		if doc.ManagedDatabase == nil {
 			add("$.database", "REQUIRED", "managed database specs must include database settings")
+		} else {
+			validateManagedDatabase(&diagnostics, *doc.ManagedDatabase, "$.database")
 		}
 	case KindStatefulGroup:
 		if doc.StatefulGroup == nil {
@@ -83,10 +85,12 @@ func Validate(doc Document) Result {
 	case KindStack:
 		if doc.Stack == nil {
 			add("$.stack", "REQUIRED", "stack specs must include stack settings")
+		} else {
+			validateStack(&diagnostics, doc)
 		}
 	}
-	validateNetwork(&diagnostics, doc)
-	validateSecrets(&diagnostics, doc)
+	validateNetworkAt(&diagnostics, doc.Network, "$.network")
+	validateSecretsAt(&diagnostics, doc.Secrets, "$.secrets")
 
 	return Result{
 		OK:          len(diagnostics) == 0,
@@ -111,80 +115,80 @@ func validateName(diagnostics *[]Diagnostic, path, value, message string) {
 	}
 }
 
-func validateArtifact(diagnostics *[]Diagnostic, doc Document) {
-	if doc.Artifact == nil {
-		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.artifact", Code: "REQUIRED", Severity: SeverityError, Message: "workload specs must include an artifact"})
+func validateArtifactAt(diagnostics *[]Diagnostic, artifact *Artifact, env, path string) {
+	if artifact == nil {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path, Code: "REQUIRED", Severity: SeverityError, Message: "workload specs must include an artifact"})
 		return
 	}
-	switch doc.Artifact.Type {
+	switch artifact.Type {
 	case "oci", "tarball", "binary":
 	default:
-		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.artifact.type", Code: "UNSUPPORTED_ARTIFACT_TYPE", Severity: SeverityError, Message: "artifact.type must be oci, tarball, or binary"})
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".type", Code: "UNSUPPORTED_ARTIFACT_TYPE", Severity: SeverityError, Message: "artifact.type must be oci, tarball, or binary"})
 	}
-	if strings.TrimSpace(doc.Artifact.Ref) == "" {
-		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.artifact.ref", Code: "REQUIRED", Severity: SeverityError, Message: "artifact.ref is required"})
+	if strings.TrimSpace(artifact.Ref) == "" {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".ref", Code: "REQUIRED", Severity: SeverityError, Message: "artifact.ref is required"})
 	}
-	if isProductionEnv(doc.Metadata.Env) {
-		switch doc.Artifact.Type {
+	if isProductionEnv(env) {
+		switch artifact.Type {
 		case "oci":
-			if !strings.Contains(doc.Artifact.Ref, "@sha256:") {
-				*diagnostics = append(*diagnostics, Diagnostic{Path: "$.artifact.ref", Code: "MUTABLE_ARTIFACT_REF", Severity: SeverityError, Message: "production OCI artifacts must be digest-pinned with @sha256:"})
+			if !strings.Contains(artifact.Ref, "@sha256:") {
+				*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".ref", Code: "MUTABLE_ARTIFACT_REF", Severity: SeverityError, Message: "production OCI artifacts must be digest-pinned with @sha256:"})
 			}
 		case "tarball", "binary":
-			if !strings.HasPrefix(doc.Artifact.Digest, "sha256:") {
-				*diagnostics = append(*diagnostics, Diagnostic{Path: "$.artifact.digest", Code: "ARTIFACT_DIGEST_REQUIRED", Severity: SeverityError, Message: "production tarball and binary artifacts require a sha256 digest"})
+			if !strings.HasPrefix(artifact.Digest, "sha256:") {
+				*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".digest", Code: "ARTIFACT_DIGEST_REQUIRED", Severity: SeverityError, Message: "production tarball and binary artifacts require a sha256 digest"})
 			}
 		}
 	}
 }
 
-func validateRuntime(diagnostics *[]Diagnostic, doc Document) {
-	if doc.Kind == KindService {
-		if doc.Runtime.Port <= 0 || doc.Runtime.Port > 65535 {
-			*diagnostics = append(*diagnostics, Diagnostic{Path: "$.runtime.port", Code: "INVALID_PORT", Severity: SeverityError, Message: "services must set runtime.port between 1 and 65535"})
+func validateRuntimeAt(diagnostics *[]Diagnostic, kind Kind, runtime Runtime, path string) {
+	if kind == KindService {
+		if runtime.Port <= 0 || runtime.Port > 65535 {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".port", Code: "INVALID_PORT", Severity: SeverityError, Message: "services must set runtime.port between 1 and 65535"})
 		}
-		if doc.Runtime.Health.Path == "" && len(doc.Runtime.Health.Command) == 0 {
-			*diagnostics = append(*diagnostics, Diagnostic{Path: "$.runtime.health", Code: "HEALTH_CHECK_REQUIRED", Severity: SeverityError, Message: "services must define an HTTP or exec health check"})
+		if runtime.Health.Path == "" && len(runtime.Health.Command) == 0 {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".health", Code: "HEALTH_CHECK_REQUIRED", Severity: SeverityError, Message: "services must define an HTTP or exec health check"})
 		}
 	}
-	if doc.Runtime.Health.Path != "" && !strings.HasPrefix(doc.Runtime.Health.Path, "/") {
-		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.runtime.health.path", Code: "INVALID_PATH", Severity: SeverityError, Message: "health check paths must start with /"})
+	if runtime.Health.Path != "" && !strings.HasPrefix(runtime.Health.Path, "/") {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".health.path", Code: "INVALID_PATH", Severity: SeverityError, Message: "health check paths must start with /"})
 	}
-	if doc.Runtime.Health.Port < 0 || doc.Runtime.Health.Port > 65535 {
-		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.runtime.health.port", Code: "INVALID_PORT", Severity: SeverityError, Message: "health check port must be between 1 and 65535"})
+	if runtime.Health.Port < 0 || runtime.Health.Port > 65535 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".health.port", Code: "INVALID_PORT", Severity: SeverityError, Message: "health check port must be between 1 and 65535"})
 	}
 }
 
-func validateScale(diagnostics *[]Diagnostic, doc Document) {
-	if doc.Kind != KindService && doc.Kind != KindWorker {
+func validateScaleAt(diagnostics *[]Diagnostic, kind Kind, scale Scale, path string) {
+	if kind != KindService && kind != KindWorker {
 		return
 	}
-	if doc.Scale.Min < 0 {
-		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.scale.min", Code: "INVALID_SCALE", Severity: SeverityError, Message: "scale.min cannot be negative"})
+	if scale.Min < 0 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".min", Code: "INVALID_SCALE", Severity: SeverityError, Message: "scale.min cannot be negative"})
 	}
-	if doc.Scale.Max < 1 {
-		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.scale.max", Code: "INVALID_SCALE", Severity: SeverityError, Message: "scale.max must be at least 1"})
+	if scale.Max < 1 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".max", Code: "INVALID_SCALE", Severity: SeverityError, Message: "scale.max must be at least 1"})
 	}
-	if doc.Scale.Min > doc.Scale.Max {
-		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.scale", Code: "INVALID_SCALE", Severity: SeverityError, Message: "scale.min cannot exceed scale.max"})
+	if scale.Min > scale.Max {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path, Code: "INVALID_SCALE", Severity: SeverityError, Message: "scale.min cannot exceed scale.max"})
 	}
 }
 
-func validateNetwork(diagnostics *[]Diagnostic, doc Document) {
-	if doc.Network.Ingress == nil {
+func validateNetworkAt(diagnostics *[]Diagnostic, network Network, path string) {
+	if network.Ingress == nil {
 		return
 	}
-	ingress := doc.Network.Ingress
+	ingress := network.Ingress
 	switch ingress.Type {
 	case "", "private", "public-http", "internal-http":
 	default:
-		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.network.ingress.type", Code: "UNSUPPORTED_INGRESS_TYPE", Severity: SeverityError, Message: "ingress type must be private, public-http, or internal-http"})
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".ingress.type", Code: "UNSUPPORTED_INGRESS_TYPE", Severity: SeverityError, Message: "ingress type must be private, public-http, or internal-http"})
 	}
 	if ingress.Type == "public-http" {
 		if strings.TrimSpace(ingress.Host) == "" {
-			*diagnostics = append(*diagnostics, Diagnostic{Path: "$.network.ingress.host", Code: "REQUIRED", Severity: SeverityError, Message: "public ingress requires a host"})
+			*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".ingress.host", Code: "REQUIRED", Severity: SeverityError, Message: "public ingress requires a host"})
 		} else if net.ParseIP(ingress.Host) != nil || !strings.Contains(ingress.Host, ".") {
-			*diagnostics = append(*diagnostics, Diagnostic{Path: "$.network.ingress.host", Code: "INVALID_HOST", Severity: SeverityError, Message: "public ingress host must be a DNS hostname"})
+			*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".ingress.host", Code: "INVALID_HOST", Severity: SeverityError, Message: "public ingress host must be a DNS hostname"})
 		}
 		tlsEnabled := ingress.TLS != nil && ingress.TLS.Enabled
 		certRef := ingress.CertRef
@@ -192,15 +196,15 @@ func validateNetwork(diagnostics *[]Diagnostic, doc Document) {
 			certRef = ingress.TLS.CertRef
 		}
 		if !tlsEnabled || strings.TrimSpace(certRef) == "" {
-			*diagnostics = append(*diagnostics, Diagnostic{Path: "$.network.ingress.tls", Code: "TLS_REQUIRED", Severity: SeverityError, Message: "public ingress requires TLS and a certificate reference"})
+			*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".ingress.tls", Code: "TLS_REQUIRED", Severity: SeverityError, Message: "public ingress requires TLS and a certificate reference"})
 		}
 	}
 }
 
-func validateSecrets(diagnostics *[]Diagnostic, doc Document) {
-	seen := make(map[string]struct{}, len(doc.Secrets))
-	for i, secret := range doc.Secrets {
-		base := fmt.Sprintf("$.secrets[%d]", i)
+func validateSecretsAt(diagnostics *[]Diagnostic, secrets []SecretRef, path string) {
+	seen := make(map[string]struct{}, len(secrets))
+	for i, secret := range secrets {
+		base := fmt.Sprintf("%s[%d]", path, i)
 		validateName(diagnostics, base+".name", secret.Name, "secret name must be a DNS-style Skiff name")
 		if _, ok := seen[secret.Name]; secret.Name != "" && ok {
 			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".name", Code: "DUPLICATE_SECRET", Severity: SeverityError, Message: "secret names must be unique"})
@@ -212,9 +216,102 @@ func validateSecrets(diagnostics *[]Diagnostic, doc Document) {
 	}
 }
 
+func validateManagedDatabase(diagnostics *[]Diagnostic, db ManagedDatabase, path string) {
+	switch strings.ToLower(strings.TrimSpace(db.Engine)) {
+	case "postgres", "postgresql", "mysql", "aurora-postgresql", "aurora-mysql":
+	default:
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".engine", Code: "UNSUPPORTED_DATABASE_ENGINE", Severity: SeverityError, Message: "database engine must be postgres, postgresql, mysql, aurora-postgresql, or aurora-mysql"})
+	}
+	if strings.TrimSpace(db.Version) == "" {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".version", Code: "REQUIRED", Severity: SeverityError, Message: "database version is required"})
+	}
+	switch strings.ToLower(strings.TrimSpace(db.Size)) {
+	case "small", "medium", "large":
+	default:
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".size", Code: "UNSUPPORTED_DATABASE_SIZE", Severity: SeverityError, Message: "database size must be small, medium, or large"})
+	}
+	if db.Storage.SizeGB < 1 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".storage.sizeGB", Code: "INVALID_STORAGE", Severity: SeverityError, Message: "database storage.sizeGB must be at least 1"})
+	}
+	switch db.Storage.Type {
+	case "", "gp3", "io1", "standard":
+	default:
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".storage.type", Code: "UNSUPPORTED_STORAGE_TYPE", Severity: SeverityError, Message: "database storage.type must be gp3, io1, or standard"})
+	}
+	if db.Backups.RetentionDays < 1 || db.Backups.RetentionDays > 35 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".backups.retentionDays", Code: "INVALID_BACKUP_RETENTION", Severity: SeverityError, Message: "database backups.retentionDays must be between 1 and 35"})
+	}
+}
+
+func validateStack(diagnostics *[]Diagnostic, doc Document) {
+	stack := doc.Stack
+	if len(stack.Services) == 0 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.services", Code: "REQUIRED", Severity: SeverityError, Message: "stack specs must include at least one service"})
+	}
+	if len(stack.Databases) == 0 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.databases", Code: "REQUIRED", Severity: SeverityError, Message: "api-database stack specs must include at least one managed database"})
+	}
+	if len(stack.Services) > 1 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.services", Code: "UNSUPPORTED_STACK_SHAPE", Severity: SeverityError, Message: "this Skiff version supports one service per API/database stack"})
+	}
+	if len(stack.Databases) > 1 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.databases", Code: "UNSUPPORTED_STACK_SHAPE", Severity: SeverityError, Message: "this Skiff version supports one managed database per API/database stack"})
+	}
+	serviceNames := map[string]struct{}{}
+	for i, service := range stack.Services {
+		base := fmt.Sprintf("$.stack.services[%d]", i)
+		validateName(diagnostics, base+".name", service.Name, "stack service name must be a DNS-style Skiff name")
+		serviceNames[service.Name] = struct{}{}
+		validateArtifactAt(diagnostics, service.Artifact, doc.Metadata.Env, base+".artifact")
+		validateRuntimeAt(diagnostics, KindService, service.Runtime, base+".runtime")
+		validateScaleAt(diagnostics, KindService, service.Scale, base+".scale")
+		validateNetworkAt(diagnostics, service.Network, base+".network")
+		validateSecretsAt(diagnostics, service.Secrets, base+".secrets")
+	}
+	databaseNames := map[string]struct{}{}
+	for i, database := range stack.Databases {
+		base := fmt.Sprintf("$.stack.databases[%d]", i)
+		validateName(diagnostics, base+".name", database.Name, "stack database name must be a DNS-style Skiff name")
+		databaseNames[database.Name] = struct{}{}
+		validateManagedDatabase(diagnostics, database.ManagedDatabase, base)
+	}
+	for i, binding := range stack.Bindings {
+		base := fmt.Sprintf("$.stack.bindings[%d]", i)
+		if _, ok := serviceNames[binding.From]; !ok {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".from", Code: "UNKNOWN_STACK_SERVICE", Severity: SeverityError, Message: "binding.from must name a service in this stack"})
+		}
+		if _, ok := databaseNames[binding.To]; !ok {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".to", Code: "UNKNOWN_STACK_DATABASE", Severity: SeverityError, Message: "binding.to must name a database in this stack"})
+		}
+		if !validEnvName(binding.As) {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".as", Code: "INVALID_ENV_NAME", Severity: SeverityError, Message: "binding.as must be an environment variable name like DATABASE_URL"})
+		}
+	}
+	if len(stack.Bindings) == 0 && len(stack.Services) > 0 && len(stack.Databases) > 0 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.bindings", Code: "REQUIRED", Severity: SeverityError, Message: "api-database stack specs must bind the service to the database"})
+	}
+}
+
 func validSecretRef(value string) bool {
 	value = strings.TrimSpace(value)
 	return strings.HasPrefix(value, "aws-secretsmanager://") ||
 		strings.HasPrefix(value, "aws-ssm://") ||
 		strings.HasPrefix(value, "secret://")
+}
+
+func validEnvName(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for i, r := range value {
+		if r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' {
+			if i == 0 && r >= '0' && r <= '9' {
+				return false
+			}
+			continue
+		}
+		return false
+	}
+	return true
 }

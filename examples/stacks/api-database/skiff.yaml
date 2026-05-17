@@ -1,0 +1,41 @@
+apiVersion: skiff.dev/v1alpha1
+kind: Stack
+metadata:
+  name: orders
+  env: prod
+stack:
+  services:
+    - name: api
+      artifact:
+        type: oci
+        ref: registry.example.com/orders-api@sha256:REPLACE_WITH_DIGEST
+      runtime:
+        port: 8080
+        env:
+          SKIFF_STACK: orders
+        health:
+          path: /healthz
+      scale:
+        min: 2
+        max: 4
+      network:
+        ingress:
+          type: internal-http
+  databases:
+    - name: db
+      engine: postgres
+      version: "16"
+      size: small
+      storage:
+        sizeGB: 20
+        type: gp3
+        encrypted: true
+      backups:
+        enabled: true
+        retentionDays: 7
+      network:
+        private: true
+  bindings:
+    - from: api
+      to: db
+      as: DATABASE_URL

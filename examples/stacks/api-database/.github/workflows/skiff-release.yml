@@ -1,0 +1,25 @@
+name: skiff-release
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and publish immutable artifact
+        run: echo "publish registry.example.com/orders-api@sha256:${GITHUB_SHA}"
+      - name: Record Skiff release candidate
+        run: |
+          skiff release candidate create orders-api \
+            --env staging \
+            --candidate cand-${GITHUB_RUN_ID} \
+            --artifact registry.example.com/orders-api@sha256:${GITHUB_SHA} \
+            --git-repo ${GITHUB_REPOSITORY} \
+            --git-sha ${GITHUB_SHA} \
+            --ci-provider github-actions \
+            --ci-run-id ${GITHUB_RUN_ID} \
+            --check tests=passed \
+            --format json

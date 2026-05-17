@@ -18,6 +18,9 @@ type Resources struct {
 	MetricConfigs      []MetricConfig     `json:"metric_configs,omitempty"`
 	TargetGroups       []TargetGroup      `json:"target_groups,omitempty"`
 	Listeners          []Listener         `json:"listeners,omitempty"`
+	ManagedDatabases   []ManagedDatabase  `json:"managed_databases,omitempty"`
+	DatabaseSecrets    []DatabaseSecret   `json:"database_secrets,omitempty"`
+	DatabaseBindings   []DatabaseBinding  `json:"database_bindings,omitempty"`
 	InstanceTemplates  []InstanceTemplate `json:"instance_templates,omitempty"`
 	AutoscalingGroups  []AutoscalingGroup `json:"autoscaling_groups,omitempty"`
 	RuntimeManifests   []RuntimeManifest  `json:"runtime_manifests,omitempty"`
@@ -87,6 +90,54 @@ type Listener struct {
 	Host           string       `json:"host,omitempty"`
 	TLS            TLS          `json:"tls,omitempty"`
 	TargetGroupRef string       `json:"target_group_ref"`
+}
+
+type ManagedDatabase struct {
+	Meta                ResourceMeta    `json:"meta"`
+	Engine              string          `json:"engine"`
+	Version             string          `json:"version"`
+	Size                string          `json:"size"`
+	Port                int             `json:"port"`
+	Region              string          `json:"region,omitempty"`
+	Storage             DatabaseStorage `json:"storage"`
+	Backups             DatabaseBackups `json:"backups"`
+	Network             DatabaseNetwork `json:"network"`
+	SecurityGroupRefs   []string        `json:"security_group_refs,omitempty"`
+	ConnectionSecretRef string          `json:"connection_secret_ref"`
+}
+
+type DatabaseStorage struct {
+	SizeGB    int    `json:"size_gb"`
+	Type      string `json:"type"`
+	Encrypted bool   `json:"encrypted"`
+}
+
+type DatabaseBackups struct {
+	Enabled       bool   `json:"enabled"`
+	RetentionDays int    `json:"retention_days"`
+	Window        string `json:"window,omitempty"`
+}
+
+type DatabaseNetwork struct {
+	Private           bool     `json:"private"`
+	SubnetGroupRef    string   `json:"subnet_group_ref,omitempty"`
+	SecurityGroupRefs []string `json:"security_group_refs,omitempty"`
+}
+
+type DatabaseSecret struct {
+	Meta        ResourceMeta `json:"meta"`
+	DatabaseRef string       `json:"database_ref"`
+	Name        string       `json:"name"`
+	Ref         string       `json:"ref"`
+	EnvName     string       `json:"env_name,omitempty"`
+}
+
+type DatabaseBinding struct {
+	Meta        ResourceMeta `json:"meta"`
+	FromService string       `json:"from_service"`
+	DatabaseRef string       `json:"database_ref"`
+	EnvName     string       `json:"env_name"`
+	SecretRef   string       `json:"secret_ref"`
 }
 
 type InstanceTemplate struct {

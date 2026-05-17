@@ -50,6 +50,7 @@ type Service struct {
 	Rollout        *Rollout          `json:"rollout,omitempty"`
 	Capacity       DependencyStatus  `json:"capacity"`
 	TargetHealth   DependencyStatus  `json:"target_health"`
+	Database       DependencyStatus  `json:"database,omitempty"`
 	Logs           DependencyStatus  `json:"logs"`
 	Metrics        DependencyStatus  `json:"metrics"`
 	RecentEvents   []schema.Event    `json:"recent_events,omitempty"`
@@ -123,6 +124,7 @@ func FromSnapshot(snapshot stateindex.Snapshot, opts Options) Result {
 		service.Resources = resourcesForService(snapshot.Resources, service)
 		service.Capacity = dependencyForKind(service.Resources, "autoscaling-group", "capacity", "Auto Scaling Group resource is known; live capacity has not been refreshed")
 		service.TargetHealth = dependencyForKind(service.Resources, "target-group", "target_health", "Target group resource is known; live target health has not been refreshed")
+		service.Database = databaseDependency(service.Resources)
 		service.Logs = dependencyForKind(service.Resources, "log-group", "logs", "CloudWatch log group resource is known")
 		service.Metrics = dependencyForKind(service.Resources, "metric-config", "metrics", "Metric config resource is known")
 		service.RecentEvents = eventsForService(snapshot.RecentEvents, service.Service, RecentEventsPerService)
@@ -249,6 +251,32 @@ func dependencyForKind(resources []ResourceSummary, kind, source, configuredSumm
 	return DependencyStatus{Status: "unknown", Source: source, Summary: "resource has not been observed in object state"}
 }
 
+func databaseDependency(resources []ResourceSummary) DependencyStatus {
+	for _, resource := range resources {
+		if resource.Kind == "rds-db-instance" || resource.LogicalKind == "rds-db-instance" {
+			return DependencyStatus{
+				Status:     "configured",
+				Source:     "database",
+				ProviderID: resource.ProviderID,
+				FreshAt:    resource.ObservedAt,
+				Summary:    "RDS managed database resource is known; live availability has not been refreshed",
+			}
+		}
+	}
+	for _, resource := range resources {
+		if resource.Kind == "secretsmanager-secret" || resource.LogicalKind == "secretsmanager-secret" {
+			return DependencyStatus{
+				Status:     "unknown",
+				Source:     "database",
+				ProviderID: resource.ProviderID,
+				FreshAt:    resource.ObservedAt,
+				Summary:    "database connection secret is known but database resource has not been observed in object state",
+			}
+		}
+	}
+	return DependencyStatus{}
+}
+
 func eventsForService(events []schema.Event, service string, limit int) []schema.Event {
 	out := make([]schema.Event, 0, limit)
 	for i := len(events) - 1; i >= 0 && len(out) < limit; i-- {
@@ -267,6 +295,9 @@ func serviceFindings(service Service) []Finding {
 	if service.Metrics.Status == "unknown" {
 		findings = append(findings, Finding{Code: "METRICS_STATUS_UNKNOWN", Summary: "metrics have not been observed for service"})
 	}
+	if hasDatabaseBinding(service) && service.Database.Status == "unknown" {
+		findings = append(findings, Finding{Code: "DATABASE_STATUS_UNKNOWN", Summary: "managed database has not been observed for service"})
+	}
 	return findings
 }
 
@@ -279,11 +310,33 @@ func deriveHealth(service Service) string {
 		return "updating"
 	case service.DesiredRelease == "":
 		return "unknown"
-	case service.Logs.Status == "unknown" || service.Metrics.Status == "unknown":
+	case service.Logs.Status == "unknown" || service.Metrics.Status == "unknown" || (hasDatabaseBinding(service) && service.Database.Status == "unknown"):
 		return "degraded"
 	default:
 		return "nominal"
 	}
+}
+
+func hasDatabaseBinding(service Service) bool {
+	if service.Database.Status != "" && service.Database.Status != "unknown" {
+		return true
+	}
+	for _, resource := range service.Resources {
+		if resource.Kind == "rds-db-instance" || resource.LogicalKind == "rds-db-instance" {
+			return true
+		}
+		if resource.Kind == "secretsmanager-secret" || resource.LogicalKind == "secretsmanager-secret" {
+			return true
+		}
+	}
+	for _, event := range service.RecentEvents {
+		for _, fact := range event.Facts {
+			if fact.Type == "database" || fact.Type == "database_connectivity" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func firstNonEmpty(values ...string) string {

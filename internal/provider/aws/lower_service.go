@@ -39,6 +39,8 @@ type ServiceResources struct {
 	MetricConfigs     []MetricConfigAWS  `json:"metric_configs,omitempty"`
 	TargetGroups      []TargetGroupAWS   `json:"target_groups,omitempty"`
 	ListenerRules     []ListenerRule     `json:"listener_rules,omitempty"`
+	Databases         []DatabaseAWS      `json:"databases,omitempty"`
+	Secrets           []SecretAWS        `json:"secrets,omitempty"`
 	LaunchTemplates   []LaunchTemplate   `json:"launch_templates,omitempty"`
 	AutoScalingGroups []AutoScalingGroup `json:"auto_scaling_groups,omitempty"`
 }
@@ -83,12 +85,13 @@ type SecurityGroupAWS struct {
 }
 
 type SecurityGroupRule struct {
-	Protocol               string `json:"protocol"`
-	FromPort               int    `json:"from_port,omitempty"`
-	ToPort                 int    `json:"to_port,omitempty"`
-	CIDR                   string `json:"cidr,omitempty"`
-	SourceSecurityGroupRef string `json:"source_security_group_ref,omitempty"`
-	Description            string `json:"description,omitempty"`
+	Protocol                    string `json:"protocol"`
+	FromPort                    int    `json:"from_port,omitempty"`
+	ToPort                      int    `json:"to_port,omitempty"`
+	CIDR                        string `json:"cidr,omitempty"`
+	SourceSecurityGroupRef      string `json:"source_security_group_ref,omitempty"`
+	DestinationSecurityGroupRef string `json:"destination_security_group_ref,omitempty"`
+	Description                 string `json:"description,omitempty"`
 }
 
 type LogGroup struct {
@@ -130,6 +133,38 @@ type ListenerRule struct {
 	TargetGroupRef string            `json:"target_group_ref"`
 	Tags           map[string]string `json:"tags,omitempty"`
 	Source         []ir.SourceRef    `json:"source,omitempty"`
+}
+
+type DatabaseAWS struct {
+	LogicalID           string            `json:"logical_id"`
+	Name                string            `json:"name"`
+	Engine              string            `json:"engine"`
+	EngineVersion       string            `json:"engine_version"`
+	InstanceClass       string            `json:"instance_class"`
+	AllocatedStorageGB  int               `json:"allocated_storage_gb"`
+	StorageType         string            `json:"storage_type"`
+	StorageEncrypted    bool              `json:"storage_encrypted"`
+	BackupRetentionDays int               `json:"backup_retention_days"`
+	BackupWindow        string            `json:"backup_window,omitempty"`
+	Port                int               `json:"port"`
+	Region              string            `json:"region,omitempty"`
+	DBSubnetGroupRef    string            `json:"db_subnet_group_ref,omitempty"`
+	SecurityGroupRefs   []string          `json:"security_group_refs,omitempty"`
+	ConnectionSecretRef string            `json:"connection_secret_ref"`
+	DeletionProtection  bool              `json:"deletion_protection"`
+	SkipFinalSnapshot   bool              `json:"skip_final_snapshot"`
+	ApplyImmediately    bool              `json:"apply_immediately"`
+	Tags                map[string]string `json:"tags,omitempty"`
+	Source              []ir.SourceRef    `json:"source,omitempty"`
+}
+
+type SecretAWS struct {
+	LogicalID   string            `json:"logical_id"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Ref         string            `json:"ref"`
+	Tags        map[string]string `json:"tags,omitempty"`
+	Source      []ir.SourceRef    `json:"source,omitempty"`
 }
 
 type LaunchTemplate struct {
@@ -184,6 +219,10 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 		Env:      graph.Env,
 		Region:   opts.Region,
 	}
+	managedSecretResources, err := managedSecretPolicyResources(graph, opts)
+	if err != nil {
+		return nil, err
+	}
 	roleNames := make(map[string]string)
 	for _, role := range graph.Resources.IAMRoles {
 		name, err := NameForResource(graph.Service, graph.Env, role.Meta)
@@ -195,7 +234,7 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 			LogicalID:        role.Meta.LogicalID,
 			Name:             name,
 			AssumeRolePolicy: ec2AssumeRolePolicy(),
-			InlinePolicy:     workloadPolicy(opts.StateBucket, graph.Service, controlKey, role.SecretRefs),
+			InlinePolicy:     workloadPolicy(opts.StateBucket, graph.Service, controlKey, role.SecretRefs, managedSecretResources),
 			Tags:             TagsMap(role.Meta, nil),
 			Source:           append([]ir.SourceRef(nil), role.Meta.Source...),
 		})
@@ -215,7 +254,7 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 		out.SecurityGroups = append(out.SecurityGroups, SecurityGroupAWS{
 			LogicalID:   sg.Meta.LogicalID,
 			Name:        name,
-			Description: "Skiff service security group for " + graph.Service,
+			Description: securityGroupDescription(graph.Service, sg.Meta.Tags),
 			Ingress:     ingress,
 			Egress:      egress,
 			Tags:        TagsMap(sg.Meta, nil),
@@ -284,6 +323,48 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 			Source:         append([]ir.SourceRef(nil), listener.Meta.Source...),
 		})
 	}
+	for _, db := range graph.Resources.ManagedDatabases {
+		name, err := NameForResource(graph.Service, graph.Env, db.Meta)
+		if err != nil {
+			return nil, err
+		}
+		out.Databases = append(out.Databases, DatabaseAWS{
+			LogicalID:           db.Meta.LogicalID,
+			Name:                name,
+			Engine:              awsDatabaseEngine(db.Engine),
+			EngineVersion:       db.Version,
+			InstanceClass:       databaseInstanceClass(db.Size),
+			AllocatedStorageGB:  db.Storage.SizeGB,
+			StorageType:         db.Storage.Type,
+			StorageEncrypted:    db.Storage.Encrypted,
+			BackupRetentionDays: db.Backups.RetentionDays,
+			BackupWindow:        db.Backups.Window,
+			Port:                db.Port,
+			Region:              firstNonEmpty(db.Region, opts.Region),
+			DBSubnetGroupRef:    db.Network.SubnetGroupRef,
+			SecurityGroupRefs:   append([]string(nil), db.SecurityGroupRefs...),
+			ConnectionSecretRef: db.ConnectionSecretRef,
+			DeletionProtection:  true,
+			SkipFinalSnapshot:   false,
+			ApplyImmediately:    false,
+			Tags:                TagsMap(db.Meta, nil),
+			Source:              append([]ir.SourceRef(nil), db.Meta.Source...),
+		})
+	}
+	for _, secret := range graph.Resources.DatabaseSecrets {
+		name, err := NameForResource(graph.Service, graph.Env, secret.Meta)
+		if err != nil {
+			return nil, err
+		}
+		out.Secrets = append(out.Secrets, SecretAWS{
+			LogicalID:   secret.Meta.LogicalID,
+			Name:        name,
+			Description: "connection reference for managed database " + secret.DatabaseRef,
+			Ref:         secret.Ref,
+			Tags:        TagsMap(secret.Meta, nil),
+			Source:      append([]ir.SourceRef(nil), secret.Meta.Source...),
+		})
+	}
 	for _, tmpl := range graph.Resources.InstanceTemplates {
 		name, err := NameForResource(graph.Service, graph.Env, tmpl.Meta)
 		if err != nil {
@@ -332,7 +413,7 @@ func (r ServiceResources) PlannedResources() []plannedAWSResource {
 		out = append(out, plannedAWSResource{Kind: ResourceKindIAMInstanceProfile, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: "EC2 instance profile attached to workload VMs"})
 	}
 	for _, item := range r.SecurityGroups {
-		out = append(out, plannedAWSResource{Kind: ResourceKindSecurityGroup, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: "Security group for workload VM ingress and egress"})
+		out = append(out, plannedAWSResource{Kind: ResourceKindSecurityGroup, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: securityGroupSummary(item)})
 	}
 	for _, item := range r.LogGroups {
 		out = append(out, plannedAWSResource{Kind: ResourceKindLogGroup, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: "CloudWatch log group for workload logs"})
@@ -345,6 +426,12 @@ func (r ServiceResources) PlannedResources() []plannedAWSResource {
 	}
 	for _, item := range r.ListenerRules {
 		out = append(out, plannedAWSResource{Kind: ResourceKindListenerRule, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: "Load balancer listener rule for service ingress"})
+	}
+	for _, item := range r.Databases {
+		out = append(out, plannedAWSResource{Kind: ResourceKindRDSInstance, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: "RDS managed database with private network access, encrypted storage, and backups"})
+	}
+	for _, item := range r.Secrets {
+		out = append(out, plannedAWSResource{Kind: ResourceKindSecret, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: "Secrets Manager secret reference for managed database credentials"})
 	}
 	for _, item := range r.LaunchTemplates {
 		out = append(out, plannedAWSResource{Kind: ResourceKindLaunchTemplate, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: "EC2 launch template with skiff-runner user-data"})
@@ -376,12 +463,17 @@ func lowerSecurityRules(rules []ir.SecurityRule, loadBalancerSecurityGroupRef st
 		if lowered.Protocol == "all" {
 			lowered.Protocol = "-1"
 		}
-		if rule.Source == "load-balancer" {
+		if strings.HasPrefix(rule.Source, "security-group:") {
+			lowered.SourceSecurityGroupRef = rule.Source
+		} else if rule.Source == "load-balancer" {
 			lowered.SourceSecurityGroupRef = loadBalancerSecurityGroupRef
 		} else {
 			lowered.CIDR = rule.Source
 		}
-		if rule.Destination != "" {
+		if strings.HasPrefix(rule.Destination, "security-group:") {
+			lowered.DestinationSecurityGroupRef = rule.Destination
+			lowered.CIDR = ""
+		} else if rule.Destination != "" {
 			lowered.CIDR = rule.Destination
 		}
 		switch rule.Direction {
@@ -392,6 +484,20 @@ func lowerSecurityRules(rules []ir.SecurityRule, loadBalancerSecurityGroupRef st
 		}
 	}
 	return ingress, egress
+}
+
+func securityGroupDescription(service string, tags map[string]string) string {
+	if database := strings.TrimSpace(tags[ir.TagDatabase]); database != "" {
+		return "Skiff managed database security group for " + database
+	}
+	return "Skiff service security group for " + service
+}
+
+func securityGroupSummary(group SecurityGroupAWS) string {
+	if database := strings.TrimSpace(group.Tags[ir.TagDatabase]); database != "" {
+		return "Security group allowing bound service traffic to managed database " + database
+	}
+	return "Security group for workload VM ingress and egress"
 }
 
 func ec2AssumeRolePolicy() PolicyDocument {
@@ -406,7 +512,7 @@ func ec2AssumeRolePolicy() PolicyDocument {
 	}
 }
 
-func workloadPolicy(stateBucket, service, controlKey string, secrets []ir.SecretRef) PolicyDocument {
+func workloadPolicy(stateBucket, service, controlKey string, secrets []ir.SecretRef, managedSecretResources []string) PolicyDocument {
 	statements := []PolicyStatement{}
 	if bucket := bucketNameFromURI(stateBucket); bucket != "" {
 		statements = append(statements, PolicyStatement{
@@ -417,6 +523,7 @@ func workloadPolicy(stateBucket, service, controlKey string, secrets []ir.Secret
 		})
 	}
 	secretResources, parameterResources := secretResourceRefs(secrets)
+	secretResources = appendUniqueStrings(secretResources, managedSecretResources...)
 	if len(secretResources) > 0 {
 		statements = append(statements, PolicyStatement{
 			Sid:      "ReadReferencedSecretsManagerSecrets",
@@ -434,6 +541,26 @@ func workloadPolicy(stateBucket, service, controlKey string, secrets []ir.Secret
 		})
 	}
 	return PolicyDocument{Version: "2012-10-17", Statement: statements}
+}
+
+func managedSecretPolicyResources(graph *ir.Graph, opts LowerOptions) ([]string, error) {
+	if graph == nil {
+		return nil, nil
+	}
+	var out []string
+	for _, secret := range graph.Resources.DatabaseSecrets {
+		name, err := NameForResource(graph.Service, graph.Env, secret.Meta)
+		if err != nil {
+			return nil, err
+		}
+		region := strings.TrimSpace(opts.Region)
+		if region == "" {
+			region = "*"
+		}
+		out = append(out, fmt.Sprintf("arn:aws:secretsmanager:%s:*:secret:%s*", region, name))
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func secretResourceRefs(secrets []ir.SecretRef) ([]string, []string) {
@@ -464,6 +591,33 @@ func secretResourceRefs(secrets []ir.SecretRef) ([]string, []string) {
 	sort.Strings(secretResources)
 	sort.Strings(parameterResources)
 	return secretResources, parameterResources
+}
+
+func appendUniqueStrings(values []string, extra ...string) []string {
+	seen := make(map[string]struct{}, len(values)+len(extra))
+	out := make([]string, 0, len(values)+len(extra))
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	for _, value := range extra {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func awsSecretResourceRef(ref string) (string, string) {
@@ -556,6 +710,34 @@ func healthCheckType(targetGroups []string) string {
 	return "ELB"
 }
 
+func awsDatabaseEngine(engine string) string {
+	switch strings.ToLower(strings.TrimSpace(engine)) {
+	case "postgres":
+		return "postgres"
+	case "postgresql":
+		return "postgres"
+	case "aurora-postgresql":
+		return "aurora-postgresql"
+	case "aurora-mysql":
+		return "aurora-mysql"
+	default:
+		return strings.ToLower(strings.TrimSpace(engine))
+	}
+}
+
+func databaseInstanceClass(size string) string {
+	switch strings.ToLower(strings.TrimSpace(size)) {
+	case "", "small":
+		return "db.t4g.micro"
+	case "medium":
+		return "db.t4g.small"
+	case "large":
+		return "db.t4g.medium"
+	default:
+		return size
+	}
+}
+
 func bucketNameFromURI(value string) string {
 	parsed, err := url.Parse(strings.TrimSpace(value))
 	if err != nil || parsed.Scheme != "s3" {
@@ -579,6 +761,12 @@ func sortServiceResources(resources *ServiceResources) {
 	sort.Slice(resources.TargetGroups, func(i, j int) bool { return resources.TargetGroups[i].LogicalID < resources.TargetGroups[j].LogicalID })
 	sort.Slice(resources.ListenerRules, func(i, j int) bool {
 		return resources.ListenerRules[i].LogicalID < resources.ListenerRules[j].LogicalID
+	})
+	sort.Slice(resources.Databases, func(i, j int) bool {
+		return resources.Databases[i].LogicalID < resources.Databases[j].LogicalID
+	})
+	sort.Slice(resources.Secrets, func(i, j int) bool {
+		return resources.Secrets[i].LogicalID < resources.Secrets[j].LogicalID
 	})
 	sort.Slice(resources.LaunchTemplates, func(i, j int) bool {
 		return resources.LaunchTemplates[i].LogicalID < resources.LaunchTemplates[j].LogicalID

@@ -222,6 +222,11 @@ func renderServiceDetail(m Model, p palette, width int) string {
 		p.highlight.Render("Cloud primitives"),
 		dependencyLine(p, "capacity/asg", service.Capacity),
 		dependencyLine(p, "target group", service.TargetHealth),
+	)
+	if service.Database.Status != "" {
+		lines = append(lines, dependencyLine(p, "database", service.Database))
+	}
+	lines = append(lines,
 		dependencyLine(p, "logs", service.Logs),
 		dependencyLine(p, "metrics", service.Metrics),
 	)

@@ -80,6 +80,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runEvents(binary, root.Args, root, stdout, stderr)
 	case "explain":
 		return runExplain(binary, root.Args, root, stdout, stderr)
+	case "init":
+		return runInit(binary, root.Args, root, stdout, stderr)
 	case "logs":
 		return runLogs(binary, root.Args, root, stdout, stderr)
 	case "metrics":
@@ -190,6 +192,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  doctor     Diagnose service health and recommend actions")
 	fmt.Fprintln(w, "  events     List local service, operation, or saga events")
 	fmt.Fprintln(w, "  explain    Explain provider cloud primitives for a spec")
+	fmt.Fprintln(w, "  init       Generate starter Skiff specs and recipes")
 	fmt.Fprintln(w, "  logs       Query service logs through the cloud provider")
 	fmt.Fprintln(w, "  metrics    Query service metrics through the cloud provider")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")

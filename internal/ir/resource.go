@@ -8,14 +8,18 @@ const (
 	ResourceKindMetricConfig     = "MetricConfig"
 	ResourceKindTargetGroup      = "TargetGroup"
 	ResourceKindListener         = "Listener"
+	ResourceKindManagedDatabase  = "ManagedDatabase"
+	ResourceKindDatabaseSecret   = "DatabaseSecret"
+	ResourceKindDatabaseBinding  = "DatabaseBinding"
 	ResourceKindInstanceTemplate = "InstanceTemplate"
 	ResourceKindAutoscalingGroup = "AutoscalingGroup"
 	ResourceKindRuntimeManifest  = "RuntimeManifest"
 
-	TagService = "skiff.dev/service"
-	TagEnv     = "skiff.dev/env"
-	TagManaged = "skiff.dev/managed"
-	TagGraph   = "skiff.dev/graph"
+	TagService  = "skiff.dev/service"
+	TagEnv      = "skiff.dev/env"
+	TagManaged  = "skiff.dev/managed"
+	TagGraph    = "skiff.dev/graph"
+	TagDatabase = "skiff.dev/database"
 )
 
 func RequiredTags(service, env string) map[string]string {

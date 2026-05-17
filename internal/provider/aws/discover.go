@@ -12,6 +12,8 @@ const (
 	ResourceKindTargetGroup      = "target-group"
 	ResourceKindIAMRole          = "iam-role"
 	ResourceKindLogGroup         = "log-group"
+	ResourceKindRDSInstance      = "rds-db-instance"
+	ResourceKindSecret           = "secretsmanager-secret"
 )
 
 type Clients struct {

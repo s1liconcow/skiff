@@ -244,6 +244,9 @@ func printStatusHuman(w io.Writer, status client.Status) {
 			if service.OperationID != "" {
 				fmt.Fprintf(w, " operation=%s:%s", service.OperationID, service.OperationState)
 			}
+			if service.Database.Status != "" {
+				fmt.Fprintf(w, " database=%s", service.Database.Status)
+			}
 			if service.Logs.Status != "" {
 				fmt.Fprintf(w, " logs=%s", service.Logs.Status)
 			}
@@ -284,7 +287,7 @@ func runCompletion(binary string, args []string, stdout, stderr io.Writer) int {
 		return ExitUserError
 	}
 	shell := args[0]
-	commands := []string{"bootstrap", "compile", "config", "completion", "deploy", "doctor", "events", "explain", "logs", "metrics", "object", "ops", "plan", "policy", "promote", "release", "rollback", "rollout", "saga", "solve", "state", "status", "tui", "validate", "version"}
+	commands := []string{"bootstrap", "compile", "config", "completion", "deploy", "doctor", "events", "explain", "init", "logs", "metrics", "object", "ops", "plan", "policy", "promote", "release", "rollback", "rollout", "saga", "solve", "state", "status", "tui", "validate", "version"}
 	sort.Strings(commands)
 	switch shell {
 	case "bash":

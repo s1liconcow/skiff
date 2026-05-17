@@ -4,58 +4,74 @@ func ApplyDefaults(doc *Document) {
 	if doc == nil {
 		return
 	}
-	if !usesWorkloadDefaults(doc.Kind) {
-		return
+	switch doc.Kind {
+	case KindManagedDatabase:
+		applyManagedDatabaseDefaults(doc.ManagedDatabase)
+	case KindStack:
+		if doc.Stack != nil {
+			for i := range doc.Stack.Services {
+				applyWorkloadDefaults(&doc.Stack.Services[i].Runtime, &doc.Stack.Services[i].Machine, &doc.Stack.Services[i].Rollout, &doc.Stack.Services[i].Scale, KindService)
+			}
+			for i := range doc.Stack.Databases {
+				applyManagedDatabaseDefaults(&doc.Stack.Databases[i].ManagedDatabase)
+			}
+		}
 	}
-	if doc.Runtime.ShutdownGrace == "" {
-		doc.Runtime.ShutdownGrace = "30s"
+	if usesWorkloadDefaults(doc.Kind) {
+		applyWorkloadDefaults(&doc.Runtime, &doc.Machine, &doc.Rollout, &doc.Scale, doc.Kind)
 	}
-	if doc.Runtime.Health.Interval == "" {
-		doc.Runtime.Health.Interval = "10s"
+}
+
+func applyWorkloadDefaults(runtime *Runtime, machine *Machine, rollout *Rollout, scale *Scale, kind Kind) {
+	if runtime.ShutdownGrace == "" {
+		runtime.ShutdownGrace = "30s"
 	}
-	if doc.Runtime.Health.Timeout == "" {
-		doc.Runtime.Health.Timeout = "2s"
+	if runtime.Health.Interval == "" {
+		runtime.Health.Interval = "10s"
 	}
-	if doc.Runtime.Health.Type == "" {
+	if runtime.Health.Timeout == "" {
+		runtime.Health.Timeout = "2s"
+	}
+	if runtime.Health.Type == "" {
 		switch {
-		case doc.Runtime.Health.Path != "":
-			doc.Runtime.Health.Type = "http"
-		case len(doc.Runtime.Health.Command) > 0:
-			doc.Runtime.Health.Type = "exec"
+		case runtime.Health.Path != "":
+			runtime.Health.Type = "http"
+		case len(runtime.Health.Command) > 0:
+			runtime.Health.Type = "exec"
 		}
 	}
-	if doc.Runtime.Health.Port == 0 {
-		doc.Runtime.Health.Port = doc.Runtime.Port
+	if runtime.Health.Port == 0 {
+		runtime.Health.Port = runtime.Port
 	}
-	if doc.Runtime.Logs.Format == "" {
-		doc.Runtime.Logs.Format = "text"
+	if runtime.Logs.Format == "" {
+		runtime.Logs.Format = "text"
 	}
-	doc.Runtime.Logs.Enabled = true
-	doc.Runtime.Metrics.Enabled = true
-	if doc.Runtime.Metrics.Path == "" {
-		doc.Runtime.Metrics.Path = "/metrics"
+	runtime.Logs.Enabled = true
+	runtime.Metrics.Enabled = true
+	if runtime.Metrics.Path == "" {
+		runtime.Metrics.Path = "/metrics"
 	}
-	if doc.Machine.Size == "" {
-		doc.Machine.Size = "small"
+	if machine.Size == "" {
+		machine.Size = "small"
 	}
-	if doc.Machine.Arch == "" {
-		doc.Machine.Arch = "x86_64"
+	if machine.Arch == "" {
+		machine.Arch = "x86_64"
 	}
-	if doc.Rollout.Strategy == "" {
-		doc.Rollout.Strategy = "rolling"
+	if rollout.Strategy == "" {
+		rollout.Strategy = "rolling"
 	}
-	if doc.Rollout.BatchSize == 0 {
-		doc.Rollout.BatchSize = 1
+	if rollout.BatchSize == 0 {
+		rollout.BatchSize = 1
 	}
-	if doc.Rollout.HealthGracePeriod == "" {
-		doc.Rollout.HealthGracePeriod = "60s"
+	if rollout.HealthGracePeriod == "" {
+		rollout.HealthGracePeriod = "60s"
 	}
-	if doc.Kind == "" || doc.Kind == KindService || doc.Kind == KindWorker {
-		if doc.Scale.Min == 0 {
-			doc.Scale.Min = 1
+	if kind == "" || kind == KindService || kind == KindWorker {
+		if scale.Min == 0 {
+			scale.Min = 1
 		}
-		if doc.Scale.Max == 0 {
-			doc.Scale.Max = doc.Scale.Min
+		if scale.Max == 0 {
+			scale.Max = scale.Min
 		}
 	}
 }
@@ -66,5 +82,28 @@ func usesWorkloadDefaults(kind Kind) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func applyManagedDatabaseDefaults(db *ManagedDatabase) {
+	if db == nil {
+		return
+	}
+	if db.Size == "" {
+		db.Size = "small"
+	}
+	if db.Storage.SizeGB == 0 {
+		db.Storage.SizeGB = 20
+	}
+	if db.Storage.Type == "" {
+		db.Storage.Type = "gp3"
+	}
+	db.Storage.Encrypted = true
+	db.Backups.Enabled = true
+	if db.Backups.RetentionDays == 0 {
+		db.Backups.RetentionDays = 7
+	}
+	if db.Network.SubnetGroupRef == "" {
+		db.Network.Private = true
 	}
 }

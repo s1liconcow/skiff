@@ -98,6 +98,16 @@ func desiredServiceResources(resources *ServiceResources) ([]DesiredServiceResou
 			return nil, err
 		}
 	}
+	for _, item := range resources.Databases {
+		if err := appendDesired(ResourceKindRDSInstance, item.LogicalID, item.Name, item.Tags, "RDS managed database with private network access, encrypted storage, backups, and deletion protection", item); err != nil {
+			return nil, err
+		}
+	}
+	for _, item := range resources.Secrets {
+		if err := appendDesired(ResourceKindSecret, item.LogicalID, item.Name, item.Tags, "Secrets Manager secret reference for managed database credentials", item); err != nil {
+			return nil, err
+		}
+	}
 	for _, item := range resources.LaunchTemplates {
 		if err := appendDesired(ResourceKindLaunchTemplate, item.LogicalID, item.Name, item.Tags, "EC2 launch template with skiff-runner user-data", item); err != nil {
 			return nil, err

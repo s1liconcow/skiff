@@ -26,6 +26,8 @@ var resourceNameLimits = map[string]int{
 	ResourceKindTargetGroup:        32,
 	ResourceKindIAMRole:            64,
 	ResourceKindLogGroup:           512,
+	ResourceKindRDSInstance:        63,
+	ResourceKindSecret:             512,
 	ir.ResourceKindSecurityGroup:   255,
 	ir.ResourceKindListener:        128,
 	ir.ResourceKindMetricConfig:    255,
@@ -42,12 +44,16 @@ var resourceKindSuffixes = map[string]string{
 	ir.ResourceKindLogConfig:        "logs",
 	ir.ResourceKindMetricConfig:     "metrics",
 	ir.ResourceKindListener:         "listener",
+	ir.ResourceKindManagedDatabase:  "db",
+	ir.ResourceKindDatabaseSecret:   "secret",
 	ir.ResourceKindRuntimeManifest:  "runtime",
 	ResourceKindAutoScalingGroup:    "asg",
 	ResourceKindLaunchTemplate:      "lt",
 	ResourceKindTargetGroup:         "tg",
 	ResourceKindIAMRole:             "role",
 	ResourceKindLogGroup:            "logs",
+	ResourceKindRDSInstance:         "db",
+	ResourceKindSecret:              "secret",
 }
 
 func NameForResource(service, env string, meta ir.ResourceMeta) (string, error) {
@@ -161,6 +167,10 @@ func normalizeKind(kind string) string {
 		return ResourceKindIAMRole
 	case ir.ResourceKindLogConfig, ResourceKindLogGroup:
 		return ResourceKindLogGroup
+	case ir.ResourceKindManagedDatabase, ResourceKindRDSInstance:
+		return ResourceKindRDSInstance
+	case ir.ResourceKindDatabaseSecret, ResourceKindSecret:
+		return ResourceKindSecret
 	default:
 		return kind
 	}

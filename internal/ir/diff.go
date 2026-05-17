@@ -55,6 +55,9 @@ func NormalizeGraph(graph Graph) Graph {
 	out.Resources.MetricConfigs = append([]MetricConfig(nil), graph.Resources.MetricConfigs...)
 	out.Resources.TargetGroups = append([]TargetGroup(nil), graph.Resources.TargetGroups...)
 	out.Resources.Listeners = append([]Listener(nil), graph.Resources.Listeners...)
+	out.Resources.ManagedDatabases = append([]ManagedDatabase(nil), graph.Resources.ManagedDatabases...)
+	out.Resources.DatabaseSecrets = append([]DatabaseSecret(nil), graph.Resources.DatabaseSecrets...)
+	out.Resources.DatabaseBindings = append([]DatabaseBinding(nil), graph.Resources.DatabaseBindings...)
 	out.Resources.InstanceTemplates = append([]InstanceTemplate(nil), graph.Resources.InstanceTemplates...)
 	out.Resources.AutoscalingGroups = append([]AutoscalingGroup(nil), graph.Resources.AutoscalingGroups...)
 	out.Resources.RuntimeManifests = append([]RuntimeManifest(nil), graph.Resources.RuntimeManifests...)
@@ -78,6 +81,15 @@ func NormalizeGraph(graph Graph) Graph {
 	})
 	sort.Slice(out.Resources.Listeners, func(i, j int) bool {
 		return out.Resources.Listeners[i].Meta.LogicalID < out.Resources.Listeners[j].Meta.LogicalID
+	})
+	sort.Slice(out.Resources.ManagedDatabases, func(i, j int) bool {
+		return out.Resources.ManagedDatabases[i].Meta.LogicalID < out.Resources.ManagedDatabases[j].Meta.LogicalID
+	})
+	sort.Slice(out.Resources.DatabaseSecrets, func(i, j int) bool {
+		return out.Resources.DatabaseSecrets[i].Meta.LogicalID < out.Resources.DatabaseSecrets[j].Meta.LogicalID
+	})
+	sort.Slice(out.Resources.DatabaseBindings, func(i, j int) bool {
+		return out.Resources.DatabaseBindings[i].Meta.LogicalID < out.Resources.DatabaseBindings[j].Meta.LogicalID
 	})
 	sort.Slice(out.Resources.InstanceTemplates, func(i, j int) bool {
 		return out.Resources.InstanceTemplates[i].Meta.LogicalID < out.Resources.InstanceTemplates[j].Meta.LogicalID

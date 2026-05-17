@@ -37,6 +37,7 @@ func TestFromSnapshotComposesServiceHealthAndDependencies(t *testing.T) {
 		Resources: []stateindex.ResourceSummary{
 			{Provider: "aws", Kind: "autoscaling-group", ID: "asg-123", Service: "payments-api", Env: "prod", ObservedAt: "2026-05-16T23:19:00Z"},
 			{Provider: "aws", Kind: "target-group", ID: "tg-123", Service: "payments-api", Env: "prod"},
+			{Provider: "aws", Kind: "rds-db-instance", ID: "db-123", Service: "payments-api", Env: "prod"},
 			{Provider: "aws", Kind: "log-group", ID: "/skiff/prod/payments-api", Service: "payments-api", Env: "prod"},
 			{Provider: "aws", Kind: "metric-config", ID: "Skiff/prod/payments-api", Service: "payments-api", Env: "prod"},
 		},
@@ -63,7 +64,7 @@ func TestFromSnapshotComposesServiceHealthAndDependencies(t *testing.T) {
 	if service.Health != "updating" || service.Rollout == nil || service.Rollout.ProviderID != "ir-123" {
 		t.Fatalf("unexpected rollout health: %+v", service)
 	}
-	if service.Capacity.Status != "configured" || service.Logs.Status != "configured" || service.Metrics.Status != "configured" {
+	if service.Capacity.Status != "configured" || service.Database.Status != "configured" || service.Database.ProviderID != "db-123" || service.Logs.Status != "configured" || service.Metrics.Status != "configured" {
 		t.Fatalf("dependencies not configured: %+v", service)
 	}
 	if len(service.RecentEvents) != 1 || service.RecentEvents[0].ID != "01JSTART" {

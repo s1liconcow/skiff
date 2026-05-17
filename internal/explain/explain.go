@@ -55,7 +55,7 @@ func AWS(resources *aws.ServiceResources) Result {
 			LogicalID:      item.LogicalID,
 			Name:           item.Name,
 			CloudPrimitive: "EC2 security group",
-			Why:            "allows only load balancer ingress to the workload port and explicit workload egress",
+			Why:            securityGroupWhy(item),
 			Source:         item.Source,
 		})
 	}
@@ -99,6 +99,26 @@ func AWS(resources *aws.ServiceResources) Result {
 			Source:         item.Source,
 		})
 	}
+	for _, item := range resources.Databases {
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           aws.ResourceKindRDSInstance,
+			LogicalID:      item.LogicalID,
+			Name:           item.Name,
+			CloudPrimitive: "RDS managed database",
+			Why:            "provides the private relational database for the bound API service with encrypted storage, backups, and deletion protection",
+			Source:         item.Source,
+		})
+	}
+	for _, item := range resources.Secrets {
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           aws.ResourceKindSecret,
+			LogicalID:      item.LogicalID,
+			Name:           item.Name,
+			CloudPrimitive: "Secrets Manager secret",
+			Why:            "stores the database connection reference without putting plaintext credentials in Skiff object state",
+			Source:         item.Source,
+		})
+	}
 	for _, item := range resources.LaunchTemplates {
 		out.Resources = append(out.Resources, ResourceExplanation{
 			Kind:           aws.ResourceKindLaunchTemplate,
@@ -120,4 +140,11 @@ func AWS(resources *aws.ServiceResources) Result {
 		})
 	}
 	return out
+}
+
+func securityGroupWhy(item aws.SecurityGroupAWS) string {
+	if item.Tags[ir.TagDatabase] != "" {
+		return "allows the bound service security group to reach the managed database port while keeping the database private"
+	}
+	return "allows only load balancer ingress to the workload port and explicit workload egress"
 }

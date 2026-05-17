@@ -140,9 +140,31 @@ type SecretRef struct {
 }
 
 type ManagedDatabase struct {
-	Engine  string `json:"engine,omitempty"`
-	Version string `json:"version,omitempty"`
-	Size    string `json:"size,omitempty"`
+	Engine  string          `json:"engine,omitempty"`
+	Version string          `json:"version,omitempty"`
+	Size    string          `json:"size,omitempty"`
+	Storage DatabaseStorage `json:"storage,omitempty"`
+	Backups DatabaseBackups `json:"backups,omitempty"`
+	Region  string          `json:"region,omitempty"`
+	Network DatabaseNetwork `json:"network,omitempty"`
+}
+
+type DatabaseStorage struct {
+	SizeGB    int    `json:"sizeGB,omitempty"`
+	Type      string `json:"type,omitempty"`
+	Encrypted bool   `json:"encrypted,omitempty"`
+}
+
+type DatabaseBackups struct {
+	Enabled       bool   `json:"enabled,omitempty"`
+	RetentionDays int    `json:"retentionDays,omitempty"`
+	Window        string `json:"window,omitempty"`
+}
+
+type DatabaseNetwork struct {
+	Private           bool     `json:"private,omitempty"`
+	SubnetGroupRef    string   `json:"subnetGroupRef,omitempty"`
+	SecurityGroupRefs []string `json:"securityGroupRefs,omitempty"`
 }
 
 type StatefulGroup struct {
@@ -156,10 +178,31 @@ type Volume struct {
 }
 
 type Stack struct {
-	Services []StackComponent `json:"services,omitempty"`
+	Services  []StackService  `json:"services,omitempty"`
+	Databases []StackDatabase `json:"databases,omitempty"`
+	Bindings  []StackBinding  `json:"bindings,omitempty"`
 }
 
-type StackComponent struct {
+type StackService struct {
+	Name     string      `json:"name"`
+	Ref      string      `json:"ref,omitempty"`
+	Artifact *Artifact   `json:"artifact,omitempty"`
+	Runtime  Runtime     `json:"runtime,omitempty"`
+	Machine  Machine     `json:"machine,omitempty"`
+	Scale    Scale       `json:"scale,omitempty"`
+	Network  Network     `json:"network,omitempty"`
+	Rollout  Rollout     `json:"rollout,omitempty"`
+	Secrets  []SecretRef `json:"secrets,omitempty"`
+}
+
+type StackDatabase struct {
 	Name string `json:"name"`
 	Ref  string `json:"ref,omitempty"`
+	ManagedDatabase
+}
+
+type StackBinding struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	As   string `json:"as"`
 }
