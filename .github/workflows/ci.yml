@@ -19,6 +19,8 @@ jobs:
         run: go test ./tests/conformance/...
       - name: Local e2e
         run: make e2e-local
+      - name: Production readiness
+        run: make readiness
       - name: Test
         run: go test ./...
       - name: Vet
