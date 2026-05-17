@@ -1,0 +1,36 @@
+package builtin
+
+import (
+	"github.com/s1liconcow/skiff/internal/objstore"
+	"github.com/s1liconcow/skiff/internal/provider"
+	"github.com/s1liconcow/skiff/internal/saga/steps"
+	"github.com/s1liconcow/skiff/internal/saga/steps/approval"
+	"github.com/s1liconcow/skiff/internal/saga/steps/check"
+)
+
+type Options struct {
+	Store    objstore.ObjectStore
+	Provider provider.Provider
+	Metrics  check.MetricsClient
+	Binary   string
+}
+
+func New(opts Options) map[string]steps.Step {
+	metrics := opts.Metrics
+	if metrics == nil {
+		metrics = opts.Provider
+	}
+	items := []steps.Step{
+		check.Preflight{Store: opts.Store, Provider: opts.Provider},
+		check.ServiceHealthy{Provider: opts.Provider},
+		check.TargetHealth{Provider: opts.Provider},
+		check.MetricsGate{Client: metrics},
+		approval.Manual{Binary: opts.Binary},
+		approval.ChangeWindow{Binary: opts.Binary},
+	}
+	out := make(map[string]steps.Step, len(items))
+	for _, item := range items {
+		out[item.Kind()] = item
+	}
+	return out
+}
