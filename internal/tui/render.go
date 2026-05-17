@@ -17,6 +17,7 @@ type palette struct {
 	header     lipgloss.Style
 	brand      lipgloss.Style
 	title      lipgloss.Style
+	subtitle   lipgloss.Style
 	meta       lipgloss.Style
 	stat       lipgloss.Style
 	statLabel  lipgloss.Style
@@ -34,9 +35,14 @@ type palette struct {
 	commandBox lipgloss.Style
 	disabled   lipgloss.Style
 	highlight  lipgloss.Style
+	section    lipgloss.Style
 	tableHead  lipgloss.Style
 	key        lipgloss.Style
 	footer     lipgloss.Style
+	okPill     lipgloss.Style
+	warnPill   lipgloss.Style
+	badPill    lipgloss.Style
+	softBox    lipgloss.Style
 }
 
 func render(m Model) string {
@@ -89,8 +95,8 @@ func renderHeader(m Model, p palette, width int) string {
 	if m.loading {
 		status = strings.TrimSpace(m.spinner.View()) + " refreshing"
 	}
-	left := p.brand.Render("Skiff") + " " + p.title.Render("Operations")
-	top := joinSpaced(left, p.pill.Render(status), max(1, width-4))
+	left := p.brand.Render("Skiff") + " " + p.title.Render("Operations Deck")
+	top := joinSpaced(left, statusPill(p, status), max(1, width-4))
 
 	meta := []string{
 		"env " + firstNonEmpty(m.dashboard.Status.Env, "unknown"),
@@ -108,8 +114,9 @@ func renderHeader(m Model, p palette, width int) string {
 		meta = append(meta, "read-only")
 	}
 
-	metaLine := fit(strings.Join(meta, "  /  "), max(1, width-4))
-	return p.header.Width(width).Render(top + "\n" + p.meta.Render(metaLine))
+	tagline := p.subtitle.Render(fit("object storage truth / typed sagas / direct recovery", max(1, width-4)))
+	metaLine := renderMetaChips(p, meta, max(1, width-4))
+	return p.header.Width(width).Render(lipgloss.JoinVertical(lipgloss.Left, top, tagline, metaLine))
 }
 
 func renderStats(m Model, p palette, width int) string {
@@ -198,6 +205,7 @@ func renderSagas(m Model, p palette, width int) string {
 func renderServiceDetail(m Model, p palette, width int) string {
 	service := m.selectedService()
 	lines := []string{panelTitle(p, "Selected Service", 0)}
+	inner := innerWidth(width)
 	if service.Service == "" {
 		lines = append(lines, p.meta.Render("Select a service to inspect rollout, provider resources, logs, metrics, and recovery actions."))
 		return p.panel.Width(width).Render(strings.Join(lines, "\n"))
@@ -205,7 +213,7 @@ func renderServiceDetail(m Model, p palette, width int) string {
 
 	lines = append(lines,
 		p.title.Render(service.Service)+"  "+healthStyle(p, service.Health).Render(firstNonEmpty(service.Health, "unknown")),
-		"desired "+p.command.Render(firstNonEmpty(service.DesiredRelease, "<none>"))+"  stable "+p.command.Render(firstNonEmpty(service.StableRelease, "<none>")),
+		renderReleaseRail(p, service, inner),
 	)
 	if service.OperationID != "" {
 		lines = append(lines, "operation "+p.command.Render(service.OperationID)+"  "+p.meta.Render(firstNonEmpty(service.OperationKind, "operation")+" / "+firstNonEmpty(service.OperationState, "running")))
@@ -219,7 +227,7 @@ func renderServiceDetail(m Model, p palette, width int) string {
 
 	lines = append(lines,
 		"",
-		p.highlight.Render("Cloud primitives"),
+		sectionTitle(p, "Cloud primitives"),
 		dependencyLine(p, "capacity/asg", service.Capacity),
 		dependencyLine(p, "target group", service.TargetHealth),
 	)
@@ -236,7 +244,7 @@ func renderServiceDetail(m Model, p palette, width int) string {
 		}
 	}
 	if len(service.Findings) > 0 {
-		lines = append(lines, "", p.warn.Render("Findings"))
+		lines = append(lines, "", sectionTitle(p, "Findings"))
 		for _, finding := range service.Findings {
 			lines = append(lines, "  "+fit(finding.Code, 26)+"  "+finding.Summary)
 		}
@@ -263,10 +271,7 @@ func renderEvents(m Model, p palette, width int) string {
 			style = p.selected
 			prefix = "> "
 		}
-		subject := event.Subject.Kind + ":" + event.Subject.Name
-		available := max(1, inner-lipgloss.Width(prefix))
-		line := prefix + column(trimTime(event.Time), 8) + " " + column(event.Type, 22) + " " + fit(subject, max(12, available-33))
-		lines = append(lines, style.Width(inner).Render(line))
+		lines = append(lines, style.Width(inner).Render(renderEventRow(p, prefix, event, inner)))
 	}
 	return panelForFocus(m, p, focusEvents).Width(width).Render(strings.Join(lines, "\n"))
 }
@@ -308,7 +313,8 @@ func renderCommandPalette(m Model, p palette, width int) string {
 	} else {
 		lines = append(lines, style.Render(action.Label+"  "+state))
 	}
-	lines = append(lines, p.commandBox.Width(innerWidth(width)).Render(wrapWords(action.Command, max(12, innerWidth(width)-4))))
+	command := p.command.Render(wrapWords(action.Command, max(12, innerWidth(width)-4)))
+	lines = append(lines, p.commandBox.Width(innerWidth(width)).Render(command))
 	return p.panel.Width(width).Render(strings.Join(lines, "\n"))
 }
 
@@ -332,6 +338,7 @@ func styles(noColor bool) palette {
 			header:     panel,
 			brand:      base,
 			title:      base,
+			subtitle:   base,
 			meta:       base,
 			stat:       panel,
 			statLabel:  base,
@@ -349,36 +356,48 @@ func styles(noColor bool) palette {
 			commandBox: base.Border(lipgloss.NormalBorder()).Padding(0, 1),
 			disabled:   base,
 			highlight:  base,
+			section:    base,
 			tableHead:  base,
 			key:        base,
 			footer:     base,
+			okPill:     base,
+			warnPill:   base,
+			badPill:    base,
+			softBox:    base,
 		}
 	}
+	base := lipgloss.NewStyle()
 	return palette{
-		shell:      lipgloss.NewStyle(),
-		header:     lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("45")).Padding(0, 1),
-		brand:      lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("16")).Background(lipgloss.Color("45")).Padding(0, 1),
-		title:      lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")),
-		meta:       lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
-		stat:       lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("238")).Padding(0, 1),
-		statLabel:  lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
-		statValue:  lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Bold(true),
-		panel:      lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240")).Padding(0, 1),
-		focus:      lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(lipgloss.Color("220")).Padding(0, 1),
-		row:        lipgloss.NewStyle().Foreground(lipgloss.Color("252")),
-		selected:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")).Background(lipgloss.Color("30")),
-		good:       lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true),
-		warn:       lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true),
-		bad:        lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
-		pill:       lipgloss.NewStyle().Foreground(lipgloss.Color("16")).Background(lipgloss.Color("220")).Bold(true).Padding(0, 1),
-		mutating:   lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true),
-		command:    lipgloss.NewStyle().Foreground(lipgloss.Color("81")),
-		commandBox: lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("45")).Foreground(lipgloss.Color("81")).Padding(0, 1),
-		disabled:   lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Strikethrough(true),
-		highlight:  lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true),
-		tableHead:  lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
-		key:        lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true),
-		footer:     lipgloss.NewStyle().Foreground(lipgloss.Color("245")).PaddingTop(1),
+		shell:      base,
+		header:     base.Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("43")).Padding(0, 1),
+		brand:      base.Bold(true).Foreground(lipgloss.Color("16")).Background(lipgloss.Color("43")).Padding(0, 1),
+		title:      base.Bold(true).Foreground(lipgloss.Color("231")),
+		subtitle:   base.Foreground(lipgloss.Color("152")),
+		meta:       base.Foreground(lipgloss.Color("245")),
+		stat:       base.Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("238")).Padding(0, 1),
+		statLabel:  base.Foreground(lipgloss.Color("246")),
+		statValue:  base.Foreground(lipgloss.Color("231")).Bold(true),
+		panel:      base.Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240")).Padding(0, 1),
+		focus:      base.Border(lipgloss.ThickBorder()).BorderForeground(lipgloss.Color("220")).Padding(0, 1),
+		row:        base.Foreground(lipgloss.Color("252")),
+		selected:   base.Bold(true).Foreground(lipgloss.Color("16")).Background(lipgloss.Color("222")),
+		good:       base.Foreground(lipgloss.Color("42")).Bold(true),
+		warn:       base.Foreground(lipgloss.Color("214")).Bold(true),
+		bad:        base.Foreground(lipgloss.Color("203")).Bold(true),
+		pill:       base.Foreground(lipgloss.Color("16")).Background(lipgloss.Color("220")).Bold(true).Padding(0, 1),
+		mutating:   base.Foreground(lipgloss.Color("214")).Bold(true),
+		command:    base.Foreground(lipgloss.Color("81")),
+		commandBox: base.Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("43")).Foreground(lipgloss.Color("81")).Padding(0, 1),
+		disabled:   base.Foreground(lipgloss.Color("240")).Strikethrough(true),
+		highlight:  base.Foreground(lipgloss.Color("220")).Bold(true),
+		section:    base.Foreground(lipgloss.Color("171")).Bold(true),
+		tableHead:  base.Foreground(lipgloss.Color("244")),
+		key:        base.Foreground(lipgloss.Color("16")).Background(lipgloss.Color("220")).Bold(true).Padding(0, 1),
+		footer:     base.Foreground(lipgloss.Color("245")).PaddingTop(1),
+		okPill:     base.Foreground(lipgloss.Color("16")).Background(lipgloss.Color("42")).Bold(true).Padding(0, 1),
+		warnPill:   base.Foreground(lipgloss.Color("16")).Background(lipgloss.Color("220")).Bold(true).Padding(0, 1),
+		badPill:    base.Foreground(lipgloss.Color("231")).Background(lipgloss.Color("160")).Bold(true).Padding(0, 1),
+		softBox:    base.Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("238")).Padding(0, 1),
 	}
 }
 
@@ -400,6 +419,26 @@ func healthStyle(p palette, health string) lipgloss.Style {
 	}
 }
 
+func healthToken(p palette, health string) string {
+	value := firstNonEmpty(health, "unknown")
+	switch health {
+	case "healthy", "serving", "ok":
+		return p.okPill.Render(value)
+	case "failed", "critical", "unhealthy":
+		return p.badPill.Render(value)
+	default:
+		return p.warnPill.Render(value)
+	}
+}
+
+func statusPill(p palette, status string) string {
+	status = firstNonEmpty(status, "ready")
+	if strings.Contains(status, "refreshing") {
+		return p.warnPill.Render(status)
+	}
+	return p.okPill.Render(status)
+}
+
 func sagaStatusStyle(p palette, status schema.SagaStatus) lipgloss.Style {
 	switch status {
 	case schema.SagaSucceeded:
@@ -409,6 +448,61 @@ func sagaStatusStyle(p palette, status schema.SagaStatus) lipgloss.Style {
 	default:
 		return p.warn
 	}
+}
+
+func renderMetaChips(p palette, values []string, width int) string {
+	if len(values) == 0 {
+		return ""
+	}
+	var lines []string
+	current := ""
+	for _, value := range values {
+		chip := p.softBox.Render(strings.TrimSpace(value))
+		if current == "" {
+			current = chip
+			continue
+		}
+		next := current + " " + chip
+		if width > 0 && lipgloss.Width(next) > width {
+			lines = append(lines, current)
+			current = chip
+			continue
+		}
+		current = next
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderReleaseRail(p palette, service client.ServiceStatus, width int) string {
+	stable := firstNonEmpty(service.StableRelease, "<none>")
+	desired := firstNonEmpty(service.DesiredRelease, "<none>")
+	state := firstNonEmpty(service.OperationState, service.Health, "observing")
+	plain := "stable " + stable + "  ->  desired " + desired + "  /  " + state
+	body := p.meta.Render("stable ") + p.command.Render(stable) +
+		p.meta.Render("  ->  desired ") + p.command.Render(desired) +
+		p.meta.Render("  /  ") + healthStyle(p, state).Render(state)
+	if width > 0 && lipgloss.Width(body) > width {
+		return fit(plain, width)
+	}
+	return body
+}
+
+func renderEventRow(p palette, prefix string, event schema.Event, width int) string {
+	available := max(1, width-lipgloss.Width(prefix))
+	subject := firstNonEmpty(event.Subject.Kind+":"+event.Subject.Name, event.Subject.Name, event.Subject.Kind, "event")
+	if available < 72 {
+		return prefix + column(trimTime(event.Time), 8) + " " + column(event.Type, 22) + " " + fit(subject, max(12, available-33))
+	}
+	summaryW := max(10, available-66)
+	subjectW := max(12, available-summaryW-35)
+	return prefix +
+		column(trimTime(event.Time), 8) + " " +
+		p.command.Render(column(event.Type, 22)) + " " +
+		column(subject, subjectW) + " " +
+		p.meta.Render(fit(firstNonEmpty(event.Summary, "-"), summaryW))
 }
 
 func dependencyLine(p palette, label string, dep client.DependencyStatus) string {
@@ -440,9 +534,13 @@ func trimTime(value string) string {
 
 func panelTitle(p palette, title string, count int) string {
 	if count > 0 {
-		return p.highlight.Render(title) + " " + p.meta.Render(fmt.Sprintf("%d", count))
+		return p.highlight.Render(strings.ToUpper(title)) + " " + p.meta.Render(fmt.Sprintf("%d", count))
 	}
-	return p.highlight.Render(title)
+	return p.highlight.Render(strings.ToUpper(title))
+}
+
+func sectionTitle(p palette, title string) string {
+	return p.section.Render(strings.ToUpper(title))
 }
 
 func serviceHeader(width int) string {
@@ -457,7 +555,7 @@ func renderServiceRow(p palette, prefix string, service client.ServiceStatus, wi
 	available := max(1, width-lipgloss.Width(prefix))
 	if available < 54 {
 		nameW := max(10, available-16)
-		return prefix + column(service.Service, nameW) + " " + healthStyle(p, service.Health).Render(firstNonEmpty(service.Health, "unknown"))
+		return prefix + column(service.Service, nameW) + " " + healthToken(p, service.Health)
 	}
 	nameW, releaseW, opW := serviceColumns(available)
 	op := ""
@@ -521,7 +619,7 @@ func renderActionHints(p palette, hints []ActionHint, width int) string {
 	var lines []string
 	current := ""
 	for _, hint := range hints {
-		part := p.key.Render(hint.Key) + " " + hint.Label
+		part := p.key.Render(hint.Key) + " " + p.meta.Render(hint.Label)
 		if current == "" {
 			current = part
 			continue
@@ -544,7 +642,7 @@ func renderStatChip(p palette, label, value, detail string, width int) string {
 	if width > 0 {
 		detail = fit(detail, max(1, width-8))
 	}
-	body := p.statLabel.Render(label) + "\n" + p.statValue.Render(value) + " " + p.meta.Render(detail)
+	body := p.statLabel.Render(strings.ToUpper(label)) + "\n" + p.statValue.Render(value) + " " + p.meta.Render(detail)
 	if width > 0 {
 		return p.stat.Width(width).Render(body)
 	}

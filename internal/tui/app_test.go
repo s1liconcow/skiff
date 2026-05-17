@@ -33,7 +33,7 @@ func TestRenderDashboardSnapshot(t *testing.T) {
 		"saga_canary",
 		"deploy.started",
 		"read-only",
-		"Command Palette",
+		"COMMAND PALETTE",
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q:\n%s", want, view)
