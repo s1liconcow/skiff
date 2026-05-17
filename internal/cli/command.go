@@ -189,7 +189,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  logs       Query service logs through the cloud provider")
 	fmt.Fprintln(w, "  metrics    Query service metrics through the cloud provider")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
-	fmt.Fprintln(w, "  ops        Watch operation event streams")
+	fmt.Fprintln(w, "  ops        Inspect, resume, and watch operations")
 	fmt.Fprintln(w, "  plan       Dry-run provider resource changes for a spec")
 	fmt.Fprintln(w, "  policy     Explain generated state security policies")
 	fmt.Fprintln(w, "  release    Verify release manifests")
