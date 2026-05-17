@@ -149,11 +149,19 @@ func e2eCoverageMatrix() []capabilityCoverage {
 		},
 		{
 			Capability:   "debug collect",
-			Local:        coverageNotImplemented,
+			Local:        coverageCovered,
 			AppleSilicon: coverageNotImplemented,
-			AWS:          coverageNotImplemented,
-			Evidence:     "The debug command surface is not implemented yet; the matrix keeps the gap explicit.",
-			Command:      "br show skiff-jss --json",
+			AWS:          coverageGated,
+			Evidence:     "Local e2e runs skiff debug collect in direct mode against file object state and the fake provider.",
+			Command:      "go test ./tests/e2e -run TestLocalCLIEndToEndCapabilityMatrix",
+		},
+		{
+			Capability:   "cost advisor",
+			Local:        coverageCovered,
+			AppleSilicon: coverageNotApplicable,
+			AWS:          coverageGated,
+			Evidence:     "Local e2e runs skiff cost explain with supplied metrics; AWS remains gated until provider metrics and pricing adapters exist.",
+			Command:      "go test ./tests/e2e -run TestLocalCLIEndToEndCapabilityMatrix",
 		},
 		{
 			Capability:   "provider conformance",

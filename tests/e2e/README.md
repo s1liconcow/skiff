@@ -8,7 +8,7 @@ The local suite is mandatory and runs in normal `go test ./...`. It includes:
   file-backed object state and the fake provider. It covers `validate`,
   `compile`, `plan`, `explain`, release verification, `deploy`, `rollout
   watch`, `status`, `events`, `logs`, `metrics`, `doctor`, `canary`,
-  `rollback`, `drift`, and `plugin validate`.
+  `debug collect`, `cost explain`, `rollback`, `drift`, and `plugin validate`.
 
 ```bash
 make e2e-local

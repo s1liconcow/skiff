@@ -81,6 +81,12 @@ func TestLocalCLIEndToEndCapabilityMatrix(t *testing.T) {
 		t.Fatalf("unexpected explain output: %+v", explained)
 	}
 
+	var cost localCostOutput
+	decodeCLIJSON(t, runSkiffCLI(t, report, "cost", "explain", service, "--file", specPath, "--cpu-p95", "18", "--memory-p95", "41", "--request-rps", "25", "--warm-capacity", "1", "--log-mb-per-hour", "64", "--format", "json", "--trace-id", traceID), &cost)
+	if !cost.OK || cost.Result.Service != service || len(cost.Result.Recommendations) == 0 || len(cost.Result.Limitations) == 0 {
+		t.Fatalf("unexpected cost explain output: %+v", cost)
+	}
+
 	deployRelease(t, report, specPath, stateURI, env, region, keyID, signingSeed, firstRelease, firstOp, traceID)
 	firstProviderID := startLocalRollout(t, ctx, store, service, env, firstOp, firstRelease, traceID)
 	report.addProviderID(firstProviderID)
@@ -192,7 +198,7 @@ func TestLocalCLIEndToEndCapabilityMatrix(t *testing.T) {
 		t.Fatal("plugin validate returned ok=false")
 	}
 
-	report.fact("local_e2e", "validated compile/plan/explain/deploy/rollout/status/events/logs/metrics/doctor/debug/canary/rollback/drift/plugin paths")
+	report.fact("local_e2e", "validated compile/plan/explain/cost/deploy/rollout/status/events/logs/metrics/doctor/debug/canary/rollback/drift/plugin paths")
 }
 
 func deployRelease(t *testing.T, report *e2eReport, specPath, stateURI, env, region, keyID, signingSeed, releaseID, operationID, traceID string) localDeployOutput {
@@ -334,6 +340,18 @@ type localExplainOutput struct {
 			CloudPrimitive string `json:"cloud_primitive"`
 			Name           string `json:"name"`
 		} `json:"resources"`
+	} `json:"result"`
+}
+
+type localCostOutput struct {
+	OK     bool `json:"ok"`
+	Result struct {
+		Service         string `json:"service"`
+		Recommendations []struct {
+			ID         string `json:"id"`
+			Confidence string `json:"confidence"`
+		} `json:"recommendations"`
+		Limitations []string `json:"limitations"`
 	} `json:"result"`
 }
 
