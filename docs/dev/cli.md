@@ -98,6 +98,21 @@ skiff deploy examples/service/skiff.yaml --direct --state s3://skiff-state-prod 
 skiff deploy examples/service/skiff.yaml --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --release-id rel_01J... --signing-seed-base64 <seed>
 ```
 
+## Release Candidates And Promotion
+
+CI systems can record immutable release candidate evidence before asking Skiff to promote an artifact. Candidate objects are create-only service-scoped records under object state and include the artifact digest, git metadata, CI metadata, and named evidence checks.
+
+```bash
+skiff release candidate create --direct --state s3://skiff-state-staging --env staging --provider aws --region us-west-2 --service payments-api --candidate-id cand_01J... --release-id rel_01J... --artifact-uri registry.example.com/payments-api@sha256:... --artifact-digest sha256:... --check tests=passed --check contract=passed --check policy=passed --check scan=passed --format json
+```
+
+Promotion is plan-first and evidence-gated. It validates the candidate, required checks, optional stable duration, and production approval context, then records a `release.promote` operation intent/control plus events and audit records when requirements pass.
+
+```bash
+skiff promote payments-api --direct --state s3://skiff-state-staging --env staging --provider aws --region us-west-2 --from staging --to prod --candidate cand_01J... --min-stable-duration 30m --approval-id approval_01J... --format markdown
+skiff promote payments-api --direct --state s3://skiff-state-staging --env staging --provider aws --region us-west-2 --from staging --to prod --candidate cand_01J... --approval-id approval_01J... --format json
+```
+
 ## Rollout
 
 `skiff rollout watch` resumes from the provider rollout ID stored in operation control and emits stable rollout status values such as `starting`, `rolling_out`, `succeeded`, `failed`, `cancelled`, and `rolling_back`.

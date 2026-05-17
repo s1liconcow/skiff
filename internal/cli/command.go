@@ -93,7 +93,9 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 	case "policy":
 		return runPolicy(binary, root.Args, stdout, stderr)
 	case "release":
-		return runRelease(binary, root.Args, stdout, stderr)
+		return runRelease(binary, root.Args, root, stdout, stderr)
+	case "promote":
+		return runPromote(binary, root.Args, root, stdout, stderr)
 	case "rollback":
 		return runRollback(binary, root.Args, root, stdout, stderr)
 	case "rollout":
@@ -194,6 +196,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  ops        Inspect, resume, and watch operations")
 	fmt.Fprintln(w, "  plan       Dry-run provider resource changes for a spec")
 	fmt.Fprintln(w, "  policy     Explain generated state security policies")
+	fmt.Fprintln(w, "  promote    Validate and record release promotion intent")
 	fmt.Fprintln(w, "  release    Verify release manifests")
 	fmt.Fprintln(w, "  rollback   Roll a service back to a stable release")
 	fmt.Fprintln(w, "  rollout    Watch rollout progress")
@@ -1292,12 +1295,14 @@ func printCompileUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  --trace-id <id>")
 }
 
-func runRelease(binary string, args []string, stdout, stderr io.Writer) int {
+func runRelease(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		printReleaseUsage(stderr, binary)
 		return ExitUserError
 	}
 	switch args[0] {
+	case "candidate":
+		return runReleaseCandidate(binary, args[1:], root, stdout, stderr)
 	case "verify":
 		return runReleaseVerify(binary, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
@@ -1509,6 +1514,7 @@ func runStatePath(binary string, args []string, stdout, stderr io.Writer) int {
 	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
 	service := fs.String("service", "", "service name")
 	release := fs.String("release", "", "release ID")
+	candidate := fs.String("candidate", "", "release candidate ID")
 	operation := fs.String("operation", "", "operation ID")
 	saga := fs.String("saga", "", "saga ID")
 	event := fs.String("event", "", "event ID")
@@ -1534,6 +1540,7 @@ func runStatePath(binary string, args []string, stdout, stderr io.Writer) int {
 	path, err := statePathFor(pathKind, statePathInputs{
 		service:      *service,
 		release:      *release,
+		candidate:    *candidate,
 		operation:    *operation,
 		saga:         *saga,
 		event:        *event,
@@ -1565,6 +1572,7 @@ func runStatePath(binary string, args []string, stdout, stderr io.Writer) int {
 			Inputs: statePathInputMap(statePathInputs{
 				service:      *service,
 				release:      *release,
+				candidate:    *candidate,
 				operation:    *operation,
 				saga:         *saga,
 				event:        *event,
@@ -1591,6 +1599,7 @@ func runStatePath(binary string, args []string, stdout, stderr io.Writer) int {
 type statePathInputs struct {
 	service      string
 	release      string
+	candidate    string
 	operation    string
 	saga         string
 	event        string
@@ -1617,8 +1626,10 @@ func statePathFor(kind string, in statePathInputs) (string, error) {
 			return paths.ReleaseManifest(in.service, in.release)
 		case "runtime-manifest":
 			return paths.RuntimeManifest(in.service, in.release)
+		case "candidate":
+			return paths.ReleaseCandidate(in.service, in.candidate)
 		default:
-			return "", fmt.Errorf("release --doc must be release or runtime-manifest")
+			return "", fmt.Errorf("release --doc must be release, runtime-manifest, or candidate")
 		}
 	case "operation":
 		switch defaultString(in.doc, "intent") {
@@ -1676,6 +1687,7 @@ func statePathInputMap(in statePathInputs) map[string]string {
 	values := map[string]string{
 		"service":       in.service,
 		"release":       in.release,
+		"candidate":     in.candidate,
 		"operation":     in.operation,
 		"saga":          in.saga,
 		"event":         in.event,
@@ -1887,6 +1899,7 @@ func writeVerifyError(binary, code, format, traceID string, err error, stdout, s
 func printReleaseUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s release <command> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  candidate  Create or inspect release candidate evidence")
 	fmt.Fprintln(w, "  verify     Verify a signed release manifest")
 }
 

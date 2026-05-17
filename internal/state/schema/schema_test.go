@@ -13,6 +13,7 @@ func TestDurableSchemasCarrySchemaVersion(t *testing.T) {
 		schema.OperationIntent{},
 		schema.OperationControl{},
 		schema.ReleaseManifest{},
+		schema.ReleaseCandidate{},
 		schema.RuntimeManifest{},
 		schema.SagaIntent{},
 		schema.SagaGraph{},

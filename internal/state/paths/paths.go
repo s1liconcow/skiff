@@ -60,6 +60,23 @@ func ServiceReleasesPrefix(service string) (string, error) {
 	return "services/" + service + "/releases/", nil
 }
 
+func ReleaseCandidate(service, candidate string) (string, error) {
+	if err := validateName("service", service); err != nil {
+		return "", err
+	}
+	if err := validateID("candidate", candidate); err != nil {
+		return "", err
+	}
+	return "services/" + service + "/candidates/" + candidate + "/candidate.json", nil
+}
+
+func ServiceCandidatesPrefix(service string) (string, error) {
+	if err := validateName("service", service); err != nil {
+		return "", err
+	}
+	return "services/" + service + "/candidates/", nil
+}
+
 func RuntimeManifest(service, release string) (string, error) {
 	if err := validateName("service", service); err != nil {
 		return "", err
@@ -269,6 +286,7 @@ var reservedSegments = map[string]struct{}{
 	"audit":        {},
 	"by-logical":   {},
 	"by-provider":  {},
+	"candidates":   {},
 	"control":      {},
 	"control.json": {},
 	"events":       {},

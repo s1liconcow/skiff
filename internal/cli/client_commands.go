@@ -284,7 +284,7 @@ func runCompletion(binary string, args []string, stdout, stderr io.Writer) int {
 		return ExitUserError
 	}
 	shell := args[0]
-	commands := []string{"bootstrap", "compile", "config", "completion", "deploy", "doctor", "events", "explain", "logs", "metrics", "object", "ops", "plan", "policy", "release", "rollback", "rollout", "saga", "solve", "state", "status", "tui", "validate", "version"}
+	commands := []string{"bootstrap", "compile", "config", "completion", "deploy", "doctor", "events", "explain", "logs", "metrics", "object", "ops", "plan", "policy", "promote", "release", "rollback", "rollout", "saga", "solve", "state", "status", "tui", "validate", "version"}
 	sort.Strings(commands)
 	switch shell {
 	case "bash":

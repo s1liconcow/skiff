@@ -178,6 +178,52 @@ type ReleaseManifest struct {
 	Signatures            []Signature `json:"signatures,omitempty"`
 }
 
+type ReleaseCandidate struct {
+	SchemaVersion string            `json:"schema_version"`
+	CandidateID   string            `json:"candidate_id"`
+	Service       string            `json:"service"`
+	Env           string            `json:"env"`
+	ReleaseID     string            `json:"release_id,omitempty"`
+	Artifact      ArtifactRef       `json:"artifact"`
+	Git           GitMetadata       `json:"git,omitempty"`
+	CI            CIMetadata        `json:"ci,omitempty"`
+	Checks        []EvidenceCheck   `json:"checks,omitempty"`
+	SBOM          []EvidenceRef     `json:"sbom,omitempty"`
+	Provenance    []EvidenceRef     `json:"provenance,omitempty"`
+	CreatedAt     string            `json:"created_at"`
+	CreatedBy     Actor             `json:"created_by"`
+	TraceID       string            `json:"trace_id,omitempty"`
+	Annotations   map[string]string `json:"annotations,omitempty"`
+}
+
+type GitMetadata struct {
+	Repo   string `json:"repo,omitempty"`
+	SHA    string `json:"sha,omitempty"`
+	Ref    string `json:"ref,omitempty"`
+	Branch string `json:"branch,omitempty"`
+}
+
+type CIMetadata struct {
+	Provider string `json:"provider,omitempty"`
+	RunID    string `json:"run_id,omitempty"`
+	RunURL   string `json:"run_url,omitempty"`
+	JobURL   string `json:"job_url,omitempty"`
+}
+
+type EvidenceCheck struct {
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+	URL         string `json:"url,omitempty"`
+	Summary     string `json:"summary,omitempty"`
+	CompletedAt string `json:"completed_at,omitempty"`
+}
+
+type EvidenceRef struct {
+	Name   string `json:"name,omitempty"`
+	URI    string `json:"uri"`
+	Digest string `json:"digest,omitempty"`
+}
+
 type RuntimeManifest struct {
 	SchemaVersion string            `json:"schema_version"`
 	Service       string            `json:"service"`
