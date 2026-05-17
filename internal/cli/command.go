@@ -106,6 +106,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runState(binary, root.Args, stdout, stderr)
 	case "status":
 		return runStatus(binary, root.Args, root, stdout, stderr)
+	case "tui":
+		return runTUI(binary, root.Args, root, stdout, stderr)
 	case "validate":
 		return runValidate(binary, root.Args, stdout, stderr)
 	case "version":
@@ -202,6 +204,7 @@ func printUsage(w io.Writer, binary string) {
 	}
 	fmt.Fprintln(w, "  state      Inspect object-state paths and developer helpers")
 	fmt.Fprintln(w, "  status     Show service status through direct or API mode")
+	fmt.Fprintln(w, "  tui        Open the terminal operations dashboard")
 	fmt.Fprintln(w, "  validate   Parse, default, and validate a Skiff spec")
 	fmt.Fprintln(w, "  version    Print version, commit, and build date")
 	fmt.Fprintln(w)

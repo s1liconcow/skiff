@@ -61,6 +61,7 @@ type Status = servicestatus.Result
 type ServiceStatus = servicestatus.Service
 type Freshness = servicestatus.Freshness
 type Finding = servicestatus.Finding
+type DependencyStatus = servicestatus.DependencyStatus
 
 type DoctorOptions struct {
 	Service string
@@ -86,6 +87,21 @@ type EventList struct {
 	Freshness Freshness      `json:"freshness"`
 	Findings  []Finding      `json:"findings,omitempty"`
 	Source    string         `json:"source"`
+}
+
+type SagaOptions struct {
+	Saga    string `json:"saga,omitempty"`
+	Fresh   bool   `json:"fresh,omitempty"`
+	TraceID string `json:"trace_id,omitempty"`
+}
+
+type SagaSummary = stateindex.SagaSummary
+
+type SagaList struct {
+	Sagas     []SagaSummary `json:"sagas"`
+	Freshness Freshness     `json:"freshness"`
+	Findings  []Finding     `json:"findings,omitempty"`
+	Source    string        `json:"source"`
 }
 
 type EventWatcher interface {
@@ -292,6 +308,34 @@ func (c *Direct) Events(ctx context.Context, opts EventOptions) (*EventList, err
 		Events:    events,
 		Freshness: freshness,
 		Findings:  findings,
+		Source:    "direct",
+	}, nil
+}
+
+func (c *Direct) Sagas(ctx context.Context, opts SagaOptions) (*SagaList, error) {
+	snapshot, err := stateindex.BuildSnapshot(ctx, c.store, stateindex.BuildOptions{
+		Now:               c.clock().UTC(),
+		Generation:        1,
+		RecentEventsLimit: stateindex.DefaultRecentEventsLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	sagas := append([]SagaSummary(nil), snapshot.Sagas...)
+	if opts.Saga != "" {
+		filtered := sagas[:0]
+		for _, saga := range sagas {
+			if saga.SagaID == opts.Saga {
+				filtered = append(filtered, saga)
+			}
+		}
+		sagas = filtered
+	}
+	freshness := servicestatus.FreshnessFromIndex(stateindex.FreshnessFromSnapshot(snapshot, c.clock().UTC(), "direct_object_store"))
+	return &SagaList{
+		Sagas:     sagas,
+		Freshness: freshness,
+		Findings:  freshness.Findings,
 		Source:    "direct",
 	}, nil
 }

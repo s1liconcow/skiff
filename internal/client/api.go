@@ -150,6 +150,30 @@ func (c *API) Events(ctx context.Context, opts EventOptions) (*EventList, error)
 	}, nil
 }
 
+func (c *API) Sagas(ctx context.Context, opts SagaOptions) (*SagaList, error) {
+	query := url.Values{}
+	if opts.Fresh {
+		query.Set("fresh", "true")
+	}
+	if opts.Saga != "" {
+		query.Set("saga", opts.Saga)
+	}
+	var body struct {
+		OK        bool          `json:"ok"`
+		Freshness Freshness     `json:"freshness"`
+		Sagas     []SagaSummary `json:"sagas"`
+	}
+	if err := c.getJSON(ctx, "/v1/sagas", opts.TraceID, query, &body); err != nil {
+		return nil, err
+	}
+	return &SagaList{
+		Sagas:     body.Sagas,
+		Freshness: body.Freshness,
+		Findings:  body.Freshness.Findings,
+		Source:    "api",
+	}, nil
+}
+
 func (c *API) WatchEvents(ctx context.Context, opts EventWatchOptions) (<-chan EventDelivery, error) {
 	query := url.Values{}
 	if opts.Scope != "" {
