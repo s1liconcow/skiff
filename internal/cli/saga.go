@@ -77,6 +77,12 @@ type statefulReplacementSagaOutput struct {
 	Result  statefulReplacementSagaResult `json:"result"`
 }
 
+type statefulBackupRestoreOutput struct {
+	OK      bool                        `json:"ok"`
+	TraceID string                      `json:"trace_id,omitempty"`
+	Result  statefulBackupRestoreResult `json:"result"`
+}
+
 type statefulOrderedSagaResult struct {
 	SagaID       string                     `json:"saga_id"`
 	OperationID  string                     `json:"operation_id,omitempty"`
@@ -106,6 +112,24 @@ type statefulReplacementSagaResult struct {
 	Execution          *sagastate.ExecutionResult `json:"execution,omitempty"`
 	Inspect            *sagastate.InspectResult   `json:"inspect,omitempty"`
 	Replacement        json.RawMessage            `json:"replacement,omitempty"`
+}
+
+type statefulBackupRestoreResult struct {
+	SagaID       string                     `json:"saga_id"`
+	OperationID  string                     `json:"operation_id,omitempty"`
+	Command      string                     `json:"command"`
+	Group        string                     `json:"group"`
+	Env          string                     `json:"env,omitempty"`
+	Members      []int                      `json:"members,omitempty"`
+	Member       int                        `json:"member,omitempty"`
+	BackupID     string                     `json:"backup_id,omitempty"`
+	RestoreID    string                     `json:"restore_id,omitempty"`
+	Status       schema.SagaStatus          `json:"status"`
+	NextAction   string                     `json:"next_action,omitempty"`
+	CurrentSteps []string                   `json:"current_steps,omitempty"`
+	Execution    *sagastate.ExecutionResult `json:"execution,omitempty"`
+	Inspect      *sagastate.InspectResult   `json:"inspect,omitempty"`
+	Plan         *sagastate.CreateRequest   `json:"plan,omitempty"`
 }
 
 var (
@@ -647,6 +671,92 @@ func createAndMaybeRunStatefulReplacement(ctx context.Context, binary string, cf
 	return &result, nil
 }
 
+func createAndMaybeRunStatefulBackup(ctx context.Context, binary string, cfg config.Config, req templates.StatefulBackupRequest, run, dryRun bool) (*statefulBackupRestoreResult, error) {
+	req = templates.NormalizeStatefulBackupRequest(req)
+	createReq, err := templates.StatefulBackup(req)
+	if err != nil {
+		return nil, err
+	}
+	result := statefulBackupResultFromRequest(req, schema.SagaPending, nil, nil)
+	if dryRun {
+		result.NextAction = "create_saga"
+		result.Plan = &createReq
+		return &result, nil
+	}
+	store, err := openSagaObjectStore(cfg)
+	if err != nil {
+		return nil, err
+	}
+	sagas := sagastate.NewStore(store)
+	if _, err := sagas.Create(ctx, createReq); err != nil {
+		return nil, err
+	}
+	var execution *sagastate.ExecutionResult
+	if run {
+		cloud, err := newSagaProvider(cfg, store)
+		if err != nil {
+			return nil, err
+		}
+		execution, err = (&sagastate.Executor{
+			Store: sagas,
+			Steps: builtin.New(builtin.Options{Store: store, Provider: cloud, Binary: binary}),
+			Owner: "skiff-cli",
+		}).Execute(ctx, req.SagaID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	inspect, err := sagas.Inspect(ctx, req.SagaID)
+	if err != nil {
+		return nil, err
+	}
+	result = statefulBackupResultFromInspect(*inspect, execution)
+	return &result, nil
+}
+
+func createAndMaybeRunStatefulRestore(ctx context.Context, binary string, cfg config.Config, req templates.StatefulRestoreRequest, run, dryRun bool) (*statefulBackupRestoreResult, error) {
+	req = templates.NormalizeStatefulRestoreRequest(req)
+	createReq, err := templates.StatefulRestore(req)
+	if err != nil {
+		return nil, err
+	}
+	result := statefulRestoreResultFromRequest(req, schema.SagaPending, nil, nil)
+	if dryRun {
+		result.NextAction = "create_saga"
+		result.Plan = &createReq
+		return &result, nil
+	}
+	store, err := openSagaObjectStore(cfg)
+	if err != nil {
+		return nil, err
+	}
+	sagas := sagastate.NewStore(store)
+	if _, err := sagas.Create(ctx, createReq); err != nil {
+		return nil, err
+	}
+	var execution *sagastate.ExecutionResult
+	if run {
+		cloud, err := newSagaProvider(cfg, store)
+		if err != nil {
+			return nil, err
+		}
+		execution, err = (&sagastate.Executor{
+			Store: sagas,
+			Steps: builtin.New(builtin.Options{Store: store, Provider: cloud, Binary: binary}),
+			Owner: "skiff-cli",
+		}).Execute(ctx, req.SagaID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	inspect, err := sagas.Inspect(ctx, req.SagaID)
+	if err != nil {
+		return nil, err
+	}
+	result = statefulRestoreResultFromInspect(*inspect, execution)
+	return &result, nil
+}
+
 func orderedUpdateMembersFromControl(ctx context.Context, store objstore.ObjectStore, group string) ([]int, error) {
 	doc, err := state.NewClient(store).GetStatefulGroupControl(ctx, group)
 	if err != nil {
@@ -738,6 +848,32 @@ func writeStatefulReplacementSagaResult(binary, command, format, traceID string,
 		return ExitSuccess
 	default:
 		return writeClientCommandError(binary, "saga", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
+	}
+}
+
+func writeStatefulBackupRestoreResult(binary, command, format, traceID string, result statefulBackupRestoreResult, stdout, stderr io.Writer) int {
+	switch format {
+	case "human", "text":
+		fmt.Fprintf(stdout, "stateful %s saga %s status=%s\n", result.Command, result.SagaID, result.Status)
+		fmt.Fprintf(stdout, "group: %s\n", result.Group)
+		if result.BackupID != "" {
+			fmt.Fprintf(stdout, "backup: %s\n", result.BackupID)
+		}
+		if result.RestoreID != "" {
+			fmt.Fprintf(stdout, "restore: %s\n", result.RestoreID)
+		}
+		if result.NextAction != "" {
+			fmt.Fprintf(stdout, "next: %s\n", result.NextAction)
+		}
+		return ExitSuccess
+	case "json":
+		if err := json.NewEncoder(stdout).Encode(statefulBackupRestoreOutput{OK: true, TraceID: traceID, Result: result}); err != nil {
+			fmt.Fprintf(stderr, "%s %s: %v\n", binary, command, err)
+			return ExitInternalError
+		}
+		return ExitSuccess
+	default:
+		return writeClientCommandError(binary, "stateful", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -890,6 +1026,75 @@ func statefulReplacementRecommendedActions(result statefulReplacementSagaResult)
 		})
 	}
 	return actions
+}
+
+func statefulBackupResultFromRequest(req templates.StatefulBackupRequest, status schema.SagaStatus, execution *sagastate.ExecutionResult, inspect *sagastate.InspectResult) statefulBackupRestoreResult {
+	return statefulBackupRestoreResult{
+		SagaID:      req.SagaID,
+		OperationID: req.OperationID,
+		Command:     "backup",
+		Group:       req.Group,
+		Env:         req.Env,
+		Members:     append([]int(nil), req.Members...),
+		BackupID:    req.BackupID,
+		Status:      status,
+		NextAction:  "resume",
+		Execution:   execution,
+		Inspect:     inspect,
+	}
+}
+
+func statefulRestoreResultFromRequest(req templates.StatefulRestoreRequest, status schema.SagaStatus, execution *sagastate.ExecutionResult, inspect *sagastate.InspectResult) statefulBackupRestoreResult {
+	return statefulBackupRestoreResult{
+		SagaID:      req.SagaID,
+		OperationID: req.OperationID,
+		Command:     "restore",
+		Group:       req.Group,
+		Env:         req.Env,
+		Member:      req.Member,
+		BackupID:    req.BackupID,
+		RestoreID:   req.RestoreID,
+		Status:      status,
+		NextAction:  "resume",
+		Execution:   execution,
+		Inspect:     inspect,
+	}
+}
+
+func statefulBackupResultFromInspect(inspect sagastate.InspectResult, execution *sagastate.ExecutionResult) statefulBackupRestoreResult {
+	var params templates.StatefulBackupRequest
+	_ = json.Unmarshal(inspect.Intent.Params, &params)
+	result := statefulBackupResultFromRequest(params, inspect.Status, execution, &inspect)
+	result.SagaID = inspect.SagaID
+	result.CurrentSteps = append([]string(nil), inspect.CurrentSteps...)
+	result.NextAction = statefulNextActionForSaga(inspect)
+	return result
+}
+
+func statefulRestoreResultFromInspect(inspect sagastate.InspectResult, execution *sagastate.ExecutionResult) statefulBackupRestoreResult {
+	var params templates.StatefulRestoreRequest
+	_ = json.Unmarshal(inspect.Intent.Params, &params)
+	result := statefulRestoreResultFromRequest(params, inspect.Status, execution, &inspect)
+	result.SagaID = inspect.SagaID
+	result.CurrentSteps = append([]string(nil), inspect.CurrentSteps...)
+	result.NextAction = statefulNextActionForSaga(inspect)
+	return result
+}
+
+func statefulNextActionForSaga(inspect sagastate.InspectResult) string {
+	switch inspect.Status {
+	case schema.SagaSucceeded:
+		return "complete"
+	case schema.SagaFailed:
+		return "inspect_failure"
+	default:
+		for _, step := range inspect.Control.StepResults {
+			if step.Status == "waiting" {
+				return "approve_or_reject"
+			}
+		}
+		return "resume"
+	}
 }
 
 func canaryProgressFromStep(ref schema.StepResultRef) (int, string, string) {

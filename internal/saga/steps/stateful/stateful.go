@@ -23,6 +23,10 @@ const (
 	KindOrderedMemberUpdate   = "stateful.member.ordered_update"
 	KindOrderedUpdateComplete = "stateful.ordered_update.complete"
 	KindReplaceMember         = "stateful.member.replace"
+	KindBackupSnapshotMember  = "stateful.backup.snapshot_member"
+	KindBackupVerify          = "stateful.backup.verify"
+	KindRestoreVerifyBackup   = "stateful.restore.verify_backup"
+	KindRestoreApply          = "stateful.restore.apply"
 )
 
 type OrderedUpdateParams struct {
@@ -46,6 +50,33 @@ type ReplaceMemberParams struct {
 	Env         string       `json:"env,omitempty"`
 	Member      int          `json:"member"`
 	Reason      string       `json:"reason,omitempty"`
+	Actor       schema.Actor `json:"actor,omitempty"`
+}
+
+type BackupParams struct {
+	SagaID      string       `json:"saga_id,omitempty"`
+	OperationID string       `json:"operation_id"`
+	BackupID    string       `json:"backup_id"`
+	Group       string       `json:"group"`
+	Env         string       `json:"env,omitempty"`
+	Members     []int        `json:"members,omitempty"`
+	Member      int          `json:"member,omitempty"`
+	Reason      string       `json:"reason,omitempty"`
+	Retention   string       `json:"retention,omitempty"`
+	Actor       schema.Actor `json:"actor,omitempty"`
+}
+
+type RestoreParams struct {
+	SagaID      string       `json:"saga_id,omitempty"`
+	OperationID string       `json:"operation_id"`
+	RestoreID   string       `json:"restore_id"`
+	BackupID    string       `json:"backup_id"`
+	Group       string       `json:"group"`
+	Env         string       `json:"env,omitempty"`
+	Member      int          `json:"member"`
+	Mode        string       `json:"mode,omitempty"`
+	Reason      string       `json:"reason,omitempty"`
+	ApprovalID  string       `json:"approval_id,omitempty"`
 	Actor       schema.Actor `json:"actor,omitempty"`
 }
 
@@ -75,6 +106,29 @@ type ReplaceMember struct {
 	LeaseTTL time.Duration
 }
 
+type BackupSnapshotMember struct {
+	Store    objstore.ObjectStore
+	Provider provider.StatefulOperations
+	Recipe   stateruntime.Recipe
+	Clock    func() time.Time
+}
+
+type BackupVerify struct {
+	Store objstore.ObjectStore
+	Clock func() time.Time
+}
+
+type RestoreVerifyBackup struct {
+	Store objstore.ObjectStore
+	Clock func() time.Time
+}
+
+type RestoreApply struct {
+	Store  objstore.ObjectStore
+	Recipe stateruntime.Recipe
+	Clock  func() time.Time
+}
+
 func New(store objstore.ObjectStore, recipe stateruntime.Recipe) []steps.Step {
 	return NewWithProvider(store, nil, recipe)
 }
@@ -85,6 +139,10 @@ func NewWithProvider(store objstore.ObjectStore, statefulProvider provider.State
 		OrderedMemberUpdate{Store: store, Recipe: recipe},
 		CompleteOrderedUpdate{Store: store},
 		ReplaceMember{Store: store, Provider: statefulProvider, Recipe: recipe},
+		BackupSnapshotMember{Store: store, Provider: statefulProvider, Recipe: recipe},
+		BackupVerify{Store: store},
+		RestoreVerifyBackup{Store: store},
+		RestoreApply{Store: store, Recipe: recipe},
 	}
 }
 
@@ -166,6 +224,267 @@ func (s ReplaceMember) Compensate(ctx context.Context, req steps.StepRequest, re
 }
 
 func (s ReplaceMember) Doctor(ctx context.Context, req steps.StepRequest) ([]steps.Finding, error) {
+	return nil, nil
+}
+
+func (BackupSnapshotMember) Kind() string { return KindBackupSnapshotMember }
+
+func (s BackupSnapshotMember) ValidateParams(ctx context.Context, params json.RawMessage) error {
+	_, err := decodeBackupParams(params, true)
+	return err
+}
+
+func (s BackupSnapshotMember) Plan(ctx context.Context, req steps.StepRequest) (*steps.StepPlan, error) {
+	return &steps.StepPlan{Summary: "snapshot one stateful member volume and persist provider snapshot ID", Risk: schema.RiskMedium, Reversibility: schema.Compensatable}, nil
+}
+
+func (s BackupSnapshotMember) Run(ctx context.Context, req steps.StepRequest) (*steps.StepResult, error) {
+	params, err := decodeBackupParams(req.Node.Params, true)
+	if err != nil {
+		return nil, err
+	}
+	params.SagaID = firstNonEmpty(params.SagaID, req.SagaID)
+	if s.Store == nil {
+		return nil, errors.New("stateful backup step requires object store")
+	}
+	if s.Provider == nil {
+		return nil, errors.New("stateful backup step requires provider lifecycle operations")
+	}
+	log, err := events.NewLog(events.Options{Store: s.Store, Clock: s.Clock})
+	if err != nil {
+		return nil, err
+	}
+	result, err := (stateruntime.BackupRunner{
+		Objects:  s.Store,
+		State:    state.NewClient(s.Store, state.WithClock(stateClock(s.Clock))),
+		Provider: s.Provider,
+		Recipe:   s.Recipe,
+		Audit:    log,
+		EventLog: log,
+		Clock:    clockFunc(s.Clock),
+	}).SnapshotMember(ctx, stateruntime.SnapshotMemberRequest{
+		BackupID:    memberBackupID(params.BackupID, params.Member, len(params.Members)),
+		Group:       params.Group,
+		Env:         params.Env,
+		Member:      params.Member,
+		OperationID: params.OperationID,
+		SagaID:      params.SagaID,
+		TraceID:     req.TraceID,
+		Actor:       actorOrDefault(params.Actor, req.Intent.Actor),
+		Reason:      params.Reason,
+		Retention:   params.Retention,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &steps.StepResult{
+		Status:             steps.StatusSucceeded,
+		Summary:            fmt.Sprintf("snapshotted stateful member %s/%d", params.Group, params.Member),
+		Result:             rawJSON(result),
+		ProviderOperations: append([]schema.ProviderOperationRef(nil), result.ProviderOperations...),
+	}, nil
+}
+
+func (s BackupSnapshotMember) Resume(ctx context.Context, req steps.StepRequest) (*steps.StepResult, error) {
+	return s.Run(ctx, req)
+}
+
+func (s BackupSnapshotMember) Compensate(ctx context.Context, req steps.StepRequest, result schema.StepResult) (*steps.StepResult, error) {
+	params, _ := decodeBackupParams(req.Node.Params, true)
+	return &steps.StepResult{Status: steps.StatusSucceeded, Summary: "stateful backups are retained for recovery", Result: rawJSON(map[string]string{"backup_id": params.BackupID, "summary": "snapshot is not deleted by compensation"})}, nil
+}
+
+func (s BackupSnapshotMember) Doctor(ctx context.Context, req steps.StepRequest) ([]steps.Finding, error) {
+	return nil, nil
+}
+
+func (BackupVerify) Kind() string { return KindBackupVerify }
+
+func (s BackupVerify) ValidateParams(ctx context.Context, params json.RawMessage) error {
+	_, err := decodeBackupParams(params, false)
+	return err
+}
+
+func (s BackupVerify) Plan(ctx context.Context, req steps.StepRequest) (*steps.StepPlan, error) {
+	return &steps.StepPlan{Summary: "verify all requested stateful member backup records exist", Risk: schema.RiskLow, Reversibility: schema.Reversible}, nil
+}
+
+func (s BackupVerify) Run(ctx context.Context, req steps.StepRequest) (*steps.StepResult, error) {
+	params, err := decodeBackupParams(req.Node.Params, false)
+	if err != nil {
+		return nil, err
+	}
+	if s.Store == nil {
+		return nil, errors.New("stateful backup verify requires object store")
+	}
+	records := make([]stateruntime.BackupRecord, 0, len(params.Members))
+	for _, member := range params.Members {
+		backupID := memberBackupID(params.BackupID, member, len(params.Members))
+		record, err := stateruntime.ReadBackupRecord(ctx, s.Store, params.Group, backupID)
+		if err != nil {
+			return failed("STATEFUL_BACKUP_MISSING", fmt.Sprintf("backup record %s for member %d is missing: %v", backupID, member, err)), nil
+		}
+		if stale, err := stateruntime.BackupRecordStale(record, clockFunc(s.Clock)()); err != nil {
+			return failed("STATEFUL_BACKUP_STALE", err.Error()), nil
+		} else if stale {
+			return failed("STATEFUL_BACKUP_STALE", fmt.Sprintf("backup record %s for member %d expired at %s", backupID, member, record.ExpiresAt)), nil
+		}
+		records = append(records, record)
+	}
+	return succeeded("verified stateful backup records", map[string]any{"group": params.Group, "backup_id": params.BackupID, "records": records})
+}
+
+func (s BackupVerify) Resume(ctx context.Context, req steps.StepRequest) (*steps.StepResult, error) {
+	return s.Run(ctx, req)
+}
+
+func (s BackupVerify) Compensate(ctx context.Context, req steps.StepRequest, result schema.StepResult) (*steps.StepResult, error) {
+	return &steps.StepResult{Status: steps.StatusSucceeded, Summary: "backup verification has no compensation"}, nil
+}
+
+func (s BackupVerify) Doctor(ctx context.Context, req steps.StepRequest) ([]steps.Finding, error) {
+	params, err := decodeBackupParams(req.Node.Params, false)
+	if err != nil {
+		return nil, err
+	}
+	if s.Store == nil {
+		return []steps.Finding{{Code: "STATEFUL_BACKUP_STORE_MISSING", Severity: "high", Summary: "object store is required to verify stateful backups"}}, nil
+	}
+	var findings []steps.Finding
+	for _, member := range params.Members {
+		backupID := memberBackupID(params.BackupID, member, len(params.Members))
+		record, err := stateruntime.ReadBackupRecord(ctx, s.Store, params.Group, backupID)
+		if err != nil {
+			findings = append(findings, steps.Finding{Code: "STATEFUL_BACKUP_MISSING", Severity: "high", Summary: fmt.Sprintf("backup record %s for member %d is missing", backupID, member)})
+			continue
+		}
+		if stale, err := stateruntime.BackupRecordStale(record, clockFunc(s.Clock)()); err != nil {
+			findings = append(findings, steps.Finding{Code: "STATEFUL_BACKUP_STALE", Severity: "high", Summary: err.Error()})
+		} else if stale {
+			findings = append(findings, steps.Finding{Code: "STATEFUL_BACKUP_STALE", Severity: "high", Summary: fmt.Sprintf("backup record %s for member %d expired at %s", backupID, member, record.ExpiresAt)})
+		}
+	}
+	return findings, nil
+}
+
+func (RestoreVerifyBackup) Kind() string { return KindRestoreVerifyBackup }
+
+func (s RestoreVerifyBackup) ValidateParams(ctx context.Context, params json.RawMessage) error {
+	_, err := decodeRestoreParams(params)
+	return err
+}
+
+func (s RestoreVerifyBackup) Plan(ctx context.Context, req steps.StepRequest) (*steps.StepPlan, error) {
+	return &steps.StepPlan{Summary: "verify the requested stateful backup exists before restore approval", Risk: schema.RiskLow, Reversibility: schema.Reversible}, nil
+}
+
+func (s RestoreVerifyBackup) Run(ctx context.Context, req steps.StepRequest) (*steps.StepResult, error) {
+	params, err := decodeRestoreParams(req.Node.Params)
+	if err != nil {
+		return nil, err
+	}
+	if s.Store == nil {
+		return nil, errors.New("stateful restore verify requires object store")
+	}
+	record, err := stateruntime.ReadBackupRecord(ctx, s.Store, params.Group, params.BackupID)
+	if err != nil {
+		return failed("STATEFUL_BACKUP_MISSING", err.Error()), nil
+	}
+	if stale, err := stateruntime.BackupRecordStale(record, clockFunc(s.Clock)()); err != nil {
+		return failed("STATEFUL_BACKUP_STALE", err.Error()), nil
+	} else if stale {
+		return failed("STATEFUL_BACKUP_STALE", fmt.Sprintf("backup %s expired at %s", params.BackupID, record.ExpiresAt)), nil
+	}
+	return succeeded("verified stateful restore backup", map[string]any{"group": params.Group, "member": params.Member, "backup_id": params.BackupID, "snapshot_id": record.SnapshotID, "provider_id": record.ProviderID})
+}
+
+func (s RestoreVerifyBackup) Resume(ctx context.Context, req steps.StepRequest) (*steps.StepResult, error) {
+	return s.Run(ctx, req)
+}
+
+func (s RestoreVerifyBackup) Compensate(ctx context.Context, req steps.StepRequest, result schema.StepResult) (*steps.StepResult, error) {
+	return &steps.StepResult{Status: steps.StatusSucceeded, Summary: "restore verification has no compensation"}, nil
+}
+
+func (s RestoreVerifyBackup) Doctor(ctx context.Context, req steps.StepRequest) ([]steps.Finding, error) {
+	params, err := decodeRestoreParams(req.Node.Params)
+	if err != nil {
+		return nil, err
+	}
+	if s.Store == nil {
+		return []steps.Finding{{Code: "STATEFUL_BACKUP_STORE_MISSING", Severity: "high", Summary: "object store is required to verify stateful restore backups"}}, nil
+	}
+	record, err := stateruntime.ReadBackupRecord(ctx, s.Store, params.Group, params.BackupID)
+	if err != nil {
+		return []steps.Finding{{Code: "STATEFUL_BACKUP_MISSING", Severity: "high", Summary: fmt.Sprintf("backup record %s is missing", params.BackupID)}}, nil
+	}
+	if stale, err := stateruntime.BackupRecordStale(record, clockFunc(s.Clock)()); err != nil {
+		return []steps.Finding{{Code: "STATEFUL_BACKUP_STALE", Severity: "high", Summary: err.Error()}}, nil
+	} else if stale {
+		return []steps.Finding{{Code: "STATEFUL_BACKUP_STALE", Severity: "high", Summary: fmt.Sprintf("backup %s expired at %s", params.BackupID, record.ExpiresAt)}}, nil
+	}
+	return nil, nil
+}
+
+func (RestoreApply) Kind() string { return KindRestoreApply }
+
+func (s RestoreApply) ValidateParams(ctx context.Context, params json.RawMessage) error {
+	_, err := decodeRestoreParams(params)
+	return err
+}
+
+func (s RestoreApply) Plan(ctx context.Context, req steps.StepRequest) (*steps.StepPlan, error) {
+	return &steps.StepPlan{Summary: "record an approved stateful restore intent; recipe restore may prepare member state", Risk: schema.RiskHigh, Reversibility: schema.PartiallyReversible}, nil
+}
+
+func (s RestoreApply) Run(ctx context.Context, req steps.StepRequest) (*steps.StepResult, error) {
+	params, err := decodeRestoreParams(req.Node.Params)
+	if err != nil {
+		return nil, err
+	}
+	if s.Store == nil {
+		return nil, errors.New("stateful restore apply requires object store")
+	}
+	log, err := events.NewLog(events.Options{Store: s.Store, Clock: s.Clock})
+	if err != nil {
+		return nil, err
+	}
+	result, err := (stateruntime.BackupRunner{
+		Objects:  s.Store,
+		Recipe:   s.Recipe,
+		Audit:    log,
+		EventLog: log,
+		Clock:    clockFunc(s.Clock),
+	}).RestoreMember(ctx, stateruntime.RestoreMemberRequest{
+		RestoreID:   params.RestoreID,
+		BackupID:    params.BackupID,
+		Group:       params.Group,
+		Env:         params.Env,
+		Member:      params.Member,
+		Mode:        params.Mode,
+		OperationID: params.OperationID,
+		SagaID:      firstNonEmpty(params.SagaID, req.SagaID),
+		TraceID:     req.TraceID,
+		Actor:       actorOrDefault(params.Actor, req.Intent.Actor),
+		ApprovalID:  params.ApprovalID,
+		Reason:      params.Reason,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return succeeded("planned stateful restore", result)
+}
+
+func (s RestoreApply) Resume(ctx context.Context, req steps.StepRequest) (*steps.StepResult, error) {
+	return s.Run(ctx, req)
+}
+
+func (s RestoreApply) Compensate(ctx context.Context, req steps.StepRequest, result schema.StepResult) (*steps.StepResult, error) {
+	params, _ := decodeRestoreParams(req.Node.Params)
+	return &steps.StepResult{Status: steps.StatusSucceeded, Summary: "stateful restore compensation requires explicit follow-up", Result: rawJSON(map[string]string{"restore_id": params.RestoreID, "summary": "restore intent remains immutable; no volume is deleted automatically"})}, nil
+}
+
+func (s RestoreApply) Doctor(ctx context.Context, req steps.StepRequest) ([]steps.Finding, error) {
 	return nil, nil
 }
 
@@ -499,6 +818,56 @@ func decodeReplaceParams(raw json.RawMessage) (ReplaceMemberParams, error) {
 	return params, nil
 }
 
+func decodeBackupParams(raw json.RawMessage, requireMember bool) (BackupParams, error) {
+	var params BackupParams
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return params, err
+	}
+	if params.Group == "" {
+		return params, errors.New("stateful group is required")
+	}
+	if params.BackupID == "" {
+		return params, errors.New("backup ID is required")
+	}
+	if params.OperationID == "" {
+		return params, errors.New("operation ID is required")
+	}
+	if requireMember && params.Member < 0 {
+		return params, errors.New("member ordinal must be non-negative")
+	}
+	if len(params.Members) == 0 && params.Member >= 0 {
+		params.Members = []int{params.Member}
+	}
+	sort.Ints(params.Members)
+	return params, nil
+}
+
+func decodeRestoreParams(raw json.RawMessage) (RestoreParams, error) {
+	var params RestoreParams
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return params, err
+	}
+	if params.Group == "" {
+		return params, errors.New("stateful group is required")
+	}
+	if params.BackupID == "" {
+		return params, errors.New("backup ID is required")
+	}
+	if params.RestoreID == "" {
+		return params, errors.New("restore ID is required")
+	}
+	if params.OperationID == "" {
+		return params, errors.New("operation ID is required")
+	}
+	if params.Member < 0 {
+		return params, errors.New("member ordinal must be non-negative")
+	}
+	if params.Mode == "" {
+		params.Mode = stateruntime.RestoreModeMember
+	}
+	return params, nil
+}
+
 func enforceMaxUnavailable(ctx context.Context, client *state.Client, params OrderedUpdateParams) error {
 	group, err := client.GetStatefulGroupControl(ctx, params.Group)
 	if err != nil {
@@ -634,6 +1003,13 @@ func replacementRecommendedActions(params ReplaceMemberParams, failure *schema.S
 		})
 	}
 	return actions
+}
+
+func memberBackupID(backupID string, member int, count int) string {
+	if count <= 1 {
+		return backupID
+	}
+	return fmt.Sprintf("%s-m%d", backupID, member)
 }
 
 func replacementFailed(params ReplaceMemberParams, code, summary string, cause error) *steps.StepResult {

@@ -19,6 +19,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/state"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
 	"github.com/s1liconcow/skiff/internal/state/schema"
+	stateruntime "github.com/s1liconcow/skiff/internal/stateful"
 )
 
 func TestCanarySagaHumanOutputIncludesGeneratedIdentifiers(t *testing.T) {
@@ -309,6 +310,159 @@ func TestStatefulReplaceMemberProdRequiresApproval(t *testing.T) {
 	}
 }
 
+func TestStatefulSnapshotDirectJSONCreatesBackupRecord(t *testing.T) {
+	clearSkiffEnv(t)
+	dir := t.TempDir()
+	store, err := file.New(dir)
+	if err != nil {
+		t.Fatalf("new file store: %v", err)
+	}
+	seedStatefulSagaCLIControls(t, store, "vol-0")
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"stateful", "snapshot", "orders-stream",
+		"--member", "0",
+		"--backup-id", "backup_cli",
+		"--operation-id", "op_backup_cli",
+		"--saga-id", "saga_backup_cli",
+		"--direct",
+		"--state", "file://" + dir,
+		"--env", "prod",
+		"--provider", "fake",
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", "tr_stateful_snapshot_cli",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	var got statefulBackupRestoreOutput
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("stateful snapshot output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_stateful_snapshot_cli" || got.Result.Status != schema.SagaSucceeded || got.Result.BackupID != "backup_cli" {
+		t.Fatalf("unexpected snapshot output: %+v", got)
+	}
+	record, err := stateruntime.ReadBackupRecord(context.Background(), store, "orders-stream", "backup_cli")
+	if err != nil {
+		t.Fatalf("read backup record: %v", err)
+	}
+	if record.SnapshotID != "snap-vol-0" || record.ProviderOperation.ID != "snapshot/snap-vol-0" {
+		t.Fatalf("snapshot provider IDs not persisted: %+v", record)
+	}
+}
+
+func TestStatefulBackupAndRestorePlansReturnJSON(t *testing.T) {
+	clearSkiffEnv(t)
+	dir := t.TempDir()
+	var backupOut, backupErr bytes.Buffer
+	code := Run("skiff", []string{
+		"stateful", "backup", "plan", "orders-stream",
+		"--members", "0,1",
+		"--backup-id", "backup_plan",
+		"--direct",
+		"--state", "file://" + dir,
+		"--env", "prod",
+		"--provider", "fake",
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", "tr_stateful_backup_plan",
+	}, &backupOut, &backupErr)
+	if code != ExitSuccess {
+		t.Fatalf("backup plan exit code = %d, stderr = %s, stdout = %s", code, backupErr.String(), backupOut.String())
+	}
+	var backup statefulBackupRestoreOutput
+	if err := json.Unmarshal(backupOut.Bytes(), &backup); err != nil {
+		t.Fatalf("backup plan output is not valid JSON: %v\n%s", err, backupOut.String())
+	}
+	if !backup.OK || backup.Result.Plan == nil || backup.Result.NextAction != "create_saga" || len(backup.Result.Plan.Graph.Nodes) != 4 {
+		t.Fatalf("unexpected backup plan output: %+v", backup)
+	}
+	if backup.Result.Plan.Graph.Nodes[1].Kind != "stateful.backup.snapshot_member" {
+		t.Fatalf("backup plan missing snapshot node: %+v", backup.Result.Plan.Graph.Nodes)
+	}
+
+	var restoreOut, restoreErr bytes.Buffer
+	code = Run("skiff", []string{
+		"stateful", "restore", "plan", "orders-stream",
+		"--member", "0",
+		"--backup-id", "backup_plan",
+		"--restore-id", "restore_plan",
+		"--direct",
+		"--state", "file://" + dir,
+		"--env", "prod",
+		"--provider", "fake",
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", "tr_stateful_restore_plan",
+	}, &restoreOut, &restoreErr)
+	if code != ExitSuccess {
+		t.Fatalf("restore plan exit code = %d, stderr = %s, stdout = %s", code, restoreErr.String(), restoreOut.String())
+	}
+	var restore statefulBackupRestoreOutput
+	if err := json.Unmarshal(restoreOut.Bytes(), &restore); err != nil {
+		t.Fatalf("restore plan output is not valid JSON: %v\n%s", err, restoreOut.String())
+	}
+	if !restore.OK || restore.Result.Plan == nil || restore.Result.Plan.Graph.Nodes[1].Kind != "approval.manual" {
+		t.Fatalf("restore plan missing approval gate: %+v", restore)
+	}
+}
+
+func TestStatefulRestoreApplyWaitsForApproval(t *testing.T) {
+	clearSkiffEnv(t)
+	dir := t.TempDir()
+	store, err := file.New(dir)
+	if err != nil {
+		t.Fatalf("new file store: %v", err)
+	}
+	seedStatefulSagaCLIControls(t, store, "vol-restore")
+	var snapshotOut, snapshotErr bytes.Buffer
+	code := Run("skiff", []string{
+		"stateful", "snapshot", "orders-stream",
+		"--member", "0",
+		"--backup-id", "backup_restore_cli",
+		"--direct",
+		"--state", "file://" + dir,
+		"--env", "prod",
+		"--provider", "fake",
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", "tr_stateful_restore_snapshot",
+	}, &snapshotOut, &snapshotErr)
+	if code != ExitSuccess {
+		t.Fatalf("snapshot exit code = %d, stderr = %s, stdout = %s", code, snapshotErr.String(), snapshotOut.String())
+	}
+
+	var stdout, stderr bytes.Buffer
+	code = Run("skiff", []string{
+		"stateful", "restore", "apply", "orders-stream",
+		"--member", "0",
+		"--backup-id", "backup_restore_cli",
+		"--restore-id", "restore_cli",
+		"--direct",
+		"--state", "file://" + dir,
+		"--env", "prod",
+		"--provider", "fake",
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", "tr_stateful_restore_apply",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("restore apply exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	var got statefulBackupRestoreOutput
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("restore apply output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.Result.Status != schema.SagaRunning || got.Result.NextAction != "approve_or_reject" || len(got.Result.CurrentSteps) != 1 || got.Result.CurrentSteps[0] != "approve-restore" {
+		t.Fatalf("restore apply should wait for manual approval: %+v", got)
+	}
+	if _, err := store.Get(context.Background(), "stateful/orders-stream/restores/restore_cli/record.json"); err == nil {
+		t.Fatalf("restore record should not be written before approval")
+	}
+}
+
 func TestSagaWatchDirectModeStreamsSagaEvents(t *testing.T) {
 	clearSkiffEnv(t)
 	dir := t.TempDir()
@@ -502,6 +656,36 @@ func TestSagaStartCanaryDeployJSONCreatesAndRuns(t *testing.T) {
 	}
 	if updated.Control.DesiredRelease != "rel_new" || updated.Control.StableRelease != "rel_new" {
 		t.Fatalf("canary did not mark release stable: %+v", updated.Control)
+	}
+}
+
+func seedStatefulSagaCLIControls(t *testing.T, store objstore.ObjectStore, volumeID string) {
+	t.Helper()
+	client := state.NewClient(store)
+	if _, err := client.CreateStatefulGroupControl(context.Background(), schema.StatefulGroupControl{
+		Group: "orders-stream",
+		Env:   "prod",
+		Members: []schema.StatefulMemberSummary{
+			{Member: 0, Generation: 1, InstanceID: "i-old", VolumeID: volumeID, DNSName: "orders-stream-0.internal", Phase: state.StatefulMemberReady},
+		},
+		Replicas:  1,
+		UpdatedBy: schema.Actor{ID: "seed", Type: "test"},
+	}); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if _, err := client.CreateStatefulMemberControl(context.Background(), schema.StatefulMemberControl{
+		Group:      "orders-stream",
+		Env:        "prod",
+		Member:     0,
+		Zone:       "us-west-2a",
+		InstanceID: "i-old",
+		VolumeID:   volumeID,
+		DNSName:    "orders-stream-0.internal",
+		Generation: 1,
+		Phase:      state.StatefulMemberReady,
+		UpdatedBy:  schema.Actor{ID: "seed", Type: "test"},
+	}); err != nil {
+		t.Fatalf("create member: %v", err)
 	}
 }
 

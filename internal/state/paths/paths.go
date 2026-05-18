@@ -161,6 +161,53 @@ func StatefulMembersPrefix(group string) (string, error) {
 	return "stateful/" + group + "/members/", nil
 }
 
+func StatefulBackupIntent(group, backup string) (string, error) {
+	if err := validateName("stateful_group", group); err != nil {
+		return "", err
+	}
+	if err := validateID("backup", backup); err != nil {
+		return "", err
+	}
+	return "stateful/" + group + "/backups/" + backup + "/intent.json", nil
+}
+
+func StatefulBackupRecord(group, backup string) (string, error) {
+	if err := validateName("stateful_group", group); err != nil {
+		return "", err
+	}
+	if err := validateID("backup", backup); err != nil {
+		return "", err
+	}
+	return "stateful/" + group + "/backups/" + backup + "/record.json", nil
+}
+
+func StatefulBackupsPrefix(group string) (string, error) {
+	if err := validateName("stateful_group", group); err != nil {
+		return "", err
+	}
+	return "stateful/" + group + "/backups/", nil
+}
+
+func StatefulRestoreIntent(group, restore string) (string, error) {
+	if err := validateName("stateful_group", group); err != nil {
+		return "", err
+	}
+	if err := validateID("restore", restore); err != nil {
+		return "", err
+	}
+	return "stateful/" + group + "/restores/" + restore + "/intent.json", nil
+}
+
+func StatefulRestoreRecord(group, restore string) (string, error) {
+	if err := validateName("stateful_group", group); err != nil {
+		return "", err
+	}
+	if err := validateID("restore", restore); err != nil {
+		return "", err
+	}
+	return "stateful/" + group + "/restores/" + restore + "/record.json", nil
+}
+
 func OperationEventsPrefix(service, operation string) (string, error) {
 	if err := validateName("service", service); err != nil {
 		return "", err

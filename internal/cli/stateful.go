@@ -55,6 +55,12 @@ func runStateful(binary string, args []string, root rootOptions, stdout, stderr 
 		return runStatefulInspect(binary, args[1:], root, stdout, stderr)
 	case "replace-member":
 		return runStatefulReplaceMember(binary, args[1:], root, stdout, stderr)
+	case "snapshot":
+		return runStatefulSnapshot(binary, args[1:], root, stdout, stderr)
+	case "backup":
+		return runStatefulBackup(binary, args[1:], root, stdout, stderr)
+	case "restore":
+		return runStatefulRestore(binary, args[1:], root, stdout, stderr)
 	case "resume":
 		return runSagaResume(binary, args[1:], root, stdout, stderr)
 	case "watch":
@@ -295,6 +301,176 @@ func runStatefulReplaceMember(binary string, args []string, root rootOptions, st
 	return writeStatefulReplacementSagaResult(binary, "stateful replace-member", *flags.format, *flags.traceID, *result, stdout, stderr)
 }
 
+func runStatefulSnapshot(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" stateful snapshot", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := addClientFlags(fs, root)
+	group := fs.String("group", "", "StatefulGroup name")
+	member := fs.Int("member", -1, "stateful member ordinal")
+	backupID := fs.String("backup-id", "", "backup ID to use")
+	operationID := fs.String("operation-id", "", "operation ID to use")
+	sagaID := fs.String("saga-id", "", "saga ID to use")
+	retention := fs.String("retention", templates.DefaultStatefulBackupRetention, "backup retention duration")
+	reason := fs.String("reason", "", "snapshot reason")
+	run := fs.Bool("run", true, "run the saga after creating it")
+	flagArgs, positionals, err := splitStatefulSnapshotArgs(args)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful snapshot", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeStatefulCommandError(binary, "stateful snapshot", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeStatefulCommandError(binary, "stateful snapshot", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	if *group == "" && len(positionals) == 1 {
+		*group = positionals[0]
+	}
+	if *group == "" || *member < 0 {
+		return writeStatefulCommandError(binary, "stateful snapshot", *flags.format, *flags.traceID, errors.New("StatefulGroup name and --member are required"), stdout, stderr)
+	}
+	loaded, err := flags.load(binary, root, fs)
+	if err != nil {
+		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+	}
+	if loaded.Config.Mode != config.ModeDirect {
+		return writeStatefulCommandError(binary, "stateful snapshot", *flags.format, *flags.traceID, errors.New("stateful snapshot currently requires --direct mode"), stdout, stderr)
+	}
+	req := templates.StatefulBackupRequest{
+		SagaID:      *sagaID,
+		OperationID: *operationID,
+		BackupID:    *backupID,
+		Group:       *group,
+		Env:         loaded.Config.Env,
+		Members:     []int{*member},
+		Member:      *member,
+		Reason:      *reason,
+		Retention:   *retention,
+		TraceID:     *flags.traceID,
+		Actor:       schema.Actor{ID: "skiff-cli", Type: "user"},
+	}
+	result, err := createAndMaybeRunStatefulBackup(nilContext(), binary, loaded.Config, req, *run, false)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful snapshot", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	return writeStatefulBackupRestoreResult(binary, "stateful snapshot", *flags.format, *flags.traceID, *result, stdout, stderr)
+}
+
+func runStatefulBackup(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	if len(args) == 0 || args[0] != "plan" {
+		return writeStatefulCommandError(binary, "stateful backup", defaultString(root.Format, "human"), root.TraceID, errors.New("expected stateful backup plan"), stdout, stderr)
+	}
+	fs := flag.NewFlagSet(binary+" stateful backup plan", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := addClientFlags(fs, root)
+	group := fs.String("group", "", "StatefulGroup name")
+	membersValue := fs.String("members", "", "comma-separated StatefulGroup member ordinals")
+	backupID := fs.String("backup-id", "", "backup ID to use")
+	operationID := fs.String("operation-id", "", "operation ID to use")
+	sagaID := fs.String("saga-id", "", "saga ID to use")
+	retention := fs.String("retention", templates.DefaultStatefulBackupRetention, "backup retention duration")
+	flagArgs, positionals, err := splitStatefulBackupArgs(args[1:])
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful backup plan", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeStatefulCommandError(binary, "stateful backup plan", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeStatefulCommandError(binary, "stateful backup plan", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	if *group == "" && len(positionals) == 1 {
+		*group = positionals[0]
+	}
+	members, err := parseMemberOrdinals(*membersValue)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful backup plan", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if *group == "" || len(members) == 0 {
+		return writeStatefulCommandError(binary, "stateful backup plan", *flags.format, *flags.traceID, errors.New("StatefulGroup name and --members are required"), stdout, stderr)
+	}
+	loaded, err := flags.load(binary, root, fs)
+	if err != nil {
+		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+	}
+	req := templates.StatefulBackupRequest{
+		SagaID:      *sagaID,
+		OperationID: *operationID,
+		BackupID:    *backupID,
+		Group:       *group,
+		Env:         loaded.Config.Env,
+		Members:     members,
+		Retention:   *retention,
+		TraceID:     *flags.traceID,
+		Actor:       schema.Actor{ID: "skiff-cli", Type: "user"},
+	}
+	result, err := createAndMaybeRunStatefulBackup(nilContext(), binary, loaded.Config, req, false, true)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful backup plan", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	return writeStatefulBackupRestoreResult(binary, "stateful backup plan", *flags.format, *flags.traceID, *result, stdout, stderr)
+}
+
+func runStatefulRestore(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	if len(args) == 0 || (args[0] != "plan" && args[0] != "apply") {
+		return writeStatefulCommandError(binary, "stateful restore", defaultString(root.Format, "human"), root.TraceID, errors.New("expected stateful restore plan or apply"), stdout, stderr)
+	}
+	command := args[0]
+	fs := flag.NewFlagSet(binary+" stateful restore "+command, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := addClientFlags(fs, root)
+	group := fs.String("group", "", "StatefulGroup name")
+	member := fs.Int("member", -1, "stateful member ordinal")
+	backupID := fs.String("backup-id", "", "backup ID to restore")
+	restoreID := fs.String("restore-id", "", "restore ID to use")
+	operationID := fs.String("operation-id", "", "operation ID to use")
+	sagaID := fs.String("saga-id", "", "saga ID to use")
+	reason := fs.String("reason", "", "restore reason")
+	approvalID := fs.String("approval-id", "", "approval ID for restore apply")
+	run := fs.Bool("run", true, "run the saga after creating it")
+	flagArgs, positionals, err := splitStatefulRestoreArgs(args[1:])
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful restore "+command, *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeStatefulCommandError(binary, "stateful restore "+command, *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeStatefulCommandError(binary, "stateful restore "+command, *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	if *group == "" && len(positionals) == 1 {
+		*group = positionals[0]
+	}
+	if *group == "" || *member < 0 || *backupID == "" {
+		return writeStatefulCommandError(binary, "stateful restore "+command, *flags.format, *flags.traceID, errors.New("StatefulGroup name, --member, and --backup-id are required"), stdout, stderr)
+	}
+	loaded, err := flags.load(binary, root, fs)
+	if err != nil {
+		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+	}
+	if command == "apply" && loaded.Config.Mode != config.ModeDirect {
+		return writeStatefulCommandError(binary, "stateful restore apply", *flags.format, *flags.traceID, errors.New("stateful restore apply currently requires --direct mode"), stdout, stderr)
+	}
+	req := templates.StatefulRestoreRequest{
+		SagaID:      *sagaID,
+		OperationID: *operationID,
+		RestoreID:   *restoreID,
+		BackupID:    *backupID,
+		Group:       *group,
+		Env:         loaded.Config.Env,
+		Member:      *member,
+		Reason:      *reason,
+		ApprovalID:  *approvalID,
+		TraceID:     *flags.traceID,
+		Actor:       schema.Actor{ID: "skiff-cli", Type: "user"},
+	}
+	result, err := createAndMaybeRunStatefulRestore(nilContext(), binary, loaded.Config, req, *run, command == "plan")
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful restore "+command, *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	return writeStatefulBackupRestoreResult(binary, "stateful restore "+command, *flags.format, *flags.traceID, *result, stdout, stderr)
+}
+
 func loadStatefulGraph(filePath string) (*ir.Graph, error) {
 	doc, err := spec.LoadFile(filePath, spec.DecodeOptions{})
 	if err != nil {
@@ -505,6 +681,78 @@ func splitStatefulReplaceArgs(args []string) ([]string, []string, error) {
 	return splitArgs(args, valueFlags)
 }
 
+func splitStatefulSnapshotArgs(args []string) ([]string, []string, error) {
+	valueFlags := map[string]bool{
+		"api-url":      true,
+		"backup-id":    true,
+		"config":       true,
+		"context":      true,
+		"env":          true,
+		"format":       true,
+		"group":        true,
+		"member":       true,
+		"mode":         true,
+		"operation-id": true,
+		"provider":     true,
+		"reason":       true,
+		"region":       true,
+		"retention":    true,
+		"saga-id":      true,
+		"state":        true,
+		"state-bucket": true,
+		"trace-id":     true,
+	}
+	return splitArgs(args, valueFlags)
+}
+
+func splitStatefulBackupArgs(args []string) ([]string, []string, error) {
+	valueFlags := map[string]bool{
+		"api-url":      true,
+		"backup-id":    true,
+		"config":       true,
+		"context":      true,
+		"env":          true,
+		"format":       true,
+		"group":        true,
+		"members":      true,
+		"mode":         true,
+		"operation-id": true,
+		"provider":     true,
+		"region":       true,
+		"retention":    true,
+		"saga-id":      true,
+		"state":        true,
+		"state-bucket": true,
+		"trace-id":     true,
+	}
+	return splitArgs(args, valueFlags)
+}
+
+func splitStatefulRestoreArgs(args []string) ([]string, []string, error) {
+	valueFlags := map[string]bool{
+		"api-url":      true,
+		"approval-id":  true,
+		"backup-id":    true,
+		"config":       true,
+		"context":      true,
+		"env":          true,
+		"format":       true,
+		"group":        true,
+		"member":       true,
+		"mode":         true,
+		"operation-id": true,
+		"provider":     true,
+		"reason":       true,
+		"region":       true,
+		"restore-id":   true,
+		"saga-id":      true,
+		"state":        true,
+		"state-bucket": true,
+		"trace-id":     true,
+	}
+	return splitArgs(args, valueFlags)
+}
+
 func writeStatefulApprovalRequired(binary, format, traceID, group string, member int, stdout, stderr io.Writer) int {
 	command := fmt.Sprintf("%s stateful replace-member %s --member %d --yes --format json", binary, group, member)
 	if isJSONFormat(format) {
@@ -535,6 +783,9 @@ func printStatefulUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  apply      Write StatefulGroup durable object state")
 	fmt.Fprintln(w, "  inspect    Inspect StatefulGroup direct object state")
 	fmt.Fprintln(w, "  replace-member  Replace one failed StatefulGroup member through a saga")
+	fmt.Fprintln(w, "  snapshot   Snapshot one StatefulGroup member volume")
+	fmt.Fprintln(w, "  backup     Render StatefulGroup backup saga plans")
+	fmt.Fprintln(w, "  restore    Plan or apply StatefulGroup restore sagas")
 	fmt.Fprintln(w, "  resume     Resume a stateful saga")
 	fmt.Fprintln(w, "  watch      Watch stateful saga events")
 	fmt.Fprintln(w, "  cancel     Cancel a registered stateful saga")

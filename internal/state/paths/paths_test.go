@@ -106,6 +106,20 @@ func TestCoreObjectPaths(t *testing.T) {
 			want: "services/payments-api/log-archives/prod/",
 		},
 		{
+			name: "stateful backup record",
+			path: func() (string, error) {
+				return paths.StatefulBackupRecord("orders-stream", "backup_01JABC")
+			},
+			want: "stateful/orders-stream/backups/backup_01JABC/record.json",
+		},
+		{
+			name: "stateful restore intent",
+			path: func() (string, error) {
+				return paths.StatefulRestoreIntent("orders-stream", "restore_01JABC")
+			},
+			want: "stateful/orders-stream/restores/restore_01JABC/intent.json",
+		},
+		{
 			name: "audit event for UTC time",
 			path: func() (string, error) {
 				return paths.AuditEventForTime(time.Date(2026, 5, 16, 23, 0, 0, 0, time.FixedZone("west", -7*60*60)), "01JABCDEF")

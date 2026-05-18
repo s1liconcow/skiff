@@ -2,16 +2,20 @@ package stateful_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/objstore/memory"
 	"github.com/s1liconcow/skiff/internal/provider"
 	sagastate "github.com/s1liconcow/skiff/internal/saga"
 	"github.com/s1liconcow/skiff/internal/saga/steps"
+	"github.com/s1liconcow/skiff/internal/saga/steps/approval"
+	"github.com/s1liconcow/skiff/internal/saga/steps/check"
 	statefulsteps "github.com/s1liconcow/skiff/internal/saga/steps/stateful"
 	"github.com/s1liconcow/skiff/internal/saga/templates"
 	"github.com/s1liconcow/skiff/internal/state"
@@ -211,6 +215,155 @@ func TestReplaceMemberExecutorClassifiesProviderFailure(t *testing.T) {
 	}
 }
 
+func TestBackupExecutorPersistsSnapshotRecord(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	seedStatefulControls(t, ctx, store, []schema.StatefulMemberSummary{memberSummary(0, state.StatefulMemberReady)})
+	createReq := backupCreateRequest(t)
+	sagas := sagastate.NewStore(store)
+	if _, err := sagas.Create(ctx, createReq); err != nil {
+		t.Fatalf("create saga: %v", err)
+	}
+	fake := &fakeStatefulOps{}
+	recipe := &recordingRecipe{name: "nats-jetstream"}
+	result, err := (&sagastate.Executor{
+		Store: sagas,
+		Steps: backupStepMap(store, fake, recipe),
+		Owner: "test",
+	}).Execute(ctx, "saga_stateful_backup")
+	if err != nil {
+		t.Fatalf("execute saga: %v", err)
+	}
+	if result.Status != schema.SagaSucceeded {
+		t.Fatalf("unexpected execution result: %+v", result)
+	}
+	record, err := stateruntime.ReadBackupRecord(ctx, store, "orders-stream", "backup_01JABC")
+	if err != nil {
+		t.Fatalf("read backup record: %v", err)
+	}
+	if record.SnapshotID != "snap-123" || record.ProviderOperation.ID != "snapshot/vol-123" || record.ProviderID != "snap-123" {
+		t.Fatalf("unexpected backup record: %+v", record)
+	}
+	if !reflect.DeepEqual(recipe.calls, []string{"0:backup"}) {
+		t.Fatalf("recipe calls = %v, want backup hook", recipe.calls)
+	}
+}
+
+func TestRestoreExecutorWaitsForApprovalThenRecordsRestore(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	seedStatefulControls(t, ctx, store, []schema.StatefulMemberSummary{memberSummary(0, state.StatefulMemberReady)})
+	fake := &fakeStatefulOps{}
+	if _, err := (stateruntime.BackupRunner{Objects: store, State: state.NewClient(store), Provider: fake}).SnapshotMember(ctx, stateruntime.SnapshotMemberRequest{
+		BackupID:    "backup_01JABC",
+		Group:       "orders-stream",
+		Env:         "prod",
+		Member:      0,
+		OperationID: "op_backup",
+		Actor:       schema.Actor{ID: "operator", Type: "user"},
+	}); err != nil {
+		t.Fatalf("SnapshotMember: %v", err)
+	}
+	sagas := sagastate.NewStore(store)
+	if _, err := sagas.Create(ctx, restoreCreateRequest(t)); err != nil {
+		t.Fatalf("create saga: %v", err)
+	}
+	steps := stepMap(append(statefulsteps.NewWithProvider(store, fake, nil), approval.Manual{Binary: "skiff"}))
+	first, err := (&sagastate.Executor{
+		Store: sagas,
+		Steps: steps,
+		Owner: "test",
+	}).Execute(ctx, "saga_stateful_restore")
+	if err != nil {
+		t.Fatalf("execute waiting saga: %v", err)
+	}
+	if first.Status != schema.SagaRunning || len(first.WaitingSteps) != 1 || first.WaitingSteps[0] != "approve-restore" {
+		t.Fatalf("unexpected waiting result: %+v", first)
+	}
+	if _, err := approval.Approve(ctx, sagas, approval.DecisionRequest{
+		SagaID: "saga_stateful_restore",
+		StepID: "approve-restore",
+		Actor:  schema.Actor{ID: "operator", Type: "user"},
+		Reason: "restore target prepared",
+	}); err != nil {
+		t.Fatalf("approve restore: %v", err)
+	}
+	second, err := (&sagastate.Executor{
+		Store: sagas,
+		Steps: steps,
+		Owner: "test",
+	}).Execute(ctx, "saga_stateful_restore")
+	if err != nil {
+		t.Fatalf("execute approved saga: %v", err)
+	}
+	if second.Status != schema.SagaSucceeded {
+		t.Fatalf("unexpected approved result: %+v", second)
+	}
+	obj, err := store.Get(ctx, "stateful/orders-stream/restores/restore_01JABC/record.json")
+	if err != nil {
+		t.Fatalf("restore record missing: %v", err)
+	}
+	var record stateruntime.RestoreRecord
+	if err := json.Unmarshal(obj.Body, &record); err != nil {
+		t.Fatalf("decode restore record: %v", err)
+	}
+	if record.Status != stateruntime.RestoreStatusPlanned || record.SnapshotID != "snap-123" || record.ProviderID != "snap-123" {
+		t.Fatalf("unexpected restore record: %+v", record)
+	}
+}
+
+func TestRestoreVerifyBackupRejectsExpiredRecord(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	body := mustJSON(t, stateruntime.BackupRecord{
+		SchemaVersion: schema.Version,
+		BackupID:      "backup_expired",
+		Group:         "orders-stream",
+		Env:           "prod",
+		Member:        0,
+		VolumeID:      "vol-123",
+		SnapshotID:    "snap-123",
+		ProviderID:    "snap-123",
+		Status:        stateruntime.BackupStatusAvailable,
+		CreatedAt:     "2026-05-18T04:00:00Z",
+		ExpiresAt:     "2026-05-18T05:00:00Z",
+	})
+	if _, err := store.Create(ctx, "stateful/orders-stream/backups/backup_expired/record.json", body, objstore.PutOptions{}); err != nil {
+		t.Fatalf("create backup record: %v", err)
+	}
+	params := mustJSON(t, statefulsteps.RestoreParams{
+		RestoreID:   "restore_expired",
+		BackupID:    "backup_expired",
+		Group:       "orders-stream",
+		Env:         "prod",
+		Member:      0,
+		OperationID: "op_restore",
+	})
+	result, err := (statefulsteps.RestoreVerifyBackup{Store: store, Clock: func() time.Time {
+		return time.Date(2026, 5, 18, 6, 0, 0, 0, time.UTC)
+	}}).Run(ctx, steps.StepRequest{
+		SagaID:  "saga_restore",
+		TraceID: "tr_restore",
+		Intent:  schema.SagaIntent{SagaID: "saga_restore", Actor: schema.Actor{ID: "operator", Type: "user"}},
+		Node:    schema.SagaNode{ID: "verify-backup", Kind: statefulsteps.KindRestoreVerifyBackup, Params: params},
+	})
+	if err != nil {
+		t.Fatalf("RestoreVerifyBackup: %v", err)
+	}
+	if result.Status != steps.StatusFailed || result.Failure == nil || result.Failure.Code != "STATEFUL_BACKUP_STALE" {
+		t.Fatalf("unexpected restore verify result: %+v", result)
+	}
+	findings, err := (statefulsteps.RestoreVerifyBackup{Store: store, Clock: func() time.Time {
+		return time.Date(2026, 5, 18, 6, 0, 0, 0, time.UTC)
+	}}).Doctor(ctx, steps.StepRequest{Node: schema.SagaNode{Params: params}})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	if len(findings) != 1 || findings[0].Code != "STATEFUL_BACKUP_STALE" {
+		t.Fatalf("unexpected doctor findings: %+v", findings)
+	}
+}
+
 func orderedUpdateCreateRequest(t *testing.T, members []int) sagastate.CreateRequest {
 	t.Helper()
 	req, err := templates.StatefulOrderedUpdate(templates.StatefulOrderedUpdateRequest{
@@ -249,6 +402,46 @@ func replaceMemberCreateRequest(t *testing.T) sagastate.CreateRequest {
 	})
 	if err != nil {
 		t.Fatalf("StatefulReplaceMember: %v", err)
+	}
+	return req
+}
+
+func backupCreateRequest(t *testing.T) sagastate.CreateRequest {
+	t.Helper()
+	req, err := templates.StatefulBackup(templates.StatefulBackupRequest{
+		SagaID:      "saga_stateful_backup",
+		OperationID: "op_stateful_backup",
+		BackupID:    "backup_01JABC",
+		Group:       "orders-stream",
+		Env:         "prod",
+		Members:     []int{0},
+		TraceID:     "tr_stateful_backup",
+		Actor:       schema.Actor{ID: "agent-one", Type: "agent"},
+		CreatedAt:   time.Date(2026, 5, 18, 4, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("StatefulBackup: %v", err)
+	}
+	return req
+}
+
+func restoreCreateRequest(t *testing.T) sagastate.CreateRequest {
+	t.Helper()
+	req, err := templates.StatefulRestore(templates.StatefulRestoreRequest{
+		SagaID:      "saga_stateful_restore",
+		OperationID: "op_stateful_restore",
+		RestoreID:   "restore_01JABC",
+		BackupID:    "backup_01JABC",
+		Group:       "orders-stream",
+		Env:         "prod",
+		Member:      0,
+		ApprovalID:  "approval-123",
+		TraceID:     "tr_stateful_restore",
+		Actor:       schema.Actor{ID: "agent-one", Type: "agent"},
+		CreatedAt:   time.Date(2026, 5, 18, 4, 30, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("StatefulRestore: %v", err)
 	}
 	return req
 }
@@ -294,6 +487,27 @@ func stepMap(items []steps.Step) map[string]steps.Step {
 	}
 	return out
 }
+
+func backupStepMap(store objstore.ObjectStore, provider provider.StatefulOperations, recipe stateruntime.Recipe) map[string]steps.Step {
+	items := []steps.Step{check.Preflight{Store: store, Provider: fakeProviderIdentity{name: "fake"}}}
+	items = append(items, statefulsteps.NewWithProvider(store, provider, recipe)...)
+	return stepMap(items)
+}
+
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	body, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal JSON: %v", err)
+	}
+	return body
+}
+
+type fakeProviderIdentity struct {
+	name string
+}
+
+func (f fakeProviderIdentity) Name() string { return f.name }
 
 type recordingRecipe struct {
 	name  string
@@ -351,6 +565,8 @@ type fakeStatefulOps struct {
 	failAttach    bool
 	calls         []string
 }
+
+func (f *fakeStatefulOps) Name() string { return "fake" }
 
 func (f *fakeStatefulOps) FenceInstance(ctx context.Context, req provider.FenceInstanceRequest) (*provider.FenceInstanceResult, error) {
 	f.calls = append(f.calls, "fence")

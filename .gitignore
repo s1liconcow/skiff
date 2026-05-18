@@ -1,5 +1,7 @@
 # bv (beads viewer) local config and caches
 .bv/
+bv-pages/
+graph.html
 
 # ralph local agent coordination state
 .ralph/

@@ -103,6 +103,91 @@ func TestStatefulReplaceMemberBuildsExecutableHighRiskGraph(t *testing.T) {
 	}
 }
 
+func TestStatefulBackupBuildsSnapshotAndVerifyGraph(t *testing.T) {
+	req, err := templates.StatefulBackup(templates.StatefulBackupRequest{
+		SagaID:      "saga_backup",
+		OperationID: "op_backup",
+		BackupID:    "backup_01JABC",
+		Group:       "orders-stream",
+		Env:         "prod",
+		Members:     []int{1, 0},
+		TraceID:     "tr_backup",
+		Actor:       schema.Actor{ID: "operator", Type: "user"},
+		CreatedAt:   time.Date(2026, 5, 18, 4, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("StatefulBackup returned error: %v", err)
+	}
+	if req.Intent.Kind != templates.StatefulBackupKind || req.Intent.Risk != schema.RiskMedium || req.Intent.Reversibility != schema.Compensatable {
+		t.Fatalf("unexpected backup intent: %+v", req.Intent)
+	}
+	wantOrder := []string{"preflight", "snapshot-member-0", "snapshot-member-1", "verify-backup"}
+	if got := nodeIDs(req.Graph.Nodes); !reflect.DeepEqual(got, wantOrder) {
+		t.Fatalf("node order = %v, want %v", got, wantOrder)
+	}
+	if req.Graph.Nodes[1].Kind != "stateful.backup.snapshot_member" || req.Graph.Nodes[3].Kind != "stateful.backup.verify" {
+		t.Fatalf("unexpected backup graph nodes: %+v", req.Graph.Nodes)
+	}
+	var params struct {
+		Retention string `json:"retention"`
+		Member    int    `json:"member"`
+	}
+	if err := json.Unmarshal(req.Graph.Nodes[1].Params, &params); err != nil {
+		t.Fatalf("decode backup params: %v", err)
+	}
+	if params.Retention != templates.DefaultStatefulBackupRetention || params.Member != 0 {
+		t.Fatalf("unexpected backup params: %+v", params)
+	}
+	if _, err := sagastate.TopologicalOrder(req.Graph); err != nil {
+		t.Fatalf("graph is not topological: %v", err)
+	}
+}
+
+func TestStatefulBackupRequiresExplicitMembers(t *testing.T) {
+	_, err := templates.StatefulBackup(templates.StatefulBackupRequest{
+		Group:   "orders-stream",
+		Actor:   schema.Actor{ID: "operator", Type: "user"},
+		TraceID: "tr_backup",
+	})
+	if err == nil || !strings.Contains(err.Error(), "at least one member") {
+		t.Fatalf("error = %v, want member requirement", err)
+	}
+}
+
+func TestStatefulRestoreBuildsApprovalGatedGraph(t *testing.T) {
+	req, err := templates.StatefulRestore(templates.StatefulRestoreRequest{
+		SagaID:      "saga_restore",
+		OperationID: "op_restore",
+		RestoreID:   "restore_01JABC",
+		BackupID:    "backup_01JABC",
+		Group:       "orders-stream",
+		Env:         "prod",
+		Member:      0,
+		TraceID:     "tr_restore",
+		Actor:       schema.Actor{ID: "operator", Type: "user"},
+		CreatedAt:   time.Date(2026, 5, 18, 4, 30, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("StatefulRestore returned error: %v", err)
+	}
+	if req.Intent.Kind != templates.StatefulRestoreKind || req.Intent.Risk != schema.RiskHigh || req.Intent.Reversibility != schema.PartiallyReversible {
+		t.Fatalf("unexpected restore intent: %+v", req.Intent)
+	}
+	wantOrder := []string{"verify-backup", "approve-restore", "apply-restore"}
+	if got := nodeIDs(req.Graph.Nodes); !reflect.DeepEqual(got, wantOrder) {
+		t.Fatalf("node order = %v, want %v", got, wantOrder)
+	}
+	if req.Graph.Nodes[1].Kind != "approval.manual" || req.Graph.Nodes[1].Risk != schema.RiskHigh {
+		t.Fatalf("restore approval node missing high risk gate: %+v", req.Graph.Nodes[1])
+	}
+	if req.Graph.Nodes[2].Kind != "stateful.restore.apply" || req.Graph.Nodes[2].Reversibility != schema.PartiallyReversible {
+		t.Fatalf("restore apply node is not marked partial reversible: %+v", req.Graph.Nodes[2])
+	}
+	if _, err := sagastate.TopologicalOrder(req.Graph); err != nil {
+		t.Fatalf("graph is not topological: %v", err)
+	}
+}
+
 func nodeIDs(nodes []schema.SagaNode) []string {
 	out := make([]string, 0, len(nodes))
 	for _, node := range nodes {
