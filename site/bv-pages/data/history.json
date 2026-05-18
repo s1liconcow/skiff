@@ -1,0 +1,558 @@
+{
+  "generated_at": "2026-05-18T03:06:39Z",
+  "commits": [
+    {
+      "sha": "004e75635c8727416c210eb34322a6ac80dfe99d",
+      "date": "2026-05-16T10:02:10-07:00",
+      "message": "Add object store abstraction and memory implementation",
+      "beads_added": [
+        "skiff-0vi"
+      ]
+    },
+    {
+      "sha": "a43ac2d2ac17756d5ab48f335a0212b38b23ec97",
+      "date": "2026-05-16T10:08:36-07:00",
+      "message": "Initialize Skiff repository skeleton",
+      "beads_added": [
+        "skiff-ddq"
+      ]
+    },
+    {
+      "sha": "8e0ce2c8e2948cd671cff5dddb019c37ac8a1f68",
+      "date": "2026-05-16T10:46:14-07:00",
+      "message": "Implement configuration loading",
+      "beads_added": [
+        "skiff-hj9"
+      ]
+    },
+    {
+      "sha": "75508ff45cc9abd45faf10dc5b98b340fdfc013f",
+      "date": "2026-05-16T10:57:28-07:00",
+      "message": "Define object-state schemas and paths",
+      "beads_added": [
+        "skiff-dui"
+      ]
+    },
+    {
+      "sha": "365eff952d31f3f0315ed11709c464eacf59682b",
+      "date": "2026-05-16T11:14:56-07:00",
+      "message": "Implement S3 object store backend",
+      "beads_added": [
+        "skiff-qby"
+      ]
+    },
+    {
+      "sha": "54326edff4da65c7254dcd22cb61bb2ec6e4710d",
+      "date": "2026-05-16T11:30:24-07:00",
+      "message": "Implement signed release verification",
+      "beads_added": [
+        "skiff-x2p"
+      ]
+    },
+    {
+      "sha": "bf48a6323be8636af81f35875c9a74b633b4505c",
+      "date": "2026-05-16T12:18:26-07:00",
+      "message": "Implement runner manifest bootstrap",
+      "beads_added": [
+        "skiff-fko",
+        "skiff-p78",
+        "skiff-ylc",
+        "skiff-lbf"
+      ]
+    },
+    {
+      "sha": "49a94eb28bfbdd0c918814158a3c81f81412e3b2",
+      "date": "2026-05-16T12:44:16-07:00",
+      "message": "Implement skiffd server skeleton",
+      "beads_added": [
+        "skiff-a79"
+      ]
+    },
+    {
+      "sha": "f7014430ba293169b19151b01eb73c2609efbce6",
+      "date": "2026-05-16T12:56:43-07:00",
+      "message": "Implement service control leases",
+      "beads_added": [
+        "skiff-geu"
+      ]
+    },
+    {
+      "sha": "07de672c1a2f4788b9e07b329131af17a0d301cc",
+      "date": "2026-05-16T13:06:16-07:00",
+      "message": "Implement runner lifecycle FSM",
+      "beads_added": [
+        "skiff-jkx"
+      ]
+    },
+    {
+      "sha": "385ea957b7fa4936ac5d4aa260cec0b1d951dfbc",
+      "date": "2026-05-16T13:46:56-07:00",
+      "message": "Implement spec validation",
+      "beads_added": [
+        "skiff-a91"
+      ]
+    },
+    {
+      "sha": "e2a418a31a20fa690100008ed9359bfe0e0362b3",
+      "date": "2026-05-16T13:56:06-07:00",
+      "message": "Define typed IR and base compiler",
+      "beads_added": [
+        "skiff-on7"
+      ]
+    },
+    {
+      "sha": "f7fc302a277a02904ba2a844f2e8808d70471546",
+      "date": "2026-05-16T14:16:27-07:00",
+      "message": "Add AWS provider and bootstrap foundations",
+      "beads_added": [
+        "skiff-ehk",
+        "skiff-oib"
+      ]
+    },
+    {
+      "sha": "518e323c03af0bb8893866fe311bb992e77da809",
+      "date": "2026-05-16T14:21:40-07:00",
+      "message": "Add append-only event log",
+      "beads_added": [
+        "skiff-8xl"
+      ]
+    },
+    {
+      "sha": "7e37bc94e920b6be86fb5651c6afa4db63d767c0",
+      "date": "2026-05-16T14:28:36-07:00",
+      "message": "Add local object-state integration harness",
+      "beads_added": [
+        "skiff-cik"
+      ]
+    },
+    {
+      "sha": "b4b76638af1fc363d1a43568952063461b45a6a1",
+      "date": "2026-05-16T14:37:05-07:00",
+      "message": "Add state bucket policy validation",
+      "beads_added": [
+        "skiff-v0a"
+      ]
+    },
+    {
+      "sha": "5439cea31b04d80c3e52ebcc048cfee5c713ba78",
+      "date": "2026-05-16T14:42:06-07:00",
+      "message": "Add artifact preparation primitives",
+      "beads_added": [
+        "skiff-vqd"
+      ]
+    },
+    {
+      "sha": "dad2493ea47a0cc47af287db38459eb8acc1080f",
+      "date": "2026-05-16T14:48:59-07:00",
+      "message": "Add local runner e2e fixture",
+      "beads_added": [
+        "skiff-78q"
+      ]
+    },
+    {
+      "sha": "99f9ce948a5d1f7e569760565c1f179d29dcfd1b",
+      "date": "2026-05-16T15:16:42-07:00",
+      "message": "Complete CLI clients and skiffd index beads",
+      "beads_added": [
+        "skiff-vdm",
+        "skiff-r3m"
+      ]
+    },
+    {
+      "sha": "20806bd11f6b4940aafc63bb3e2f2f1f9465b3ec",
+      "date": "2026-05-16T15:29:51-07:00",
+      "message": "Lower service IR to AWS resources",
+      "beads_added": [
+        "skiff-cyk"
+      ]
+    },
+    {
+      "sha": "3352d047b90410204ba0fa12c988eeb379e04aea",
+      "date": "2026-05-16T15:37:37-07:00",
+      "message": "Implement AWS direct resource plan apply",
+      "beads_added": [
+        "skiff-92g"
+      ]
+    },
+    {
+      "sha": "f8ec4a533695f583c15001d1f050cb7a0ee4e363",
+      "date": "2026-05-16T15:44:38-07:00",
+      "message": "Implement deploy release orchestration",
+      "beads_added": [
+        "skiff-n3s"
+      ]
+    },
+    {
+      "sha": "5df490c511e60cca2eccad803fa80b630136d91a",
+      "date": "2026-05-16T15:50:16-07:00",
+      "message": "Implement ASG rollout watch support",
+      "beads_added": [
+        "skiff-fpl"
+      ]
+    },
+    {
+      "sha": "990ee79950628a8c06e72be7254e5cabf31d3be3",
+      "date": "2026-05-16T16:03:41-07:00",
+      "message": "Implement service log tailing",
+      "beads_added": [
+        "skiff-n54"
+      ]
+    },
+    {
+      "sha": "1ba25645a7952664a5ba4b6c0692eb8312f86243",
+      "date": "2026-05-16T16:13:00-07:00",
+      "message": "Implement service metrics queries",
+      "beads_added": [
+        "skiff-q8p"
+      ]
+    },
+    {
+      "sha": "13ed4422e94b78d0fb8f5366c214aa85dd3f261b",
+      "date": "2026-05-16T16:20:14-07:00",
+      "message": "Implement service health status",
+      "beads_added": [
+        "skiff-v3l"
+      ]
+    },
+    {
+      "sha": "e7c59569332e3fa3ed9bc9f858a2fd28b08920ad",
+      "date": "2026-05-16T16:45:30-07:00",
+      "message": "Implement service doctor diagnostics",
+      "beads_added": [
+        "skiff-ihr"
+      ]
+    },
+    {
+      "sha": "bda0449a486702333345a758475d2af1ecb85939",
+      "date": "2026-05-16T16:55:53-07:00",
+      "message": "Implement saga object-state persistence",
+      "beads_added": [
+        "skiff-eeh"
+      ]
+    },
+    {
+      "sha": "db41f6fb38af319e1e504254ac1eeed3baf60dbc",
+      "date": "2026-05-16T17:03:30-07:00",
+      "message": "Implement saga executor engine",
+      "beads_added": [
+        "skiff-q33"
+      ]
+    },
+    {
+      "sha": "520c9f0bcb6141b3929623b85661e6be41716291",
+      "date": "2026-05-16T17:18:02-07:00",
+      "message": "Implement rollback operation and saga template",
+      "beads_added": [
+        "skiff-2cc"
+      ]
+    },
+    {
+      "sha": "8616a84a1c63e4f851fa2d5cb5a5b235b83fdd44",
+      "date": "2026-05-16T17:27:39-07:00",
+      "message": "Implement saga check and approval steps",
+      "beads_added": [
+        "skiff-jb6"
+      ]
+    },
+    {
+      "sha": "59cde06b5dbbc72de0785713e49bb8e32956e9e0",
+      "date": "2026-05-16T17:46:54-07:00",
+      "message": "Implement canary deployment saga",
+      "beads_added": [
+        "skiff-a9o"
+      ]
+    },
+    {
+      "sha": "aea57ac84c16dadea024a594eb2d2f47edd90016",
+      "date": "2026-05-16T18:06:26-07:00",
+      "message": "Add stateless service release gate",
+      "beads_added": [
+        "skiff-2zf"
+      ]
+    },
+    {
+      "sha": "8aee22ae781c7f6d38dd3c4dc624877e5532840c",
+      "date": "2026-05-16T18:19:37-07:00",
+      "message": "Add agent solve action graph",
+      "beads_added": [
+        "skiff-syg"
+      ]
+    },
+    {
+      "sha": "d1e8b51ca2b90fc67a6971bbb887a7bd078e23d1",
+      "date": "2026-05-16T18:30:25-07:00",
+      "message": "Add operation and saga event streaming",
+      "beads_added": [
+        "skiff-u4b"
+      ]
+    },
+    {
+      "sha": "304194e4a1c05e7539cc7d56b227e397f1aed360",
+      "date": "2026-05-16T18:36:12-07:00",
+      "message": "Standardize CLI failure taxonomy",
+      "beads_added": [
+        "skiff-d89"
+      ]
+    },
+    {
+      "sha": "5024aeaef9824db99fb5ae2ad52fbdd85b701a1c",
+      "date": "2026-05-16T18:51:20-07:00",
+      "message": "Add operation resume worker",
+      "beads_added": [
+        "skiff-1y3"
+      ]
+    },
+    {
+      "sha": "3d53d7ebfdddf2e6fad8057684e1da762ac70412",
+      "date": "2026-05-16T19:17:49-07:00",
+      "message": "Add Bubble Tea operations TUI",
+      "beads_added": [
+        "skiff-wrp"
+      ]
+    },
+    {
+      "sha": "095140838160d4a79ef4f4832040479e342f6b4b",
+      "date": "2026-05-16T19:33:30-07:00",
+      "message": "Add release candidate promotion workflow",
+      "beads_added": [
+        "skiff-3qy"
+      ]
+    },
+    {
+      "sha": "343655145026abbc4c16ffe2911489cc6036405b",
+      "date": "2026-05-16T20:02:15-07:00",
+      "message": "Add managed database stack recipe",
+      "beads_added": [
+        "skiff-9dd"
+      ]
+    },
+    {
+      "sha": "61f121102b18c2bff3a14317c0afaf8c5994b8f5",
+      "date": "2026-05-16T20:17:19-07:00",
+      "message": "Add typed plugin API and host",
+      "beads_added": [
+        "skiff-bga"
+      ]
+    },
+    {
+      "sha": "886b2f188c3f859cb572232a0764656f1f1f4f11",
+      "date": "2026-05-16T20:25:08-07:00",
+      "message": "Add authorization and audit hardening",
+      "beads_added": [
+        "skiff-07s"
+      ]
+    },
+    {
+      "sha": "e81ef805f34d58f6d8adaa3fad86f7eed2e1dc76",
+      "date": "2026-05-16T20:32:04-07:00",
+      "message": "Add drift detection and conservative GC",
+      "beads_added": [
+        "skiff-qj8"
+      ]
+    },
+    {
+      "sha": "ce2823cbb98b67f90ff8e8a876d554f20f20aa9f",
+      "date": "2026-05-16T20:49:20-07:00",
+      "message": "Add database backup and restore sagas",
+      "beads_added": [
+        "skiff-4fr"
+      ]
+    },
+    {
+      "sha": "135ac9d5941e9a9e04196ec45519c65807b66451",
+      "date": "2026-05-16T20:56:29-07:00",
+      "message": "Add install and self-hosted skiffd packaging",
+      "beads_added": [
+        "skiff-1pb"
+      ]
+    },
+    {
+      "sha": "c7d4a5b0e38a84546d94687a832b4eff80b433ed",
+      "date": "2026-05-16T21:07:52-07:00",
+      "message": "Add provider and plugin conformance suites",
+      "beads_added": [
+        "skiff-1a2"
+      ]
+    },
+    {
+      "sha": "272d12b3d8c176cf804f9e348792b2270778af47",
+      "date": "2026-05-16T21:24:35-07:00",
+      "message": "Add multi-region stack failover journey",
+      "beads_added": [
+        "skiff-9it"
+      ]
+    },
+    {
+      "sha": "20bf53ae020d14226f4422ccef8c704c707f1f9a",
+      "date": "2026-05-16T21:43:03-07:00",
+      "message": "Add secret rotation saga",
+      "beads_added": [
+        "skiff-p8c"
+      ]
+    },
+    {
+      "sha": "dafe32302537a5767b87ab488b794045c2a11c52",
+      "date": "2026-05-16T22:10:30-07:00",
+      "message": "Expand e2e coverage matrix",
+      "beads_added": [
+        "skiff-kws"
+      ]
+    },
+    {
+      "sha": "2383bb030517ba355ddff06894f0e9922e73f9dd",
+      "date": "2026-05-16T22:23:04-07:00",
+      "message": "Add optional mTLS plugin",
+      "beads_added": [
+        "skiff-rr7"
+      ]
+    },
+    {
+      "sha": "a8ead8224e776743729d111b930c3f787c244d66",
+      "date": "2026-05-16T22:46:53-07:00",
+      "message": "Implement Kubernetes import workflow",
+      "beads_added": [
+        "skiff-ew2"
+      ]
+    },
+    {
+      "sha": "dfe542c2a6ffabc79ebfd8c243f33f1ce00e3c28",
+      "date": "2026-05-16T22:59:30-07:00",
+      "message": "Implement Terraform adoption workflow",
+      "beads_added": [
+        "skiff-irk"
+      ]
+    },
+    {
+      "sha": "1399b122c7efdc6bc8bbf6b1ee64dd6cc11b7efe",
+      "date": "2026-05-16T23:15:15-07:00",
+      "message": "Generate CI/CD templates",
+      "beads_added": [
+        "skiff-7z5"
+      ]
+    },
+    {
+      "sha": "b62ccb3d74eb47f842705d769108cdf5646269ec",
+      "date": "2026-05-17T09:27:44-07:00",
+      "message": "Add customer journey docs and demos",
+      "beads_added": [
+        "skiff-aff"
+      ]
+    },
+    {
+      "sha": "5cfb4bde76cc282de321098de1d4299d9b538d5a",
+      "date": "2026-05-17T09:41:07-07:00",
+      "message": "Implement secure debug bundles",
+      "beads_added": [
+        "skiff-jss"
+      ]
+    },
+    {
+      "sha": "b9a1d8f5d143cbff06cbd0592572a1578e512235",
+      "date": "2026-05-17T09:50:29-07:00",
+      "message": "Add key and certificate rotation templates",
+      "beads_added": [
+        "skiff-jtj"
+      ]
+    },
+    {
+      "sha": "f27a17f94dab272f7a6a926e6c131f97f541aaf7",
+      "date": "2026-05-17T10:03:50-07:00",
+      "message": "Add stateful group foundation",
+      "beads_added": [
+        "skiff-767"
+      ]
+    },
+    {
+      "sha": "0709971371a8a92a627fbe0058defae854142b86",
+      "date": "2026-05-17T10:12:43-07:00",
+      "message": "Add cost shape advisor",
+      "beads_added": [
+        "skiff-9u1"
+      ]
+    },
+    {
+      "sha": "3c7ba67a001961eced055229f6d9f79ab9eaa7b2",
+      "date": "2026-05-17T10:54:57-07:00",
+      "message": "Define AWS live deployment shape inputs",
+      "beads_added": [
+        "skiff-wku"
+      ]
+    },
+    {
+      "sha": "3a67f5dde02204054ff35bdaf83f1bf90cacc2d4",
+      "date": "2026-05-17T11:08:56-07:00",
+      "message": "Bump Go baseline to 1.24",
+      "beads_added": [
+        "skiff-txx"
+      ]
+    },
+    {
+      "sha": "450828030f4d4e5ced4176f1c3d746dc9611bb44",
+      "date": "2026-05-17T11:29:56-07:00",
+      "message": "Implement live AWS adapters and e2e coverage",
+      "beads_added": [
+        "skiff-txx"
+      ]
+    },
+    {
+      "sha": "7855c6844fbf1b48b6b67fd2c60cbdfe92aba248",
+      "date": "2026-05-17T11:35:17-07:00",
+      "message": "Complete e2e integration matrix",
+      "beads_added": [
+        "skiff-kws"
+      ]
+    },
+    {
+      "sha": "1236c84f23ce862e0ebd57278d66fac685c27ccf",
+      "date": "2026-05-17T11:43:52-07:00",
+      "message": "Add production readiness gate",
+      "beads_added": [
+        "skiff-66e"
+      ]
+    },
+    {
+      "sha": "5b36e30cda8a9d8589254651c0ada7d0961ac2bf",
+      "date": "2026-05-17T11:47:47-07:00",
+      "message": "Add GA release handoff docs",
+      "beads_added": [
+        "skiff-iau"
+      ]
+    },
+    {
+      "sha": "153ea76a12855f4610cdb604a0c8c08148781648",
+      "date": "2026-05-17T19:20:51-07:00",
+      "message": "Implement stateful groups and sandbox updates",
+      "beads_added": [
+        "skiff-statefulgroup-provider-plan-6lv",
+        "skiff-statefulgroup-aws-lifecycle-f2u",
+        "skiff-statefulgroup-runner-runtime-981",
+        "skiff-statefulgroup-object-apply-ub6",
+        "skiff-statefulgroup-compile-plan-vcj"
+      ]
+    },
+    {
+      "sha": "4aaae24349befdb4de4477a304c817808295ca73",
+      "date": "2026-05-17T19:35:17-07:00",
+      "message": "Add stateful runner runtime support",
+      "beads_added": [
+        "skiff-statefulgroup-runner-runtime-981"
+      ]
+    },
+    {
+      "sha": "c74e35e63d571e8efb2e4c36ed41d7b225551469",
+      "date": "2026-05-17T19:46:20-07:00",
+      "message": "Add ordered stateful update saga",
+      "beads_added": [
+        "skiff-statefulgroup-ordered-update-saga-vg8"
+      ]
+    },
+    {
+      "sha": "c04a95c3a780a032c28b4903a473ddcb97f7cf78",
+      "date": "2026-05-17T19:59:03-07:00",
+      "message": "Productionize stateful replacement saga",
+      "beads_added": [
+        "skiff-statefulgroup-replace-recovery-saga-6wv"
+      ]
+    }
+  ]
+}
