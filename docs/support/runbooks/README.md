@@ -10,4 +10,5 @@ unavailable.
 - [lease-held.md](lease-held.md)
 - [stuck-saga.md](stuck-saga.md)
 - [failed-restore.md](failed-restore.md)
+- [stateful-member-replacement.md](stateful-member-replacement.md)
 - [skiffd-unavailable.md](skiffd-unavailable.md)

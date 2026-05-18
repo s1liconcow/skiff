@@ -192,6 +192,18 @@ primitives: IAM role/profile, security groups, launch template, Auto Scaling
 Group, target group, log group, metrics, release manifest, runtime manifest, and
 service control state.
 
+Stateful examples are available for deliberate self-managed state:
+
+```bash
+skiff validate examples/stateful/jetstream/skiff.yaml --format json
+skiff validate examples/stateful/single-member/skiff.yaml --format json
+skiff stateful plan examples/stateful/jetstream/skiff.yaml --provider fake --region local --format json
+```
+
+Read [Stateful Group](recipes/stateful-group.md) before using these examples in
+production. Managed state remains the default recommendation for ordinary
+databases, queues, and caches.
+
 ## Plan Cloud Primitives
 
 ```bash
