@@ -372,6 +372,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Service:     strings.TrimSpace(r.URL.Query().Get("service")),
 		Source:      "api",
 		Freshness:   servicestatus.FreshnessFromIndex(read.freshness),
+		Now:         s.clock().UTC(),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":         true,
@@ -407,6 +408,7 @@ func (s *Server) handleDoctor(w http.ResponseWriter, r *http.Request) {
 		Service:     service,
 		Source:      "api",
 		Freshness:   servicestatus.FreshnessFromIndex(read.freshness),
+		Now:         s.clock().UTC(),
 	})
 	result, err := servicedoctor.Diagnose(r.Context(), status, servicedoctor.Options{
 		Service: service,

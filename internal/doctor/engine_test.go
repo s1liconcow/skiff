@@ -189,6 +189,91 @@ func TestDiagnoseMissingService(t *testing.T) {
 	}
 }
 
+func TestDiagnoseStatefulGroupFindingsAndActions(t *testing.T) {
+	result, err := Diagnose(context.Background(), servicestatus.Result{
+		Env:       "prod",
+		Provider:  "aws",
+		Region:    "us-west-2",
+		Source:    "direct",
+		Freshness: servicestatus.Freshness{Source: "direct_object_store", Ready: true},
+		StatefulGroups: []servicestatus.StatefulGroup{{
+			Group:          "orders-stream",
+			Env:            "prod",
+			Replicas:       1,
+			Health:         "degraded",
+			OperationID:    "saga_replace",
+			OperationKind:  "stateful.replace_member",
+			OperationState: "running",
+			Operation: &servicestatus.Operation{
+				ID:    "saga_replace",
+				Kind:  "stateful.replace_member",
+				State: "running",
+			},
+			Members: []servicestatus.StatefulMember{{
+				Member:     0,
+				Generation: 2,
+				Phase:      "failed",
+				Health:     "degraded",
+				InstanceID: "",
+				VolumeID:   "vol-0",
+				DNSName:    "",
+				UpdatedAt:  "2026-05-17T00:58:00Z",
+				Findings: []servicestatus.Finding{
+					{Code: "STATEFUL_MEMBER_NOT_READY", Summary: "orders-stream member 0 phase is failed"},
+					{Code: "STATEFUL_MEMBER_INSTANCE_MISSING", Summary: "orders-stream member 0 instance provider ID is missing"},
+				},
+			}},
+			Backups: []servicestatus.StatefulBackup{{
+				BackupID:   "backup_old",
+				Member:     0,
+				VolumeID:   "vol-0",
+				SnapshotID: "snap-old",
+				ProviderID: "snap-old",
+				Status:     "available",
+				CreatedAt:  "2026-05-16T00:00:00Z",
+				ExpiresAt:  "2026-05-16T12:00:00Z",
+				Stale:      true,
+			}},
+			Findings: []servicestatus.Finding{
+				{Code: "STATEFUL_MEMBER_NOT_READY", Summary: "orders-stream member 0 phase is failed"},
+				{Code: "STATEFUL_MEMBER_INSTANCE_MISSING", Summary: "orders-stream member 0 instance provider ID is missing"},
+				{Code: "STATEFUL_BACKUP_STALE", Summary: "orders-stream member 0 no available fresh backup was observed"},
+			},
+		}},
+	}, Options{Service: "orders-stream", TraceID: "tr_stateful_doctor", Binary: "skiff"})
+	if err != nil {
+		t.Fatalf("diagnose: %v", err)
+	}
+	if result.Health != "degraded" || result.Service != "orders-stream" || result.TraceID != "tr_stateful_doctor" {
+		t.Fatalf("unexpected result metadata: %+v", result)
+	}
+	assertFinding(t, result, "STATEFUL_MEMBER_NOT_READY", SeverityHigh)
+	assertFinding(t, result, "STATEFUL_MEMBER_INSTANCE_MISSING", SeverityHigh)
+	assertFinding(t, result, "STATEFUL_BACKUP_STALE", SeverityHigh)
+	if len(result.Facts) == 0 || len(result.Hypotheses) == 0 {
+		t.Fatalf("facts or hypotheses missing: %+v", result)
+	}
+	for _, id := range []string{"orders-stream_stateful_status", "orders-stream_stateful_logs", "orders-stream_stateful_metrics"} {
+		if !hasAction(result, id, false) {
+			t.Fatalf("missing read-only stateful action %s: %+v", id, result.RecommendedActions)
+		}
+	}
+	if !hasAction(result, "orders-stream_stateful_snapshot_member", true) || !hasAction(result, "orders-stream_stateful_replace_member", true) || !hasAction(result, "orders-stream_stateful_resume", true) {
+		t.Fatalf("missing mutating stateful actions: %+v", result.RecommendedActions)
+	}
+	for _, action := range result.RecommendedActions {
+		if !action.Mutating {
+			continue
+		}
+		if action.Risk == "" || action.Reversibility == "" || action.Safety == "" {
+			t.Fatalf("mutating action lacks safety metadata: %+v", action)
+		}
+		if action.ID == "orders-stream_stateful_replace_member" && (!action.RequiresApproval || action.Risk != schema.RiskHigh) {
+			t.Fatalf("replacement action should require approval: %+v", action)
+		}
+	}
+}
+
 func assertFinding(t *testing.T, result Result, code string, severity Severity) {
 	t.Helper()
 	for _, finding := range result.Findings {

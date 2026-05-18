@@ -21,7 +21,7 @@ func TestAPIStatusUsesSkiffdJSONEndpoints(t *testing.T) {
 		var body string
 		switch req.URL.Path {
 		case "/v1/status":
-			body = `{"ok":true,"status":{"mode":"api","env":"prod","provider":"aws","region":"us-west-2","state_bucket":"s3://skiff-state-prod","source":"api","freshness":{"source":"memory_index","ready":true,"generation":7},"services":[{"service":"payments-api","env":"prod","desired_release":"rel_03","health":"nominal"}]}}`
+			body = `{"ok":true,"status":{"mode":"api","env":"prod","provider":"aws","region":"us-west-2","state_bucket":"s3://skiff-state-prod","source":"api","freshness":{"source":"memory_index","ready":true,"generation":7},"services":[{"service":"payments-api","env":"prod","desired_release":"rel_03","health":"nominal"}],"stateful_groups":[{"group":"orders-stream","env":"prod","replicas":1,"health":"nominal","members":[{"member":0,"generation":2,"role":"primary","instance_id":"i-0","volume_id":"vol-0","dns_name":"orders-stream-0.internal","phase":"ready","health":"nominal"}]}]}}`
 		default:
 			t.Fatalf("unexpected path %s", req.URL.Path)
 		}
@@ -49,6 +49,9 @@ func TestAPIStatusUsesSkiffdJSONEndpoints(t *testing.T) {
 	}
 	if len(status.Services) != 1 || status.Services[0].Service != "payments-api" || status.Services[0].DesiredRelease != "rel_03" {
 		t.Fatalf("unexpected services: %+v", status.Services)
+	}
+	if len(status.StatefulGroups) != 1 || status.StatefulGroups[0].Group != "orders-stream" || status.StatefulGroups[0].Members[0].Role != "primary" {
+		t.Fatalf("unexpected stateful groups: %+v", status.StatefulGroups)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -137,6 +138,21 @@ func BuildSnapshot(ctx context.Context, store objstore.ObjectStore, opts BuildOp
 		}
 	}
 
+	statefulMetas, err := store.List(ctx, "stateful/", objstore.ListOptions{Limit: opts.ListLimit})
+	if err != nil {
+		return Snapshot{}, err
+	}
+	for _, meta := range statefulMetas {
+		switch {
+		case strings.HasSuffix(meta.Key, "/control.json") && strings.Contains(meta.Key, "/members/"):
+			addStatefulMemberControl(ctx, store, meta.Key, &snapshot)
+		case strings.HasSuffix(meta.Key, "/control.json"):
+			addStatefulGroupControl(ctx, store, meta.Key, &snapshot)
+		case strings.HasSuffix(meta.Key, "/record.json") && strings.Contains(meta.Key, "/backups/"):
+			addStatefulBackupRecord(ctx, store, meta.Key, &snapshot)
+		}
+	}
+
 	sagaMetas, err := store.List(ctx, "sagas/", objstore.ListOptions{Limit: opts.ListLimit})
 	if err != nil {
 		return Snapshot{}, err
@@ -208,6 +224,147 @@ func addOperationControl(ctx context.Context, store objstore.ObjectStore, key st
 		UpdatedAt:          control.UpdatedAt,
 		TraceID:            control.TraceID,
 		ProviderOperations: append([]schema.ProviderOperationRef(nil), control.ProviderOperations...),
+	})
+}
+
+func addStatefulGroupControl(ctx context.Context, store objstore.ObjectStore, key string, snapshot *Snapshot) {
+	group, ok := statefulGroupFromControlKey(key)
+	if !ok {
+		snapshot.Findings = append(snapshot.Findings, Finding{Code: "MALFORMED_STATEFUL_GROUP_CONTROL_KEY", Summary: "stateful group control key does not match stateful/<group>/control.json", Key: key})
+		return
+	}
+	var control schema.StatefulGroupControl
+	if !readObject(ctx, store, key, &control, "MALFORMED_STATEFUL_GROUP_CONTROL", snapshot) {
+		return
+	}
+	if control.Group == "" {
+		control.Group = group
+	}
+	summary := StatefulGroupSummary{
+		Group:     control.Group,
+		Env:       control.Env,
+		Replicas:  control.Replicas,
+		Lease:     cloneLease(control.Lease),
+		UpdatedAt: control.UpdatedAt,
+	}
+	for _, member := range control.Members {
+		summary.Members = append(summary.Members, StatefulMemberSummary{
+			Member:             member.Member,
+			Generation:         member.Generation,
+			ExpectedGeneration: member.Generation,
+			ReleaseID:          member.ReleaseID,
+			ReleaseManifestKey: member.ReleaseManifestKey,
+			RuntimeManifestKey: member.RuntimeManifestKey,
+			InstanceID:         member.InstanceID,
+			ExpectedInstanceID: member.InstanceID,
+			VolumeID:           member.VolumeID,
+			ExpectedVolumeID:   member.VolumeID,
+			DNSName:            member.DNSName,
+			ExpectedDNSName:    member.DNSName,
+			Phase:              member.Phase,
+			ExpectedPhase:      member.Phase,
+		})
+	}
+	if control.Operation != nil {
+		summary.OperationID = control.Operation.ID
+		summary.OperationKind = control.Operation.Kind
+		summary.OperationState = control.Operation.State
+	}
+	upsertStatefulGroup(snapshot, summary)
+}
+
+func addStatefulMemberControl(ctx context.Context, store objstore.ObjectStore, key string, snapshot *Snapshot) {
+	group, member, ok := statefulMemberFromControlKey(key)
+	if !ok {
+		snapshot.Findings = append(snapshot.Findings, Finding{Code: "MALFORMED_STATEFUL_MEMBER_CONTROL_KEY", Summary: "stateful member control key does not match stateful/<group>/members/<member>/control.json", Key: key})
+		return
+	}
+	var control schema.StatefulMemberControl
+	if !readObject(ctx, store, key, &control, "MALFORMED_STATEFUL_MEMBER_CONTROL", snapshot) {
+		return
+	}
+	if control.Group == "" {
+		control.Group = group
+	}
+	if control.Member != member {
+		snapshot.Findings = append(snapshot.Findings, Finding{Code: "STATEFUL_MEMBER_KEY_MISMATCH", Summary: "stateful member control ordinal does not match object key", Key: key})
+		control.Member = member
+	}
+	upsertStatefulMember(snapshot, control.Group, StatefulMemberSummary{
+		Member:             control.Member,
+		Env:                control.Env,
+		Zone:               control.Zone,
+		Generation:         control.Generation,
+		ReleaseID:          control.ReleaseID,
+		ReleaseManifestKey: control.ReleaseManifestKey,
+		RuntimeManifestKey: control.RuntimeManifestKey,
+		InstanceID:         control.InstanceID,
+		VolumeID:           control.VolumeID,
+		DNSName:            control.DNSName,
+		Phase:              control.Phase,
+		Lease:              cloneLease(control.Lease),
+		ProviderOperations: append([]schema.ProviderOperationRef(nil), control.ProviderOperations...),
+		UpdatedAt:          control.UpdatedAt,
+	})
+}
+
+func addStatefulBackupRecord(ctx context.Context, store objstore.ObjectStore, key string, snapshot *Snapshot) {
+	group, backup, ok := statefulBackupFromRecordKey(key)
+	if !ok {
+		snapshot.Findings = append(snapshot.Findings, Finding{Code: "MALFORMED_STATEFUL_BACKUP_RECORD_KEY", Summary: "stateful backup record key does not match stateful/<group>/backups/<backup>/record.json", Key: key})
+		return
+	}
+	var record struct {
+		SchemaVersion     string                      `json:"schema_version"`
+		BackupID          string                      `json:"backup_id"`
+		Group             string                      `json:"group"`
+		Env               string                      `json:"env,omitempty"`
+		Member            int                         `json:"member"`
+		VolumeID          string                      `json:"volume_id"`
+		SnapshotID        string                      `json:"snapshot_id"`
+		Provider          string                      `json:"provider,omitempty"`
+		ProviderID        string                      `json:"provider_id,omitempty"`
+		ProviderOperation schema.ProviderOperationRef `json:"provider_operation"`
+		RecipeBackup      *struct {
+			OK      bool              `json:"ok"`
+			Summary string            `json:"summary,omitempty"`
+			Facts   map[string]string `json:"facts,omitempty"`
+		} `json:"recipe_backup,omitempty"`
+		Status    string `json:"status"`
+		CreatedAt string `json:"created_at"`
+		ExpiresAt string `json:"expires_at,omitempty"`
+	}
+	if !readObject(ctx, store, key, &record, "MALFORMED_STATEFUL_BACKUP_RECORD", snapshot) {
+		return
+	}
+	if record.Group == "" {
+		record.Group = group
+	}
+	if record.BackupID == "" {
+		record.BackupID = backup
+	}
+	recipeStatus := ""
+	recipeSummary := ""
+	if record.RecipeBackup != nil {
+		recipeStatus = "unhealthy"
+		if record.RecipeBackup.OK {
+			recipeStatus = "ok"
+		}
+		recipeSummary = record.RecipeBackup.Summary
+	}
+	upsertStatefulBackup(snapshot, record.Group, StatefulBackupSummary{
+		BackupID:          record.BackupID,
+		Member:            record.Member,
+		VolumeID:          record.VolumeID,
+		SnapshotID:        record.SnapshotID,
+		Provider:          record.Provider,
+		ProviderID:        record.ProviderID,
+		ProviderOperation: record.ProviderOperation,
+		Status:            record.Status,
+		RecipeStatus:      recipeStatus,
+		RecipeSummary:     recipeSummary,
+		CreatedAt:         record.CreatedAt,
+		ExpiresAt:         record.ExpiresAt,
 	})
 }
 
@@ -352,6 +509,23 @@ func sortSnapshot(snapshot *Snapshot) {
 	sort.Slice(snapshot.Sagas, func(i, j int) bool {
 		return snapshot.Sagas[i].SagaID < snapshot.Sagas[j].SagaID
 	})
+	sort.Slice(snapshot.StatefulGroups, func(i, j int) bool {
+		if snapshot.StatefulGroups[i].Group == snapshot.StatefulGroups[j].Group {
+			return snapshot.StatefulGroups[i].Env < snapshot.StatefulGroups[j].Env
+		}
+		return snapshot.StatefulGroups[i].Group < snapshot.StatefulGroups[j].Group
+	})
+	for i := range snapshot.StatefulGroups {
+		sort.Slice(snapshot.StatefulGroups[i].Members, func(a, b int) bool {
+			return snapshot.StatefulGroups[i].Members[a].Member < snapshot.StatefulGroups[i].Members[b].Member
+		})
+		sort.Slice(snapshot.StatefulGroups[i].Backups, func(a, b int) bool {
+			if snapshot.StatefulGroups[i].Backups[a].Member == snapshot.StatefulGroups[i].Backups[b].Member {
+				return snapshot.StatefulGroups[i].Backups[a].CreatedAt > snapshot.StatefulGroups[i].Backups[b].CreatedAt
+			}
+			return snapshot.StatefulGroups[i].Backups[a].Member < snapshot.StatefulGroups[i].Backups[b].Member
+		})
+	}
 	sort.Slice(snapshot.Operations, func(i, j int) bool {
 		if snapshot.Operations[i].Service == snapshot.Operations[j].Service {
 			return snapshot.Operations[i].OperationID < snapshot.Operations[j].OperationID
@@ -389,6 +563,154 @@ func sagaFromControlKey(key string) (string, bool) {
 		return "", false
 	}
 	return parts[1], true
+}
+
+func statefulGroupFromControlKey(key string) (string, bool) {
+	parts := strings.Split(key, "/")
+	if len(parts) != 3 || parts[0] != "stateful" || parts[2] != "control.json" || parts[1] == "" {
+		return "", false
+	}
+	return parts[1], true
+}
+
+func statefulMemberFromControlKey(key string) (string, int, bool) {
+	parts := strings.Split(key, "/")
+	if len(parts) != 5 || parts[0] != "stateful" || parts[2] != "members" || parts[4] != "control.json" || parts[1] == "" {
+		return "", 0, false
+	}
+	member, err := strconv.Atoi(parts[3])
+	if err != nil || member < 0 {
+		return "", 0, false
+	}
+	return parts[1], member, true
+}
+
+func statefulBackupFromRecordKey(key string) (string, string, bool) {
+	parts := strings.Split(key, "/")
+	if len(parts) != 5 || parts[0] != "stateful" || parts[2] != "backups" || parts[4] != "record.json" || parts[1] == "" || parts[3] == "" {
+		return "", "", false
+	}
+	return parts[1], parts[3], true
+}
+
+func upsertStatefulGroup(snapshot *Snapshot, next StatefulGroupSummary) {
+	for i := range snapshot.StatefulGroups {
+		if snapshot.StatefulGroups[i].Group != next.Group {
+			continue
+		}
+		current := snapshot.StatefulGroups[i]
+		next.Members = mergeStatefulMembers(current.Members, next.Members)
+		next.Backups = append(next.Backups, current.Backups...)
+		snapshot.StatefulGroups[i] = next
+		return
+	}
+	snapshot.StatefulGroups = append(snapshot.StatefulGroups, next)
+}
+
+func upsertStatefulMember(snapshot *Snapshot, group string, next StatefulMemberSummary) {
+	for i := range snapshot.StatefulGroups {
+		if snapshot.StatefulGroups[i].Group == group {
+			snapshot.StatefulGroups[i].Members = mergeStatefulMembers(snapshot.StatefulGroups[i].Members, []StatefulMemberSummary{next})
+			if snapshot.StatefulGroups[i].Env == "" {
+				snapshot.StatefulGroups[i].Env = next.Env
+			}
+			return
+		}
+	}
+	snapshot.StatefulGroups = append(snapshot.StatefulGroups, StatefulGroupSummary{Group: group, Env: next.Env, Members: []StatefulMemberSummary{next}})
+}
+
+func upsertStatefulBackup(snapshot *Snapshot, group string, next StatefulBackupSummary) {
+	for i := range snapshot.StatefulGroups {
+		if snapshot.StatefulGroups[i].Group == group {
+			snapshot.StatefulGroups[i].Backups = append(snapshot.StatefulGroups[i].Backups, next)
+			return
+		}
+	}
+	snapshot.StatefulGroups = append(snapshot.StatefulGroups, StatefulGroupSummary{Group: group, Backups: []StatefulBackupSummary{next}})
+}
+
+func mergeStatefulMembers(existing, incoming []StatefulMemberSummary) []StatefulMemberSummary {
+	out := append([]StatefulMemberSummary(nil), existing...)
+	for _, next := range incoming {
+		found := false
+		for i := range out {
+			if out[i].Member == next.Member {
+				out[i] = mergeStatefulMember(out[i], next)
+				found = true
+				break
+			}
+		}
+		if !found {
+			out = append(out, next)
+		}
+	}
+	return out
+}
+
+func mergeStatefulMember(left, right StatefulMemberSummary) StatefulMemberSummary {
+	if right.Env != "" || right.Zone != "" || right.UpdatedAt != "" || len(right.ProviderOperations) > 0 || right.Lease != nil {
+		right.ExpectedGeneration = firstNonZeroInt64(right.ExpectedGeneration, left.ExpectedGeneration)
+		right.ExpectedInstanceID = firstNonEmptyString(right.ExpectedInstanceID, left.ExpectedInstanceID)
+		right.ExpectedVolumeID = firstNonEmptyString(right.ExpectedVolumeID, left.ExpectedVolumeID)
+		right.ExpectedDNSName = firstNonEmptyString(right.ExpectedDNSName, left.ExpectedDNSName)
+		right.ExpectedPhase = firstNonEmptyString(right.ExpectedPhase, left.ExpectedPhase)
+		right.Role = firstNonEmptyString(right.Role, left.Role)
+		right.RecipeStatus = firstNonEmptyString(right.RecipeStatus, left.RecipeStatus)
+		right.RecipeSummary = firstNonEmptyString(right.RecipeSummary, left.RecipeSummary)
+		if right.Generation == 0 {
+			right.Generation = left.Generation
+		}
+		if right.InstanceID == "" {
+			right.InstanceID = left.InstanceID
+		}
+		if right.VolumeID == "" {
+			right.VolumeID = left.VolumeID
+		}
+		if right.DNSName == "" {
+			right.DNSName = left.DNSName
+		}
+		if right.Phase == "" {
+			right.Phase = left.Phase
+		}
+		if right.ReleaseID == "" {
+			right.ReleaseID = left.ReleaseID
+		}
+		if right.ReleaseManifestKey == "" {
+			right.ReleaseManifestKey = left.ReleaseManifestKey
+		}
+		if right.RuntimeManifestKey == "" {
+			right.RuntimeManifestKey = left.RuntimeManifestKey
+		}
+		return right
+	}
+	return left
+}
+
+func firstNonZeroInt64(values ...int64) int64 {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func cloneLease(lease *schema.Lease) *schema.Lease {
+	if lease == nil {
+		return nil
+	}
+	out := *lease
+	return &out
 }
 
 func isEventKey(key string) bool {

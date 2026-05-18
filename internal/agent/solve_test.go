@@ -160,6 +160,58 @@ func TestSolveLogsUnavailableProducesReadOnlyLogInspection(t *testing.T) {
 	}
 }
 
+func TestSolveStatefulGroupActionsExposeTypedAPIOperations(t *testing.T) {
+	result := doctor.Result{
+		TraceID: "tr_stateful_solve",
+		Service: "orders-stream",
+		Health:  "degraded",
+		Findings: []doctor.Finding{{
+			ID:         "orders-stream_stateful_member_not_ready",
+			Code:       "STATEFUL_MEMBER_NOT_READY",
+			Severity:   doctor.SeverityHigh,
+			Service:    "orders-stream",
+			Summary:    "member 0 failed",
+			Confidence: 0.84,
+		}},
+		RecommendedActions: []doctor.RecommendedAction{
+			{
+				ID:       "orders-stream_stateful_logs_member_0",
+				Kind:     "command",
+				Service:  "orders-stream",
+				Command:  "skiff stateful logs orders-stream --member 0 --since 20m --format json",
+				Mutating: false,
+			},
+			{
+				ID:            "orders-stream_stateful_replace_member",
+				Kind:          "command",
+				Service:       "orders-stream",
+				Command:       "skiff stateful replace-member orders-stream --member 0 --yes --format json",
+				Mutating:      true,
+				Risk:          schema.RiskHigh,
+				Reversibility: schema.Compensatable,
+				Safety:        "requires explicit member fencing before volume attach",
+			},
+		},
+	}
+
+	graph := Solve(result, SolveOptions{Goal: GoalRestoreHealth, Binary: "skiff"})
+
+	if graph.Status != StatusApprovalRequired || len(graph.Steps) != 3 {
+		t.Fatalf("unexpected stateful graph: %+v", graph)
+	}
+	logs := graph.Steps[0]
+	if logs.APIOperation == nil || logs.APIOperation.Operation != "stateful.logs" || logs.APIOperation.Target.Kind != "stateful-group" || logs.APIOperation.Params["member"] != "0" || logs.APIOperation.Params["since"] != "20m" {
+		t.Fatalf("stateful logs api operation = %+v", logs.APIOperation)
+	}
+	replace := graph.Steps[1]
+	if replace.APIOperation == nil || replace.APIOperation.Operation != "stateful.replace_member" || replace.APIOperation.Target.Kind != "stateful-member" || replace.APIOperation.Params["member"] != "0" {
+		t.Fatalf("stateful replace api operation = %+v", replace.APIOperation)
+	}
+	if !replace.RequiresApproval || strings.Contains(replace.Command, "--yes") {
+		t.Fatalf("stateful high-risk replacement approval handling = %+v", replace)
+	}
+}
+
 func TestSolveHighRiskIrreversibleActionRequiresApprovalAndStripsYes(t *testing.T) {
 	result := doctor.Result{
 		Service: "payments-api",

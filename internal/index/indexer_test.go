@@ -95,6 +95,118 @@ func TestRebuildFromMemoryStoreIndexesDurableState(t *testing.T) {
 	}
 }
 
+func TestRebuildIndexesStatefulGroupDurableState(t *testing.T) {
+	store := memory.New()
+	createJSON(t, store, "stateful/orders-stream/control.json", schema.StatefulGroupControl{
+		SchemaVersion: schema.Version,
+		Group:         "orders-stream",
+		Env:           "prod",
+		Replicas:      2,
+		Members: []schema.StatefulMemberSummary{{
+			Member:     0,
+			Generation: 1,
+			InstanceID: "i-group-0",
+			VolumeID:   "vol-group-0",
+			DNSName:    "orders-stream-0.internal",
+			Phase:      "ready",
+		}},
+		Operation: &schema.ActiveOperation{ID: "op_stateful", Kind: "stateful.replace_member", State: "running"},
+		Version:   1,
+		UpdatedAt: "2026-05-16T21:10:00Z",
+		UpdatedBy: schema.Actor{ID: "agent-one", Type: "agent"},
+	})
+	createJSON(t, store, "stateful/orders-stream/members/0/control.json", schema.StatefulMemberControl{
+		SchemaVersion: schema.Version,
+		Group:         "orders-stream",
+		Env:           "prod",
+		Member:        0,
+		Zone:          "us-west-2a",
+		InstanceID:    "i-member-0",
+		VolumeID:      "vol-member-0",
+		DNSName:       "orders-stream-0.internal",
+		Generation:    2,
+		Phase:         "ready",
+		ProviderOperations: []schema.ProviderOperationRef{{
+			Provider:   "aws",
+			Kind:       "ec2-attach-volume",
+			ID:         "attach-123",
+			ObservedAt: "2026-05-16T21:11:00Z",
+		}},
+		Version:   1,
+		UpdatedAt: "2026-05-16T21:12:00Z",
+		UpdatedBy: schema.Actor{ID: "agent-one", Type: "agent"},
+	})
+	createJSON(t, store, "stateful/orders-stream/backups/backup_01/record.json", struct {
+		SchemaVersion     string                      `json:"schema_version"`
+		BackupID          string                      `json:"backup_id"`
+		Group             string                      `json:"group"`
+		Env               string                      `json:"env,omitempty"`
+		Member            int                         `json:"member"`
+		VolumeID          string                      `json:"volume_id"`
+		SnapshotID        string                      `json:"snapshot_id"`
+		Provider          string                      `json:"provider,omitempty"`
+		ProviderID        string                      `json:"provider_id,omitempty"`
+		ProviderOperation schema.ProviderOperationRef `json:"provider_operation"`
+		RecipeBackup      *struct {
+			OK      bool              `json:"ok"`
+			Summary string            `json:"summary,omitempty"`
+			Facts   map[string]string `json:"facts,omitempty"`
+		} `json:"recipe_backup,omitempty"`
+		Status    string `json:"status"`
+		CreatedAt string `json:"created_at"`
+		ExpiresAt string `json:"expires_at,omitempty"`
+	}{
+		SchemaVersion: schema.Version,
+		BackupID:      "backup_01",
+		Group:         "orders-stream",
+		Env:           "prod",
+		Member:        0,
+		VolumeID:      "vol-member-0",
+		SnapshotID:    "snap-123",
+		Provider:      "aws",
+		ProviderID:    "snap-123",
+		ProviderOperation: schema.ProviderOperationRef{
+			Provider:   "aws",
+			Kind:       "ec2-create-snapshot",
+			ID:         "snapshot/snap-123",
+			ObservedAt: "2026-05-16T21:13:00Z",
+		},
+		RecipeBackup: &struct {
+			OK      bool              `json:"ok"`
+			Summary string            `json:"summary,omitempty"`
+			Facts   map[string]string `json:"facts,omitempty"`
+		}{OK: true, Summary: "backup hook ok"},
+		Status:    "available",
+		CreatedAt: "2026-05-16T21:13:00Z",
+		ExpiresAt: "2026-05-23T21:13:00Z",
+	})
+
+	snapshot, err := BuildSnapshot(context.Background(), store, BuildOptions{Now: fixedClock(), Generation: 1})
+	if err != nil {
+		t.Fatalf("build snapshot: %v", err)
+	}
+	if len(snapshot.Findings) != 0 {
+		t.Fatalf("unexpected findings: %+v", snapshot.Findings)
+	}
+	if len(snapshot.StatefulGroups) != 1 {
+		t.Fatalf("stateful groups = %+v", snapshot.StatefulGroups)
+	}
+	group := snapshot.StatefulGroups[0]
+	if group.Group != "orders-stream" || group.Env != "prod" || group.Replicas != 2 || group.OperationID != "op_stateful" {
+		t.Fatalf("unexpected group summary: %+v", group)
+	}
+	if len(group.Members) != 1 {
+		t.Fatalf("members = %+v", group.Members)
+	}
+	member := group.Members[0]
+	if member.Member != 0 || member.Zone != "us-west-2a" || member.InstanceID != "i-member-0" || member.VolumeID != "vol-member-0" || len(member.ProviderOperations) != 1 {
+		t.Fatalf("unexpected member summary: %+v", member)
+	}
+	if len(group.Backups) != 1 || group.Backups[0].BackupID != "backup_01" || group.Backups[0].ProviderID != "snap-123" || group.Backups[0].ProviderOperation.ID != "snapshot/snap-123" || group.Backups[0].RecipeStatus != "ok" {
+		t.Fatalf("unexpected backups: %+v", group.Backups)
+	}
+}
+
 func hasRecentEvent(events []schema.Event, id string) bool {
 	for _, event := range events {
 		if event.ID == id {

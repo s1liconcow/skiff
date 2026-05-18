@@ -55,7 +55,8 @@ func (e *Engine) Diagnose(ctx context.Context, status servicestatus.Result, opts
 	}
 
 	services := servicesForRequest(status.Services, opts.Service)
-	if opts.Service != "" && len(services) == 0 {
+	statefulGroups := statefulGroupsForRequest(status.StatefulGroups, opts.Service)
+	if opts.Service != "" && len(services) == 0 && len(statefulGroups) == 0 {
 		builder.addFinding(Finding{
 			ID:         findingID(opts.Service, "SERVICE_NOT_FOUND"),
 			Code:       "SERVICE_NOT_FOUND",
@@ -102,6 +103,10 @@ func (e *Engine) Diagnose(ctx context.Context, status servicestatus.Result, opts
 				builder.addFinding(finding)
 			}
 		}
+	}
+	for _, group := range statefulGroups {
+		builder.addStatefulFacts(group)
+		builder.checkStatefulGroup(group)
 	}
 	builder.finish()
 	return builder.result, nil
@@ -160,6 +165,107 @@ func (b *resultBuilder) addServiceFacts(service servicestatus.Service) {
 			b.addFact(Evidence{Type: fact.Type, Service: service.Service, Source: "event", EventID: event.ID, ObservedAt: event.Time, Message: fact.Message})
 		}
 	}
+}
+
+func (b *resultBuilder) addStatefulFacts(group servicestatus.StatefulGroup) {
+	b.addFact(Evidence{Type: "stateful_group_health", Service: group.Group, Source: "status", Message: fmt.Sprintf("%s health is %s", group.Group, firstNonEmpty(group.Health, "unknown"))})
+	if group.Operation != nil {
+		b.addFact(Evidence{Type: "stateful_operation", Service: group.Group, Source: "status", Message: fmt.Sprintf("%s operation %s is %s", group.Operation.Kind, group.Operation.ID, firstNonEmpty(group.Operation.State, "unknown")), ObservedAt: group.Operation.UpdatedAt})
+		for _, op := range group.Operation.ProviderOperations {
+			if op.ID != "" {
+				b.addFact(Evidence{Type: "provider_operation", Service: group.Group, Source: "object_state", Message: fmt.Sprintf("%s %s", op.Kind, op.ID), ProviderID: op.ID, ObservedAt: op.ObservedAt})
+			}
+		}
+	}
+	if group.Lease != nil {
+		b.addFact(Evidence{Type: "stateful_group_lease", Service: group.Group, Source: "object_state", Message: fmt.Sprintf("lease held by %s until %s", group.Lease.Owner, group.Lease.ExpiresAt), ObservedAt: group.UpdatedAt})
+	}
+	for _, member := range group.Members {
+		message := fmt.Sprintf("member %d phase=%s generation=%d instance=%s volume=%s dns=%s", member.Member, firstNonEmpty(member.Phase, "unknown"), member.Generation, firstNonEmpty(member.InstanceID, "missing"), firstNonEmpty(member.VolumeID, "missing"), firstNonEmpty(member.DNSName, "missing"))
+		b.addFact(Evidence{Type: "stateful_member", Service: group.Group, Source: "object_state", Message: message, ProviderID: firstNonEmpty(member.InstanceID, member.VolumeID), ObservedAt: member.UpdatedAt})
+		for _, op := range member.ProviderOperations {
+			if op.ID != "" {
+				b.addFact(Evidence{Type: "provider_operation", Service: group.Group, Source: "object_state", Message: fmt.Sprintf("member %d %s %s", member.Member, op.Kind, op.ID), ProviderID: op.ID, ObservedAt: op.ObservedAt})
+			}
+		}
+	}
+	for _, backup := range group.Backups {
+		message := fmt.Sprintf("backup %s member=%d status=%s snapshot=%s", backup.BackupID, backup.Member, firstNonEmpty(backup.Status, "unknown"), firstNonEmpty(backup.SnapshotID, "missing"))
+		if backup.Stale {
+			message += " stale=true"
+		}
+		b.addFact(Evidence{Type: "stateful_backup", Service: group.Group, Source: "object_state", Message: message, ProviderID: firstNonEmpty(backup.ProviderID, backup.SnapshotID), ObservedAt: backup.CreatedAt})
+	}
+	for _, event := range group.RecentEvents {
+		if event.Summary != "" {
+			b.addFact(Evidence{Type: firstNonEmpty(event.Type, "event"), Service: group.Group, Source: "event", EventID: event.ID, ObservedAt: event.Time, Message: event.Summary})
+		}
+		for _, fact := range event.Facts {
+			b.addFact(Evidence{Type: fact.Type, Service: group.Group, Source: "event", EventID: event.ID, ObservedAt: event.Time, Message: fact.Message})
+		}
+	}
+}
+
+func (b *resultBuilder) checkStatefulGroup(group servicestatus.StatefulGroup) {
+	for _, finding := range group.Findings {
+		doctorFinding := Finding{
+			ID:         findingID(group.Group, finding.Code),
+			Code:       finding.Code,
+			Severity:   severityForStatefulFinding(finding.Code),
+			Service:    group.Group,
+			Summary:    finding.Summary,
+			Confidence: confidenceForStatefulFinding(finding.Code),
+			Evidence:   statefulEvidence(group, finding.Code),
+		}
+		b.addFinding(doctorFinding)
+		b.addStatefulHypothesis(group, doctorFinding)
+	}
+	b.addAction(statefulInspectAction(b.binary, group.Group))
+	b.addAction(statefulLogsAction(b.binary, group.Group, -1))
+	b.addAction(statefulMetricsAction(b.binary, group.Group, -1))
+	if hasStatefulFinding(group, "STATEFUL_BACKUP_MISSING") || hasStatefulFinding(group, "STATEFUL_BACKUP_STALE") {
+		b.addAction(statefulSnapshotAction(b.binary, group.Group, firstStatefulMember(group)))
+	}
+	if hasStatefulFinding(group, "STATEFUL_MEMBER_NOT_READY") || hasStatefulFinding(group, "STATEFUL_MEMBER_VOLUME_MISSING") || hasStatefulFinding(group, "STATEFUL_MEMBER_VOLUME_MISMATCH") || hasStatefulFinding(group, "STATEFUL_MEMBER_INSTANCE_MISSING") || hasStatefulFinding(group, "STATEFUL_RUNNER_STALE") || hasStatefulFinding(group, "STATEFUL_RECIPE_UNHEALTHY") || hasStatefulFinding(group, "STATEFUL_PROVIDER_DRIFT") {
+		b.addAction(statefulReplaceAction(b.binary, group.Group, firstUnhealthyStatefulMember(group)))
+	}
+	if group.OperationID != "" && group.OperationState != string(schema.OperationSucceeded) {
+		b.addAction(statefulResumeAction(b.binary, group.Group, group.OperationID))
+	}
+}
+
+func (b *resultBuilder) addStatefulHypothesis(group servicestatus.StatefulGroup, finding Finding) {
+	message := ""
+	switch finding.Code {
+	case "STATEFUL_MEMBER_NOT_READY":
+		message = "the runner, recipe health check, or replacement saga may not have completed for this member"
+	case "STATEFUL_MEMBER_VOLUME_MISSING", "STATEFUL_MEMBER_VOLUME_MISMATCH":
+		message = "the member may be attached to the wrong durable volume or provider state may have drifted"
+	case "STATEFUL_RUNNER_STALE":
+		message = "the VM-local runner may still be serving an older generation than object state expects"
+	case "STATEFUL_RECIPE_UNHEALTHY":
+		message = "the recipe hook reported unhealthy state or failed to complete a member lifecycle step"
+	case "STATEFUL_PROVIDER_DRIFT":
+		message = "provider resources observed in object state no longer match the StatefulGroup control summary"
+	case "STATEFUL_QUORUM_RISK":
+		message = "too many members are degraded to safely preserve majority quorum"
+	case "STATEFUL_MEMBER_DNS_MISSING":
+		message = "stable member DNS may not have been created or Route53 state may have drifted"
+	case "STATEFUL_BACKUP_MISSING", "STATEFUL_BACKUP_STALE":
+		message = "restore safety is reduced until a fresh member snapshot is recorded"
+	case "STATEFUL_GROUP_LEASE_HELD", "STATEFUL_MEMBER_LEASE_HELD":
+		message = "another saga or interrupted operation may still own the control document lease"
+	default:
+		message = "stateful durable object state needs operator review"
+	}
+	b.addHypothesis(Hypothesis{
+		ID:         hypothesisID(group.Group, strings.ToLower(finding.Code)),
+		FindingID:  finding.ID,
+		Service:    group.Group,
+		Message:    message,
+		Confidence: 0.7,
+		Evidence:   finding.Evidence,
+	})
 }
 
 func (b *resultBuilder) checkDependencies(service servicestatus.Service) {
@@ -671,6 +777,16 @@ func servicesForRequest(services []servicestatus.Service, service string) []serv
 	return out
 }
 
+func statefulGroupsForRequest(groups []servicestatus.StatefulGroup, service string) []servicestatus.StatefulGroup {
+	out := make([]servicestatus.StatefulGroup, 0, len(groups))
+	for _, item := range groups {
+		if service == "" || item.Group == service {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
 func dependencyEvidence(service, kind string, dep servicestatus.DependencyStatus) []Evidence {
 	message := fmt.Sprintf("%s status is %s", kind, firstNonEmpty(dep.Status, "unknown"))
 	if dep.Summary != "" {
@@ -684,6 +800,70 @@ func dependencyEvidence(service, kind string, dep servicestatus.DependencyStatus
 		ProviderID: dep.ProviderID,
 		ObservedAt: dep.FreshAt,
 	}}
+}
+
+func severityForStatefulFinding(code string) Severity {
+	switch code {
+	case "STATEFUL_MEMBER_NOT_READY", "STATEFUL_MEMBER_VOLUME_MISSING", "STATEFUL_MEMBER_VOLUME_MISMATCH", "STATEFUL_MEMBER_INSTANCE_MISSING", "STATEFUL_BACKUP_STALE", "STATEFUL_RUNNER_STALE", "STATEFUL_RECIPE_UNHEALTHY", "STATEFUL_QUORUM_RISK", "STATEFUL_PROVIDER_DRIFT":
+		return SeverityHigh
+	case "STATEFUL_BACKUP_MISSING", "STATEFUL_MEMBER_DNS_MISSING", "STATEFUL_GROUP_LEASE_HELD", "STATEFUL_MEMBER_LEASE_HELD":
+		return SeverityMedium
+	default:
+		return SeverityLow
+	}
+}
+
+func confidenceForStatefulFinding(code string) float64 {
+	switch code {
+	case "STATEFUL_MEMBER_VOLUME_MISSING", "STATEFUL_MEMBER_VOLUME_MISMATCH", "STATEFUL_BACKUP_STALE", "STATEFUL_RUNNER_STALE", "STATEFUL_PROVIDER_DRIFT":
+		return 0.9
+	case "STATEFUL_MEMBER_NOT_READY", "STATEFUL_MEMBER_INSTANCE_MISSING", "STATEFUL_BACKUP_MISSING", "STATEFUL_RECIPE_UNHEALTHY", "STATEFUL_QUORUM_RISK":
+		return 0.84
+	default:
+		return 0.72
+	}
+}
+
+func statefulEvidence(group servicestatus.StatefulGroup, code string) []Evidence {
+	var evidence []Evidence
+	evidence = append(evidence, Evidence{Type: "stateful_group", Service: group.Group, Source: "status", Message: fmt.Sprintf("%s health is %s", group.Group, firstNonEmpty(group.Health, "unknown"))})
+	for _, member := range group.Members {
+		switch code {
+		case "STATEFUL_MEMBER_NOT_READY", "STATEFUL_MEMBER_VOLUME_MISSING", "STATEFUL_MEMBER_VOLUME_MISMATCH", "STATEFUL_MEMBER_INSTANCE_MISSING", "STATEFUL_MEMBER_DNS_MISSING", "STATEFUL_MEMBER_LEASE_HELD", "STATEFUL_RUNNER_STALE", "STATEFUL_RECIPE_UNHEALTHY", "STATEFUL_PROVIDER_DRIFT", "STATEFUL_QUORUM_RISK":
+			evidence = append(evidence, Evidence{Type: "stateful_member", Service: group.Group, Source: "object_state", Message: fmt.Sprintf("member %d phase=%s generation=%d expected_generation=%d instance=%s expected_instance=%s volume=%s expected_volume=%s dns=%s expected_dns=%s", member.Member, firstNonEmpty(member.Phase, "unknown"), member.Generation, member.ExpectedGeneration, firstNonEmpty(member.InstanceID, "missing"), firstNonEmpty(member.ExpectedInstanceID, "unknown"), firstNonEmpty(member.VolumeID, "missing"), firstNonEmpty(member.ExpectedVolumeID, "unknown"), firstNonEmpty(member.DNSName, "missing"), firstNonEmpty(member.ExpectedDNSName, "unknown")), ProviderID: firstNonEmpty(member.InstanceID, member.VolumeID), ObservedAt: member.UpdatedAt})
+		}
+	}
+	for _, backup := range group.Backups {
+		if strings.HasPrefix(code, "STATEFUL_BACKUP") || code == "STATEFUL_RECIPE_UNHEALTHY" {
+			evidence = append(evidence, Evidence{Type: "stateful_backup", Service: group.Group, Source: "object_state", Message: fmt.Sprintf("backup %s member=%d status=%s stale=%t", backup.BackupID, backup.Member, firstNonEmpty(backup.Status, "unknown"), backup.Stale), ProviderID: firstNonEmpty(backup.ProviderID, backup.SnapshotID), ObservedAt: backup.CreatedAt})
+		}
+	}
+	return evidence
+}
+
+func hasStatefulFinding(group servicestatus.StatefulGroup, code string) bool {
+	for _, finding := range group.Findings {
+		if finding.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func firstStatefulMember(group servicestatus.StatefulGroup) int {
+	if len(group.Members) == 0 {
+		return 0
+	}
+	return group.Members[0].Member
+}
+
+func firstUnhealthyStatefulMember(group servicestatus.StatefulGroup) int {
+	for _, member := range group.Members {
+		if member.Health != "" && member.Health != "nominal" {
+			return member.Member
+		}
+	}
+	return firstStatefulMember(group)
 }
 
 func evidenceFromEvent(service string, event schema.Event) []Evidence {
@@ -788,6 +968,97 @@ func inspectMetricsAction(binary, service string) RecommendedAction {
 		Summary:  "inspect recent service metrics",
 		Command:  fmt.Sprintf("%s metrics %s --since 20m --format json", binary, service),
 		Mutating: false,
+	}
+}
+
+func statefulInspectAction(binary, group string) RecommendedAction {
+	return RecommendedAction{
+		ID:       actionID(group, "stateful_status"),
+		Kind:     "command",
+		Service:  group,
+		Summary:  "refresh StatefulGroup status from object state",
+		Command:  fmt.Sprintf("%s stateful status %s --fresh --format json", binary, group),
+		Mutating: false,
+	}
+}
+
+func statefulLogsAction(binary, group string, member int) RecommendedAction {
+	command := fmt.Sprintf("%s stateful logs %s --since 20m --format json", binary, group)
+	id := "stateful_logs"
+	if member >= 0 {
+		command = fmt.Sprintf("%s stateful logs %s --member %d --since 20m --format json", binary, group, member)
+		id = fmt.Sprintf("stateful_logs_member_%d", member)
+	}
+	return RecommendedAction{
+		ID:       actionID(group, id),
+		Kind:     "command",
+		Service:  group,
+		Summary:  "inspect recent StatefulGroup member logs",
+		Command:  command,
+		Mutating: false,
+	}
+}
+
+func statefulMetricsAction(binary, group string, member int) RecommendedAction {
+	command := fmt.Sprintf("%s stateful metrics %s --since 20m --format json", binary, group)
+	id := "stateful_metrics"
+	if member >= 0 {
+		command = fmt.Sprintf("%s stateful metrics %s --member %d --since 20m --format json", binary, group, member)
+		id = fmt.Sprintf("stateful_metrics_member_%d", member)
+	}
+	return RecommendedAction{
+		ID:       actionID(group, id),
+		Kind:     "command",
+		Service:  group,
+		Summary:  "inspect recent StatefulGroup member metrics",
+		Command:  command,
+		Mutating: false,
+	}
+}
+
+func statefulSnapshotAction(binary, group string, member int) RecommendedAction {
+	return RecommendedAction{
+		ID:            actionID(group, "stateful_snapshot_member"),
+		Kind:          "command",
+		Service:       group,
+		Summary:       "create a fresh stateful member snapshot before restore or replacement work",
+		Command:       fmt.Sprintf("%s stateful snapshot %s --member %d --format json", binary, group, member),
+		Mutating:      true,
+		Safety:        "create-only backup intent and snapshot record; does not delete or overwrite volumes",
+		Reversibility: schema.Compensatable,
+		Risk:          schema.RiskMedium,
+	}
+}
+
+func statefulReplaceAction(binary, group string, member int) RecommendedAction {
+	return RecommendedAction{
+		ID:               actionID(group, "stateful_replace_member"),
+		Kind:             "command",
+		Service:          group,
+		Summary:          "replace one unhealthy StatefulGroup member through the explicit saga",
+		Command:          fmt.Sprintf("%s stateful replace-member %s --member %d --yes --format json", binary, group, member),
+		Mutating:         true,
+		Safety:           "requires explicit member fencing before volume attach",
+		Reversibility:    schema.Compensatable,
+		Risk:             schema.RiskHigh,
+		RequiresApproval: true,
+	}
+}
+
+func statefulResumeAction(binary, group, operationID string) RecommendedAction {
+	if operationID == "" {
+		return RecommendedAction{}
+	}
+	return RecommendedAction{
+		ID:            actionID(group, "stateful_resume"),
+		Kind:          "command",
+		Service:       group,
+		Summary:       "resume the active StatefulGroup saga or inspect it if the operation ID is not a saga ID",
+		Command:       fmt.Sprintf("%s stateful resume %s --format json", binary, operationID),
+		Mutating:      true,
+		Safety:        "resumes from durable saga/control state; does not start a new operation",
+		Reversibility: schema.Compensatable,
+		Risk:          schema.RiskMedium,
 	}
 }
 

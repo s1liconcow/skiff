@@ -60,6 +60,9 @@ type StatusOptions struct {
 
 type Status = servicestatus.Result
 type ServiceStatus = servicestatus.Service
+type StatefulGroup = servicestatus.StatefulGroup
+type StatefulMember = servicestatus.StatefulMember
+type StatefulBackup = servicestatus.StatefulBackup
 type Freshness = servicestatus.Freshness
 type Finding = servicestatus.Finding
 type DependencyStatus = servicestatus.DependencyStatus
@@ -274,6 +277,7 @@ func (c *Direct) Status(ctx context.Context, opts StatusOptions) (*Status, error
 		Freshness:   freshness,
 		Source:      "direct",
 		Service:     opts.Service,
+		Now:         c.clock().UTC(),
 	})
 	return &status, nil
 }

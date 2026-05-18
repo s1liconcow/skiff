@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/s1liconcow/skiff/internal/agent"
 	"github.com/s1liconcow/skiff/internal/client"
 	"github.com/s1liconcow/skiff/internal/compiler"
 	"github.com/s1liconcow/skiff/internal/config"
@@ -18,6 +20,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/provider/aws"
 	"github.com/s1liconcow/skiff/internal/saga/templates"
 	"github.com/s1liconcow/skiff/internal/spec"
+	"github.com/s1liconcow/skiff/internal/state"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 )
 
@@ -39,6 +42,23 @@ type statefulInspectOutput struct {
 	Result  deploy.StatefulInspectResult `json:"result"`
 }
 
+type statefulStatusOutput struct {
+	OK      bool                 `json:"ok"`
+	TraceID string               `json:"trace_id,omitempty"`
+	Result  client.StatefulGroup `json:"result"`
+}
+
+type statefulDoctorOutput struct {
+	OK      bool          `json:"ok"`
+	TraceID string        `json:"trace_id,omitempty"`
+	Doctor  client.Doctor `json:"doctor"`
+}
+
+type statefulSolveOutput struct {
+	OK bool `json:"ok"`
+	agent.ActionGraph
+}
+
 var newStatefulProvider = newCLIProvider
 
 func runStateful(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
@@ -53,6 +73,16 @@ func runStateful(binary string, args []string, root rootOptions, stdout, stderr 
 		return runStatefulApply(binary, args[1:], root, stdout, stderr)
 	case "inspect":
 		return runStatefulInspect(binary, args[1:], root, stdout, stderr)
+	case "status":
+		return runStatefulStatus(binary, args[1:], root, stdout, stderr)
+	case "doctor":
+		return runStatefulDoctor(binary, args[1:], root, stdout, stderr)
+	case "solve":
+		return runStatefulSolve(binary, args[1:], root, stdout, stderr)
+	case "logs":
+		return runStatefulLogs(binary, args[1:], root, stdout, stderr)
+	case "metrics":
+		return runStatefulMetrics(binary, args[1:], root, stdout, stderr)
 	case "replace-member":
 		return runStatefulReplaceMember(binary, args[1:], root, stdout, stderr)
 	case "snapshot":
@@ -242,6 +272,241 @@ func runStatefulInspect(binary string, args []string, root rootOptions, stdout, 
 		return writeStatefulCommandError(binary, "stateful inspect", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	return writeStatefulInspectResult(binary, *flags.format, *flags.traceID, result, stdout, stderr)
+}
+
+func runStatefulStatus(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" stateful status", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := addClientFlags(fs, root)
+	group := fs.String("group", "", "StatefulGroup name")
+	fresh := fs.Bool("fresh", false, "bypass cached API views where supported")
+
+	flagArgs, positionals, err := splitStatefulStatusArgs(args)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful status", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeStatefulCommandError(binary, "stateful status", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeStatefulCommandError(binary, "stateful status", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	if *group == "" && len(positionals) == 1 {
+		*group = positionals[0]
+	}
+	if *group == "" {
+		return writeStatefulCommandError(binary, "stateful status", *flags.format, *flags.traceID, errors.New("StatefulGroup name is required"), stdout, stderr)
+	}
+	loaded, err := flags.load(binary, root, fs)
+	if err != nil {
+		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+	}
+	skiffClient, err := newStatusClient(loaded.Config, client.Options{})
+	if err != nil {
+		return writeClientError(binary, "stateful status", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	status, err := skiffClient.Status(nilContext(), client.StatusOptions{Service: *group, Fresh: *fresh, TraceID: *flags.traceID})
+	if err != nil {
+		return writeClientError(binary, "stateful status", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	groupStatus, ok := statefulGroupFromStatus(*status, *group)
+	if !ok {
+		return writeStatefulCommandError(binary, "stateful status", *flags.format, *flags.traceID, fmt.Errorf("StatefulGroup %q was not found", *group), stdout, stderr)
+	}
+	return writeStatefulStatusResult(binary, *flags.format, *flags.traceID, groupStatus, stdout, stderr)
+}
+
+func runStatefulDoctor(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" stateful doctor", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := addClientFlags(fs, root)
+	group := fs.String("group", "", "StatefulGroup name")
+	fresh := fs.Bool("fresh", true, "bypass cached API views where supported")
+	flagArgs, positionals, err := splitStatefulStatusArgs(args)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful doctor", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeStatefulCommandError(binary, "stateful doctor", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeStatefulCommandError(binary, "stateful doctor", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	if *group == "" && len(positionals) == 1 {
+		*group = positionals[0]
+	}
+	if *group == "" {
+		return writeStatefulCommandError(binary, "stateful doctor", *flags.format, *flags.traceID, errors.New("StatefulGroup name is required"), stdout, stderr)
+	}
+	loaded, err := flags.load(binary, root, fs)
+	if err != nil {
+		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+	}
+	skiffClient, err := newDoctorClient(loaded.Config, client.Options{})
+	if err != nil {
+		return writeClientError(binary, "stateful doctor", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	result, err := skiffClient.Doctor(nilContext(), client.DoctorOptions{Service: *group, Fresh: *fresh, TraceID: *flags.traceID})
+	if err != nil {
+		return writeClientError(binary, "stateful doctor", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	return writeStatefulDoctorResult(binary, *flags.format, *flags.traceID, *result, stdout, stderr)
+}
+
+func runStatefulSolve(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" stateful solve", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := addClientFlags(fs, root)
+	group := fs.String("group", "", "StatefulGroup name")
+	goal := fs.String("goal", agent.GoalRestoreHealth, "goal to solve: restore-health")
+	fresh := fs.Bool("fresh", true, "bypass cached API views where supported")
+	flagArgs, positionals, err := splitStatefulSolveArgs(args)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful solve", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeStatefulCommandError(binary, "stateful solve", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeStatefulCommandError(binary, "stateful solve", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	if *group == "" && len(positionals) == 1 {
+		*group = positionals[0]
+	}
+	if *group == "" {
+		return writeStatefulCommandError(binary, "stateful solve", *flags.format, *flags.traceID, errors.New("StatefulGroup name is required"), stdout, stderr)
+	}
+	if *goal != agent.GoalRestoreHealth {
+		return writeStatefulCommandError(binary, "stateful solve", *flags.format, *flags.traceID, fmt.Errorf("unsupported goal %q; expected %q", *goal, agent.GoalRestoreHealth), stdout, stderr)
+	}
+	loaded, err := flags.load(binary, root, fs)
+	if err != nil {
+		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+	}
+	skiffClient, err := newSolveClient(loaded.Config, client.Options{})
+	if err != nil {
+		return writeClientError(binary, "stateful solve", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	diagnosis, err := skiffClient.Doctor(nilContext(), client.DoctorOptions{Service: *group, Fresh: *fresh, TraceID: *flags.traceID})
+	if err != nil {
+		return writeClientError(binary, "stateful solve", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	graph := agent.Solve(*diagnosis, agent.SolveOptions{Goal: *goal, Service: *group, TraceID: *flags.traceID, Binary: binary})
+	return writeStatefulSolveResult(binary, *flags.format, graph, stdout, stderr)
+}
+
+func runStatefulLogs(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" stateful logs", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := addClientFlags(fs, root)
+	group := fs.String("group", "", "StatefulGroup name")
+	member := fs.Int("member", -1, "stateful member ordinal")
+	sinceValue := fs.String("since", "", "duration like 20m or RFC3339 timestamp")
+	limit := fs.Int("limit", 100, "maximum log entries")
+	follow := fs.Bool("follow", false, "follow log output")
+	flagArgs, positionals, err := splitStatefulLogsArgs(args)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful logs", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeStatefulCommandError(binary, "stateful logs", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeStatefulCommandError(binary, "stateful logs", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	if *group == "" && len(positionals) == 1 {
+		*group = positionals[0]
+	}
+	if *group == "" {
+		return writeStatefulCommandError(binary, "stateful logs", *flags.format, *flags.traceID, errors.New("StatefulGroup name is required"), stdout, stderr)
+	}
+	loaded, err := flags.load(binary, root, fs)
+	if err != nil {
+		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+	}
+	if loaded.Config.Mode != config.ModeDirect {
+		return writeStatefulCommandError(binary, "stateful logs", *flags.format, *flags.traceID, errors.New("stateful logs currently requires --direct mode"), stdout, stderr)
+	}
+	since, err := parseSince(*sinceValue)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful logs", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	instanceID, err := statefulMemberInstanceID(nilContext(), loaded.Config, *group, *member)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful logs", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	logProvider, err := newLogsProvider(loaded.Config)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful logs", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	return runLogsQuery(logsContext(), logProvider, provider.LogsRequest{
+		Service:    *group,
+		Env:        loaded.Config.Env,
+		InstanceID: instanceID,
+		Since:      since,
+		Limit:      *limit,
+	}, *follow, binary, *flags.format, *flags.traceID, stdout, stderr)
+}
+
+func runStatefulMetrics(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" stateful metrics", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := addClientFlags(fs, root)
+	group := fs.String("group", "", "StatefulGroup name")
+	member := fs.Int("member", -1, "stateful member ordinal")
+	metricNames := fs.String("metric", "", "comma-separated metric names")
+	sinceValue := fs.String("since", "", "duration like 15m or RFC3339 start timestamp")
+	fromValue := fs.String("from", "", "RFC3339 start timestamp")
+	toValue := fs.String("to", "", "RFC3339 end timestamp")
+	period := fs.Int("period", 60, "metric period in seconds")
+	flagArgs, positionals, err := splitStatefulMetricsArgs(args)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful metrics", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeStatefulCommandError(binary, "stateful metrics", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeStatefulCommandError(binary, "stateful metrics", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	if *group == "" && len(positionals) == 1 {
+		*group = positionals[0]
+	}
+	if *group == "" {
+		return writeStatefulCommandError(binary, "stateful metrics", *flags.format, *flags.traceID, errors.New("StatefulGroup name is required"), stdout, stderr)
+	}
+	loaded, err := flags.load(binary, root, fs)
+	if err != nil {
+		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+	}
+	if loaded.Config.Mode != config.ModeDirect {
+		return writeStatefulCommandError(binary, "stateful metrics", *flags.format, *flags.traceID, errors.New("stateful metrics currently requires --direct mode"), stdout, stderr)
+	}
+	from, to, err := parseMetricWindow(*sinceValue, *fromValue, *toValue)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful metrics", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	instanceID, err := statefulMemberInstanceID(nilContext(), loaded.Config, *group, *member)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful metrics", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	metricProvider, err := newMetricsProviderForCLI(loaded.Config)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful metrics", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	result, err := metricProvider.Metrics(nilContext(), provider.MetricsRequest{
+		Service:       *group,
+		Env:           loaded.Config.Env,
+		InstanceID:    instanceID,
+		Names:         splitMetricNames(*metricNames),
+		From:          from,
+		To:            to,
+		PeriodSeconds: *period,
+	})
+	if err != nil {
+		return writeMetricsError(binary, *flags.format, *flags.traceID, *group, err, stdout, stderr)
+	}
+	return writeMetricsResult(binary, *flags.format, *flags.traceID, result.Series, stdout, stderr)
 }
 
 func runStatefulReplaceMember(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
@@ -580,6 +845,171 @@ func writeStatefulInspectResult(binary, format, traceID string, result *deploy.S
 	}
 }
 
+func writeStatefulStatusResult(binary, format, traceID string, result client.StatefulGroup, stdout, stderr io.Writer) int {
+	switch {
+	case format == "human" || format == "text":
+		fmt.Fprintf(stdout, "StatefulGroup %s", result.Group)
+		if result.Env != "" {
+			fmt.Fprintf(stdout, " env=%s", result.Env)
+		}
+		fmt.Fprintf(stdout, " health=%s replicas=%d\n", firstNonEmptyCLI(result.Health, "unknown"), result.Replicas)
+		if result.OperationID != "" {
+			fmt.Fprintf(stdout, "operation: %s", result.OperationID)
+			if result.OperationKind != "" {
+				fmt.Fprintf(stdout, " kind=%s", result.OperationKind)
+			}
+			if result.OperationState != "" {
+				fmt.Fprintf(stdout, " state=%s", result.OperationState)
+			}
+			fmt.Fprintln(stdout)
+		}
+		if result.Lease != nil {
+			fmt.Fprintf(stdout, "lease: owner=%s token=%s generation=%d expires=%s\n", result.Lease.Owner, result.Lease.Token, result.Lease.Generation, result.Lease.ExpiresAt)
+		}
+		if len(result.Members) == 0 {
+			fmt.Fprintln(stdout, "members: none")
+		} else {
+			fmt.Fprintln(stdout, "members:")
+			for _, member := range result.Members {
+				fmt.Fprintf(stdout, "- member %d health=%s phase=%s generation=%d", member.Member, firstNonEmptyCLI(member.Health, "unknown"), firstNonEmptyCLI(member.Phase, "unknown"), member.Generation)
+				if member.ExpectedGeneration > 0 && member.ExpectedGeneration != member.Generation {
+					fmt.Fprintf(stdout, " expected_generation=%d", member.ExpectedGeneration)
+				}
+				if member.Role != "" {
+					fmt.Fprintf(stdout, " role=%s", member.Role)
+				}
+				if member.Zone != "" {
+					fmt.Fprintf(stdout, " zone=%s", member.Zone)
+				}
+				if member.InstanceID != "" {
+					fmt.Fprintf(stdout, " instance=%s", member.InstanceID)
+				}
+				if member.VolumeID != "" {
+					fmt.Fprintf(stdout, " volume=%s", member.VolumeID)
+				}
+				if member.DNSName != "" {
+					fmt.Fprintf(stdout, " dns=%s", member.DNSName)
+				}
+				if member.ReleaseID != "" {
+					fmt.Fprintf(stdout, " release=%s", member.ReleaseID)
+				}
+				if member.RecipeStatus != "" {
+					fmt.Fprintf(stdout, " recipe=%s", member.RecipeStatus)
+				}
+				fmt.Fprintln(stdout)
+				if member.Lease != nil {
+					fmt.Fprintf(stdout, "  lease: owner=%s token=%s generation=%d expires=%s\n", member.Lease.Owner, member.Lease.Token, member.Lease.Generation, member.Lease.ExpiresAt)
+				}
+				for _, op := range member.ProviderOperations {
+					fmt.Fprintf(stdout, "  provider-op: %s %s %s", op.Provider, op.Kind, op.ID)
+					if op.Description != "" {
+						fmt.Fprintf(stdout, " %s", op.Description)
+					}
+					fmt.Fprintln(stdout)
+				}
+				for _, finding := range member.Findings {
+					fmt.Fprintf(stdout, "  finding: %s %s\n", finding.Code, finding.Summary)
+				}
+			}
+		}
+		if len(result.Backups) == 0 {
+			fmt.Fprintln(stdout, "backups: none")
+		} else {
+			fmt.Fprintln(stdout, "backups:")
+			for _, backup := range result.Backups {
+				fmt.Fprintf(stdout, "- %s member=%d status=%s", backup.BackupID, backup.Member, firstNonEmptyCLI(backup.Status, "unknown"))
+				if backup.SnapshotID != "" {
+					fmt.Fprintf(stdout, " snapshot=%s", backup.SnapshotID)
+				}
+				if backup.VolumeID != "" {
+					fmt.Fprintf(stdout, " volume=%s", backup.VolumeID)
+				}
+				if backup.Stale {
+					fmt.Fprint(stdout, " stale=true")
+				}
+				if backup.ExpiresAt != "" {
+					fmt.Fprintf(stdout, " expires=%s", backup.ExpiresAt)
+				}
+				fmt.Fprintln(stdout)
+			}
+		}
+		if len(result.Findings) > 0 {
+			fmt.Fprintln(stdout, "findings:")
+			for _, finding := range result.Findings {
+				fmt.Fprintf(stdout, "- %s: %s\n", finding.Code, finding.Summary)
+			}
+		}
+		return ExitSuccess
+	case isJSONFormat(format):
+		if err := writeJSON(stdout, format, statefulStatusOutput{OK: true, TraceID: traceID, Result: result}); err != nil {
+			fmt.Fprintf(stderr, "%s stateful status: %v\n", binary, err)
+			return ExitInternalError
+		}
+		return ExitSuccess
+	default:
+		return writeStatefulCommandError(binary, "stateful status", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
+	}
+}
+
+func writeStatefulDoctorResult(binary, format, traceID string, result client.Doctor, stdout, stderr io.Writer) int {
+	switch {
+	case format == "human" || format == "text":
+		printDoctorHuman(stdout, result)
+		return ExitSuccess
+	case isJSONFormat(format):
+		if err := writeJSON(stdout, format, statefulDoctorOutput{OK: true, TraceID: traceID, Doctor: result}); err != nil {
+			fmt.Fprintf(stderr, "%s stateful doctor: %v\n", binary, err)
+			return ExitInternalError
+		}
+		return ExitSuccess
+	default:
+		return writeStatefulCommandError(binary, "stateful doctor", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
+	}
+}
+
+func writeStatefulSolveResult(binary, format string, graph agent.ActionGraph, stdout, stderr io.Writer) int {
+	switch {
+	case format == "human" || format == "text":
+		printSolveHuman(stdout, graph)
+		return ExitSuccess
+	case isJSONFormat(format):
+		if err := writeJSON(stdout, format, statefulSolveOutput{OK: true, ActionGraph: graph}); err != nil {
+			fmt.Fprintf(stderr, "%s stateful solve: %v\n", binary, err)
+			return ExitInternalError
+		}
+		return ExitSuccess
+	default:
+		return writeStatefulCommandError(binary, "stateful solve", format, graph.TraceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
+	}
+}
+
+func statefulGroupFromStatus(status client.Status, group string) (client.StatefulGroup, bool) {
+	for _, item := range status.StatefulGroups {
+		if item.Group == group {
+			return item, true
+		}
+	}
+	return client.StatefulGroup{}, false
+}
+
+func statefulMemberInstanceID(ctx context.Context, cfg config.Config, group string, member int) (string, error) {
+	if member < 0 {
+		return "", nil
+	}
+	store, err := client.OpenObjectStore(cfg)
+	if err != nil {
+		return "", err
+	}
+	doc, err := state.NewClient(store).GetStatefulMemberControl(ctx, group, member)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(doc.Control.InstanceID) == "" {
+		return "", fmt.Errorf("StatefulGroup %q member %d has no instance provider ID in object state", group, member)
+	}
+	return doc.Control.InstanceID, nil
+}
+
 func writeStatefulSpecError(binary, code, format, traceID string, err error, stdout, stderr io.Writer) int {
 	var validation spec.ValidationError
 	if errors.As(err, &validation) {
@@ -653,6 +1083,88 @@ func splitStatefulInspectArgs(args []string) ([]string, []string, error) {
 		"region":       true,
 		"state":        true,
 		"state-bucket": true,
+		"trace-id":     true,
+	}
+	return splitArgs(args, valueFlags)
+}
+
+func splitStatefulStatusArgs(args []string) ([]string, []string, error) {
+	valueFlags := map[string]bool{
+		"api-url":      true,
+		"config":       true,
+		"context":      true,
+		"env":          true,
+		"format":       true,
+		"group":        true,
+		"mode":         true,
+		"provider":     true,
+		"region":       true,
+		"state":        true,
+		"state-bucket": true,
+		"trace-id":     true,
+	}
+	return splitArgs(args, valueFlags)
+}
+
+func splitStatefulSolveArgs(args []string) ([]string, []string, error) {
+	valueFlags := map[string]bool{
+		"api-url":      true,
+		"config":       true,
+		"context":      true,
+		"env":          true,
+		"format":       true,
+		"goal":         true,
+		"group":        true,
+		"mode":         true,
+		"provider":     true,
+		"region":       true,
+		"state":        true,
+		"state-bucket": true,
+		"trace-id":     true,
+	}
+	return splitArgs(args, valueFlags)
+}
+
+func splitStatefulLogsArgs(args []string) ([]string, []string, error) {
+	valueFlags := map[string]bool{
+		"api-url":      true,
+		"config":       true,
+		"context":      true,
+		"env":          true,
+		"format":       true,
+		"group":        true,
+		"limit":        true,
+		"member":       true,
+		"mode":         true,
+		"provider":     true,
+		"region":       true,
+		"since":        true,
+		"state":        true,
+		"state-bucket": true,
+		"trace-id":     true,
+	}
+	return splitArgs(args, valueFlags)
+}
+
+func splitStatefulMetricsArgs(args []string) ([]string, []string, error) {
+	valueFlags := map[string]bool{
+		"api-url":      true,
+		"config":       true,
+		"context":      true,
+		"env":          true,
+		"format":       true,
+		"from":         true,
+		"group":        true,
+		"member":       true,
+		"metric":       true,
+		"mode":         true,
+		"period":       true,
+		"provider":     true,
+		"region":       true,
+		"since":        true,
+		"state":        true,
+		"state-bucket": true,
+		"to":           true,
 		"trace-id":     true,
 	}
 	return splitArgs(args, valueFlags)
@@ -782,6 +1294,11 @@ func printStatefulUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  plan       Plan StatefulGroup provider resources")
 	fmt.Fprintln(w, "  apply      Write StatefulGroup durable object state")
 	fmt.Fprintln(w, "  inspect    Inspect StatefulGroup direct object state")
+	fmt.Fprintln(w, "  status     Show StatefulGroup health, members, backups, leases, and provider IDs")
+	fmt.Fprintln(w, "  doctor     Diagnose StatefulGroup health from object state")
+	fmt.Fprintln(w, "  solve      Render an agent action graph for StatefulGroup recovery")
+	fmt.Fprintln(w, "  logs       Query StatefulGroup or member logs")
+	fmt.Fprintln(w, "  metrics    Query StatefulGroup or member metrics")
 	fmt.Fprintln(w, "  replace-member  Replace one failed StatefulGroup member through a saga")
 	fmt.Fprintln(w, "  snapshot   Snapshot one StatefulGroup member volume")
 	fmt.Fprintln(w, "  backup     Render StatefulGroup backup saga plans")

@@ -163,8 +163,38 @@ func apiOperationForAction(action doctor.RecommendedAction, service string) *API
 	id := strings.ToLower(action.ID)
 	params := map[string]string{}
 	operation := ""
+	targetKind := "service"
 
 	switch {
+	case strings.Contains(command, " stateful status "):
+		operation = "stateful.status"
+		targetKind = "stateful-group"
+		params["fresh"] = "true"
+	case strings.Contains(command, " stateful logs "):
+		operation = "stateful.logs"
+		targetKind = "stateful-group"
+		params["since"] = firstNonEmpty(flagValue(action.Command, "since"), "20m")
+		if member := flagValue(action.Command, "member"); member != "" {
+			params["member"] = member
+		}
+	case strings.Contains(command, " stateful metrics "):
+		operation = "stateful.metrics"
+		targetKind = "stateful-group"
+		params["since"] = firstNonEmpty(flagValue(action.Command, "since"), "20m")
+		if member := flagValue(action.Command, "member"); member != "" {
+			params["member"] = member
+		}
+	case strings.Contains(command, " stateful snapshot "):
+		operation = "stateful.snapshot"
+		targetKind = "stateful-group"
+		params["member"] = flagValue(action.Command, "member")
+	case strings.Contains(command, " stateful replace-member "):
+		operation = "stateful.replace_member"
+		targetKind = "stateful-member"
+		params["member"] = flagValue(action.Command, "member")
+	case strings.Contains(command, " stateful resume "):
+		operation = "stateful.resume"
+		targetKind = "stateful-group"
 	case strings.Contains(id, "inspect_status") || strings.Contains(command, " status "):
 		operation = "status.get"
 		params["fresh"] = "true"
@@ -198,7 +228,7 @@ func apiOperationForAction(action doctor.RecommendedAction, service string) *API
 	params = compactParams(params)
 	return &APIOperation{
 		Operation: operation,
-		Target:    schema.Target{Kind: "service", Name: service},
+		Target:    schema.Target{Kind: targetKind, Name: service},
 		Params:    params,
 		Mutating:  action.Mutating,
 	}

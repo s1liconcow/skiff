@@ -19,6 +19,7 @@ type Snapshot struct {
 	RefreshedAt    time.Time
 	LastFullScanAt time.Time
 	Services       []ServiceSummary
+	StatefulGroups []StatefulGroupSummary
 	Sagas          []SagaSummary
 	Operations     []OperationSummary
 	Resources      []ResourceSummary
@@ -35,6 +36,59 @@ type ServiceSummary struct {
 	OperationKind  string `json:"operation_kind,omitempty"`
 	OperationState string `json:"operation_state,omitempty"`
 	UpdatedAt      string `json:"updated_at,omitempty"`
+}
+
+type StatefulGroupSummary struct {
+	Group          string                  `json:"group"`
+	Env            string                  `json:"env,omitempty"`
+	Replicas       int                     `json:"replicas"`
+	Members        []StatefulMemberSummary `json:"members,omitempty"`
+	Backups        []StatefulBackupSummary `json:"backups,omitempty"`
+	OperationID    string                  `json:"operation_id,omitempty"`
+	OperationKind  string                  `json:"operation_kind,omitempty"`
+	OperationState string                  `json:"operation_state,omitempty"`
+	Lease          *schema.Lease           `json:"lease,omitempty"`
+	UpdatedAt      string                  `json:"updated_at,omitempty"`
+}
+
+type StatefulMemberSummary struct {
+	Member             int                           `json:"member"`
+	Env                string                        `json:"env,omitempty"`
+	Zone               string                        `json:"zone,omitempty"`
+	Generation         int64                         `json:"generation"`
+	ExpectedGeneration int64                         `json:"expected_generation,omitempty"`
+	ReleaseID          string                        `json:"release_id,omitempty"`
+	ReleaseManifestKey string                        `json:"release_manifest_key,omitempty"`
+	RuntimeManifestKey string                        `json:"runtime_manifest_key,omitempty"`
+	InstanceID         string                        `json:"instance_id,omitempty"`
+	ExpectedInstanceID string                        `json:"expected_instance_id,omitempty"`
+	VolumeID           string                        `json:"volume_id,omitempty"`
+	ExpectedVolumeID   string                        `json:"expected_volume_id,omitempty"`
+	DNSName            string                        `json:"dns_name,omitempty"`
+	ExpectedDNSName    string                        `json:"expected_dns_name,omitempty"`
+	Phase              string                        `json:"phase,omitempty"`
+	ExpectedPhase      string                        `json:"expected_phase,omitempty"`
+	Role               string                        `json:"role,omitempty"`
+	RecipeStatus       string                        `json:"recipe_status,omitempty"`
+	RecipeSummary      string                        `json:"recipe_summary,omitempty"`
+	Lease              *schema.Lease                 `json:"lease,omitempty"`
+	ProviderOperations []schema.ProviderOperationRef `json:"provider_operations,omitempty"`
+	UpdatedAt          string                        `json:"updated_at,omitempty"`
+}
+
+type StatefulBackupSummary struct {
+	BackupID          string                      `json:"backup_id"`
+	Member            int                         `json:"member"`
+	VolumeID          string                      `json:"volume_id,omitempty"`
+	SnapshotID        string                      `json:"snapshot_id,omitempty"`
+	Provider          string                      `json:"provider,omitempty"`
+	ProviderID        string                      `json:"provider_id,omitempty"`
+	ProviderOperation schema.ProviderOperationRef `json:"provider_operation,omitempty"`
+	Status            string                      `json:"status,omitempty"`
+	RecipeStatus      string                      `json:"recipe_status,omitempty"`
+	RecipeSummary     string                      `json:"recipe_summary,omitempty"`
+	CreatedAt         string                      `json:"created_at,omitempty"`
+	ExpiresAt         string                      `json:"expires_at,omitempty"`
 }
 
 type SagaSummary struct {
@@ -151,6 +205,26 @@ func (s *AtomicSnapshot) Store(snapshot Snapshot) {
 func CloneSnapshot(snapshot Snapshot) Snapshot {
 	out := snapshot
 	out.Services = append([]ServiceSummary(nil), snapshot.Services...)
+	out.StatefulGroups = make([]StatefulGroupSummary, 0, len(snapshot.StatefulGroups))
+	for _, group := range snapshot.StatefulGroups {
+		members := group.Members
+		backups := group.Backups
+		if group.Lease != nil {
+			lease := *group.Lease
+			group.Lease = &lease
+		}
+		group.Members = make([]StatefulMemberSummary, 0, len(members))
+		for _, member := range members {
+			if member.Lease != nil {
+				lease := *member.Lease
+				member.Lease = &lease
+			}
+			member.ProviderOperations = append([]schema.ProviderOperationRef(nil), member.ProviderOperations...)
+			group.Members = append(group.Members, member)
+		}
+		group.Backups = append([]StatefulBackupSummary(nil), backups...)
+		out.StatefulGroups = append(out.StatefulGroups, group)
+	}
 	out.Sagas = append([]SagaSummary(nil), snapshot.Sagas...)
 	out.Operations = make([]OperationSummary, 0, len(snapshot.Operations))
 	for _, operation := range snapshot.Operations {
