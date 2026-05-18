@@ -31,6 +31,8 @@ func TestRenderDashboardSnapshot(t *testing.T) {
 	for _, want := range []string{
 		"Skiff Operations",
 		"payments-api",
+		"orders-stream",
+		"vol-0",
 		"rel_02",
 		"saga_canary",
 		"deploy.started",
@@ -133,6 +135,28 @@ func (fakeDashboardClient) Status(ctx context.Context, opts client.StatusOptions
 				{Kind: "metric-config", ProviderID: "skiff-e2e-44720-1779067497068491000-metrics"},
 				{Kind: "target-group", ProviderID: "fake-target-group-caddy-web"},
 			},
+		}},
+		StatefulGroups: []client.StatefulGroup{{
+			Group:    "orders-stream",
+			Env:      "prod",
+			Replicas: 1,
+			Health:   "nominal",
+			Members: []client.StatefulMember{{
+				Member:     0,
+				Generation: 1,
+				InstanceID: "i-0",
+				VolumeID:   "vol-0",
+				DNSName:    "orders-stream-0.internal",
+				Phase:      "Ready",
+				Health:     "nominal",
+			}},
+			Backups: []client.StatefulBackup{{
+				BackupID:   "backup_01",
+				Member:     0,
+				SnapshotID: "snap-0",
+				ProviderID: "snap-0",
+				Status:     "available",
+			}},
 		}},
 	}, nil
 }

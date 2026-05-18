@@ -17,6 +17,7 @@ import (
 
 const (
 	focusServices = "services"
+	focusStateful = "stateful"
 	focusSagas    = "sagas"
 	focusEvents   = "events"
 )
@@ -220,24 +221,37 @@ func (m Model) Load(ctx context.Context) (Model, error) {
 
 func (m Model) ActionForKey(value string) (Action, bool) {
 	service := m.selectedService()
+	stateful := m.selectedStatefulGroup()
 	saga := m.selectedSaga()
 	switch value {
 	case "d":
+		if m.focus == focusStateful && stateful.Group != "" {
+			return m.readAction("stateful_doctor", "Doctor", "d", fmt.Sprintf("skiff stateful doctor %s --fresh --format json --trace-id %s", stateful.Group, m.trace()), "Run doctor diagnostics for the selected StatefulGroup"), true
+		}
 		if service.Service == "" {
 			return Action{}, false
 		}
 		return m.readAction("doctor", "Doctor", "d", fmt.Sprintf("skiff doctor %s --fresh --format json --trace-id %s", service.Service, m.trace()), "Run doctor diagnostics for the selected service"), true
 	case "l":
+		if m.focus == focusStateful && stateful.Group != "" {
+			return m.readAction("stateful_logs", "Logs", "l", fmt.Sprintf("skiff stateful logs %s --since 20m --format json --trace-id %s", stateful.Group, m.trace()), "Open recent StatefulGroup logs"), true
+		}
 		if service.Service == "" {
 			return Action{}, false
 		}
 		return m.readAction("logs", "Logs", "l", fmt.Sprintf("skiff logs %s --since 20m --format json --trace-id %s", service.Service, m.trace()), "Open recent service logs"), true
 	case "m":
+		if m.focus == focusStateful && stateful.Group != "" {
+			return m.readAction("stateful_metrics", "Metrics", "m", fmt.Sprintf("skiff stateful metrics %s --from -30m --format json --trace-id %s", stateful.Group, m.trace()), "Inspect StatefulGroup metrics"), true
+		}
 		if service.Service == "" {
 			return Action{}, false
 		}
 		return m.readAction("metrics", "Metrics", "m", fmt.Sprintf("skiff metrics %s --from -30m --format json --trace-id %s", service.Service, m.trace()), "Inspect service metrics"), true
 	case "e":
+		if m.focus == focusStateful && stateful.Group != "" {
+			return m.readAction("stateful_events", "Events", "e", fmt.Sprintf("skiff events --scope service --service %s --format json --trace-id %s", stateful.Group, m.trace()), "List recent StatefulGroup events"), true
+		}
 		if service.Service == "" {
 			return Action{}, false
 		}
@@ -303,6 +317,8 @@ func (m Model) fetch(ctx context.Context) (Dashboard, error) {
 func (m *Model) nextFocus() {
 	switch m.focus {
 	case focusServices:
+		m.focus = focusStateful
+	case focusStateful:
 		m.focus = focusSagas
 	case focusSagas:
 		m.focus = focusEvents
@@ -317,6 +333,8 @@ func (m *Model) clampSelection() {
 	switch m.focus {
 	case focusServices:
 		max = len(m.dashboard.Status.Services)
+	case focusStateful:
+		max = len(m.dashboard.Status.StatefulGroups)
 	case focusSagas:
 		max = len(m.dashboard.Sagas)
 	case focusEvents:
@@ -332,6 +350,16 @@ func (m *Model) clampSelection() {
 	if m.selected >= max {
 		m.selected = max - 1
 	}
+}
+
+func (m Model) selectedStatefulGroup() client.StatefulGroup {
+	if len(m.dashboard.Status.StatefulGroups) == 0 {
+		return client.StatefulGroup{}
+	}
+	if m.focus == focusStateful && m.selected < len(m.dashboard.Status.StatefulGroups) {
+		return m.dashboard.Status.StatefulGroups[m.selected]
+	}
+	return m.dashboard.Status.StatefulGroups[0]
 }
 
 func (m Model) selectedService() client.ServiceStatus {

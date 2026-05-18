@@ -12,8 +12,11 @@ import (
 	"github.com/s1liconcow/skiff/internal/objstore/memory"
 	"github.com/s1liconcow/skiff/internal/provider"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
+	fakeprovider "github.com/s1liconcow/skiff/internal/provider/fake"
 	sagastate "github.com/s1liconcow/skiff/internal/saga"
 	"github.com/s1liconcow/skiff/internal/saga/steps"
+	"github.com/s1liconcow/skiff/internal/saga/templates"
+	"github.com/s1liconcow/skiff/internal/state"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
 	"github.com/s1liconcow/skiff/internal/state/paths"
 	"github.com/s1liconcow/skiff/internal/state/schema"
@@ -172,8 +175,85 @@ func TestWorkerResumesSagasThroughExecutor(t *testing.T) {
 	}
 }
 
+func TestWorkerDefaultsResumeStatefulSagas(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	seedWorkerStatefulMember(t, store)
+	sagas := sagastate.NewStore(store, sagastate.WithClock(workerNow))
+	req, err := templates.StatefulReplaceMember(templates.StatefulReplaceMemberRequest{
+		SagaID:      "saga_stateful_worker",
+		OperationID: "op_stateful_worker",
+		Group:       "orders-stream",
+		Env:         "dev",
+		Member:      0,
+		Actor:       schema.Actor{ID: "agent-one", Type: "agent"},
+		TraceID:     "tr_stateful_worker",
+		CreatedAt:   workerNow(),
+	})
+	if err != nil {
+		t.Fatalf("stateful replace template: %v", err)
+	}
+	if _, err := sagas.Create(ctx, req); err != nil {
+		t.Fatalf("create stateful saga: %v", err)
+	}
+	result, err := (worker.Worker{
+		Store:    store,
+		Provider: fakeprovider.New(),
+		Owner:    "worker-stateful",
+		Clock:    workerNow,
+	}).RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("run once: %v", err)
+	}
+	if result.SagaResumed != 1 {
+		t.Fatalf("stateful saga was not resumed by default steps: %+v", result)
+	}
+	member, err := state.NewClient(store).GetStatefulMemberControl(ctx, "orders-stream", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if member.Control.Generation != 2 || member.Control.InstanceID != "fake-orders-stream-0-gen-2" {
+		t.Fatalf("stateful member was not replaced: %+v", member.Control)
+	}
+}
+
 type workerOperationOptions struct {
 	Lease *schema.Lease
+}
+
+func seedWorkerStatefulMember(t *testing.T, store objstore.ObjectStore) {
+	t.Helper()
+	client := state.NewClient(store)
+	ctx := context.Background()
+	if _, err := client.CreateStatefulGroupControl(ctx, schema.StatefulGroupControl{
+		Group: "orders-stream",
+		Env:   "dev",
+		Members: []schema.StatefulMemberSummary{{
+			Member:     0,
+			Generation: 1,
+			InstanceID: "i-old",
+			VolumeID:   "vol-0",
+			DNSName:    "orders-stream-0.internal",
+			Phase:      state.StatefulMemberReady,
+		}},
+		Replicas:  1,
+		UpdatedBy: schema.Actor{ID: "seed", Type: "test"},
+	}); err != nil {
+		t.Fatalf("create stateful group: %v", err)
+	}
+	if _, err := client.CreateStatefulMemberControl(ctx, schema.StatefulMemberControl{
+		Group:      "orders-stream",
+		Env:        "dev",
+		Member:     0,
+		InstanceID: "i-old",
+		VolumeID:   "vol-0",
+		DNSName:    "orders-stream-0.internal",
+		Generation: 1,
+		Phase:      state.StatefulMemberReady,
+		UpdatedBy:  schema.Actor{ID: "seed", Type: "test"},
+	}); err != nil {
+		t.Fatalf("create stateful member: %v", err)
+	}
 }
 
 func createWorkerOperation(t *testing.T, store objstore.ObjectStore, opts workerOperationOptions) {

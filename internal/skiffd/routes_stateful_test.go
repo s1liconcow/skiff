@@ -6,15 +6,19 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/s1liconcow/skiff/internal/config"
 	servicedoctor "github.com/s1liconcow/skiff/internal/doctor"
+	"github.com/s1liconcow/skiff/internal/events"
 	stateindex "github.com/s1liconcow/skiff/internal/index"
+	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/objstore/memory"
 	"github.com/s1liconcow/skiff/internal/provider/fake"
 	"github.com/s1liconcow/skiff/internal/state"
+	"github.com/s1liconcow/skiff/internal/state/canonical"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 	servicestatus "github.com/s1liconcow/skiff/internal/status"
 )
@@ -163,6 +167,105 @@ func TestStatefulStatusAndDoctorRoutesUseIndexedGroups(t *testing.T) {
 	}
 }
 
+func TestStatefulGroupRoutesSupportFreshInspectAndMemberReload(t *testing.T) {
+	store := memory.New()
+	seedSkiffdStatefulMember(t, store)
+	server, err := New(Options{
+		Config:      config.Config{Env: "dev", Provider: "fake"},
+		ObjectStore: store,
+		Index: NewStaticIndex(Snapshot{Ready: true, Generation: 7, StatefulGroups: []stateindex.StatefulGroupSummary{{
+			Group: "orders-stream",
+			Env:   "dev",
+			Members: []stateindex.StatefulMemberSummary{{
+				Member:     0,
+				InstanceID: "i-stale",
+				Phase:      state.StatefulMemberFailed,
+			}},
+		}}}),
+		Provider: fake.New(),
+		Clock:    func() time.Time { return time.Date(2026, 5, 18, 4, 0, 0, 0, time.UTC) },
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/stateful/groups/orders-stream/members/0?fresh=true&format=json", nil)
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("inspect status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		OK     bool                         `json:"ok"`
+		Member servicestatus.StatefulMember `json:"member"`
+		Index  struct {
+			Source string `json:"source"`
+		} `json:"index"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v\n%s", err, rec.Body.String())
+	}
+	if !got.OK || got.Member.InstanceID != "i-old" || got.Index.Source != "direct_object_store" {
+		t.Fatalf("fresh stateful inspect did not use object state: %+v", got)
+	}
+}
+
+func TestStatefulSagaRoutesCreateUpdateBackupRestoreAndWatch(t *testing.T) {
+	store := memory.New()
+	seedSkiffdStatefulMember(t, store)
+	server, err := New(Options{
+		Config:      config.Config{Env: "dev", Provider: "fake"},
+		ObjectStore: store,
+		Index:       NewStaticIndex(Snapshot{Ready: true, Generation: 1, RefreshedAt: time.Now().UTC()}),
+		Provider:    fake.New(),
+		Clock:       func() time.Time { return time.Date(2026, 5, 18, 4, 10, 0, 0, time.UTC) },
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	handler := server.Handler()
+	for _, tc := range []struct {
+		path string
+		body string
+	}{
+		{path: "/v1/stateful/update?format=json", body: `{"group":"orders-stream","release_id":"rel_new","run":false}`},
+		{path: "/v1/stateful/backup?format=json", body: `{"group":"orders-stream","members":[0],"plan_only":true}`},
+		{path: "/v1/stateful/restore?format=json", body: `{"group":"orders-stream","member":0,"backup_id":"backup_01","plan_only":true}`},
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, tc.path, bytes.NewBufferString(tc.body))
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusAccepted && rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, body = %s", tc.path, rec.Code, rec.Body.String())
+		}
+		var got struct {
+			OK     bool                  `json:"ok"`
+			Result statefulSagaAPIResult `json:"result"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode %s: %v\n%s", tc.path, err, rec.Body.String())
+		}
+		if !got.OK || got.Result.SagaID == "" || got.Result.Group != "orders-stream" {
+			t.Fatalf("unexpected stateful saga result for %s: %+v", tc.path, got)
+		}
+	}
+
+	writeSkiffdJSON(t, store, "sagas/saga_watch/events/01JWATCH.json", schema.Event{
+		SchemaVersion: schema.Version,
+		ID:            "01JWATCH",
+		Time:          "2026-05-18T04:10:00Z",
+		Subject:       schema.Target{Kind: string(events.ScopeSaga), Name: "saga_watch"},
+		Type:          "stateful.saga.updated",
+		Summary:       "stateful saga updated",
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/stateful/sagas/saga_watch/watch?once=true&format=json", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "01JWATCH") {
+		t.Fatalf("watch status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 func seedSkiffdStatefulMember(t *testing.T, store *memory.Store) {
 	t.Helper()
 	client := state.NewClient(store)
@@ -191,6 +294,17 @@ func seedSkiffdStatefulMember(t *testing.T, store *memory.Store) {
 		UpdatedBy:  schema.Actor{ID: "seed", Type: "test"},
 	}); err != nil {
 		t.Fatalf("create member: %v", err)
+	}
+}
+
+func writeSkiffdJSON(t *testing.T, store *memory.Store, key string, value any) {
+	t.Helper()
+	body, err := canonical.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal %s: %v", key, err)
+	}
+	if _, err := store.Create(context.Background(), key, body, objstore.PutOptions{ContentType: canonical.ContentType}); err != nil {
+		t.Fatalf("create %s: %v", key, err)
 	}
 }
 

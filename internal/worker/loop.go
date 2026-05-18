@@ -10,6 +10,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/provider"
 	sagastate "github.com/s1liconcow/skiff/internal/saga"
 	"github.com/s1liconcow/skiff/internal/saga/steps"
+	"github.com/s1liconcow/skiff/internal/saga/steps/builtin"
 	"github.com/s1liconcow/skiff/internal/state"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 )
@@ -113,6 +114,10 @@ func (w Worker) resumeSagas(ctx context.Context) (*RunResult, error) {
 		return result, err
 	}
 	sagas := sagastate.NewStore(w.Store, sagastate.WithClock(w.now))
+	registered := w.SagaSteps
+	if registered == nil {
+		registered = builtin.New(builtin.Options{Store: w.Store, Provider: w.Provider, Binary: "skiff"})
+	}
 	for _, meta := range metas {
 		sagaID, ok := parseSagaControlKey(meta.Key)
 		if !ok {
@@ -128,7 +133,7 @@ func (w Worker) resumeSagas(ctx context.Context) (*RunResult, error) {
 		}
 		_, err = (&sagastate.Executor{
 			Store:         sagas,
-			Steps:         w.SagaSteps,
+			Steps:         registered,
 			Owner:         w.owner(),
 			LeaseDuration: w.leaseDuration(),
 		}).Execute(ctx, sagaID)

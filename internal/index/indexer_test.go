@@ -290,6 +290,88 @@ func TestRefreshKeyAppliesHotControlHint(t *testing.T) {
 	}
 }
 
+func TestRefreshKeyAppliesStatefulControlHints(t *testing.T) {
+	store := memory.New()
+	createJSON(t, store, "stateful/orders-stream/control.json", schema.StatefulGroupControl{
+		SchemaVersion: schema.Version,
+		Group:         "orders-stream",
+		Env:           "prod",
+		Replicas:      1,
+		Members: []schema.StatefulMemberSummary{{
+			Member:     0,
+			Generation: 1,
+			InstanceID: "i-old",
+			VolumeID:   "vol-0",
+			DNSName:    "orders-stream-0.internal",
+			Phase:      "Ready",
+		}},
+		UpdatedAt: "2026-05-16T21:00:00Z",
+		UpdatedBy: schema.Actor{ID: "agent-one", Type: "agent"},
+	})
+	member := schema.StatefulMemberControl{
+		SchemaVersion: schema.Version,
+		Group:         "orders-stream",
+		Env:           "prod",
+		Member:        0,
+		Generation:    1,
+		InstanceID:    "i-old",
+		VolumeID:      "vol-0",
+		DNSName:       "orders-stream-0.internal",
+		Phase:         "Ready",
+		UpdatedAt:     "2026-05-16T21:00:00Z",
+		UpdatedBy:     schema.Actor{ID: "agent-one", Type: "agent"},
+	}
+	createJSON(t, store, "stateful/orders-stream/members/0/control.json", member)
+	createJSON(t, store, "stateful/orders-stream/backups/backup_01/record.json", struct {
+		SchemaVersion string `json:"schema_version"`
+		BackupID      string `json:"backup_id"`
+		Group         string `json:"group"`
+		Member        int    `json:"member"`
+		VolumeID      string `json:"volume_id"`
+		SnapshotID    string `json:"snapshot_id"`
+		Status        string `json:"status"`
+		CreatedAt     string `json:"created_at"`
+	}{
+		SchemaVersion: schema.Version,
+		BackupID:      "backup_01",
+		Group:         "orders-stream",
+		Member:        0,
+		VolumeID:      "vol-0",
+		SnapshotID:    "snap-old",
+		Status:        "available",
+		CreatedAt:     "2026-05-16T21:00:00Z",
+	})
+	idx, err := New(store, Options{Clock: fixedClock})
+	if err != nil {
+		t.Fatalf("new index: %v", err)
+	}
+	if _, err := idx.Rebuild(context.Background()); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+
+	current, err := store.Head(context.Background(), "stateful/orders-stream/members/0/control.json")
+	if err != nil {
+		t.Fatalf("head member: %v", err)
+	}
+	member.InstanceID = "i-new"
+	member.Generation = 2
+	body, err := canonical.Marshal(member)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CompareAndSwap(context.Background(), "stateful/orders-stream/members/0/control.json", current.ETag, body, objstore.PutOptions{ContentType: canonical.ContentType}); err != nil {
+		t.Fatalf("cas member: %v", err)
+	}
+
+	snapshot, err := idx.ApplyHint(context.Background(), HintForKey(KeyForStatefulMember("orders-stream", 0)))
+	if err != nil {
+		t.Fatalf("apply stateful member hint: %v", err)
+	}
+	if len(snapshot.StatefulGroups) != 1 || len(snapshot.StatefulGroups[0].Members) != 1 || snapshot.StatefulGroups[0].Members[0].InstanceID != "i-new" {
+		t.Fatalf("stateful member hint did not refresh member: %+v", snapshot.StatefulGroups)
+	}
+}
+
 func TestAtomicSnapshotReadsDuringRebuilds(t *testing.T) {
 	store := memory.New()
 	for i := 0; i < 20; i++ {

@@ -41,6 +41,17 @@ func (i *Index) RefreshKey(ctx context.Context, key string) (Snapshot, error) {
 	case isSagaControlKey(key):
 		removeSaga(&next, sagaNameFromKey(key))
 		addSagaControl(ctx, i.store, key, &next)
+	case isStatefulGroupControlKey(key):
+		removeStatefulGroup(&next, statefulGroupNameFromKey(key))
+		addStatefulGroupControl(ctx, i.store, key, &next)
+	case isStatefulMemberControlKey(key):
+		group, member := statefulMemberNamesFromKey(key)
+		removeStatefulMember(&next, group, member)
+		addStatefulMemberControl(ctx, i.store, key, &next)
+	case isStatefulBackupRecordKey(key):
+		group, backup := statefulBackupNamesFromKey(key)
+		removeStatefulBackup(&next, group, backup)
+		addStatefulBackupRecord(ctx, i.store, key, &next)
 	case strings.HasPrefix(key, "resources/") && strings.HasSuffix(key, ".json"):
 		removeResourceByKeyShape(&next, key)
 		addResourceRecord(ctx, i.store, key, &next)
@@ -105,6 +116,48 @@ func removeOperation(snapshot *Snapshot, service, operation string) {
 	snapshot.Operations = filtered
 }
 
+func removeStatefulGroup(snapshot *Snapshot, group string) {
+	filtered := snapshot.StatefulGroups[:0]
+	for _, item := range snapshot.StatefulGroups {
+		if item.Group != group {
+			filtered = append(filtered, item)
+		}
+	}
+	snapshot.StatefulGroups = filtered
+}
+
+func removeStatefulMember(snapshot *Snapshot, group string, member int) {
+	for i := range snapshot.StatefulGroups {
+		if snapshot.StatefulGroups[i].Group != group {
+			continue
+		}
+		filtered := snapshot.StatefulGroups[i].Members[:0]
+		for _, item := range snapshot.StatefulGroups[i].Members {
+			if item.Member != member {
+				filtered = append(filtered, item)
+			}
+		}
+		snapshot.StatefulGroups[i].Members = filtered
+		return
+	}
+}
+
+func removeStatefulBackup(snapshot *Snapshot, group, backup string) {
+	for i := range snapshot.StatefulGroups {
+		if snapshot.StatefulGroups[i].Group != group {
+			continue
+		}
+		filtered := snapshot.StatefulGroups[i].Backups[:0]
+		for _, item := range snapshot.StatefulGroups[i].Backups {
+			if item.BackupID != backup {
+				filtered = append(filtered, item)
+			}
+		}
+		snapshot.StatefulGroups[i].Backups = filtered
+		return
+	}
+}
+
 func removeResourceByKeyShape(snapshot *Snapshot, key string) {
 	// Resource hints do not carry a durable key in the public summary. Keep the
 	// old entry until the refreshed record is appended; a full rebuild dedupes.
@@ -126,6 +179,21 @@ func isServiceControlKey(key string) bool {
 
 func isSagaControlKey(key string) bool {
 	_, ok := sagaFromControlKey(key)
+	return ok
+}
+
+func isStatefulGroupControlKey(key string) bool {
+	_, ok := statefulGroupFromControlKey(key)
+	return ok
+}
+
+func isStatefulMemberControlKey(key string) bool {
+	_, _, ok := statefulMemberFromControlKey(key)
+	return ok
+}
+
+func isStatefulBackupRecordKey(key string) bool {
+	_, _, ok := statefulBackupFromRecordKey(key)
 	return ok
 }
 
@@ -152,8 +220,35 @@ func operationNamesFromKey(key string) (string, string) {
 	return parts[1], parts[3]
 }
 
+func statefulGroupNameFromKey(key string) string {
+	group, _ := statefulGroupFromControlKey(key)
+	return group
+}
+
+func statefulMemberNamesFromKey(key string) (string, int) {
+	group, member, _ := statefulMemberFromControlKey(key)
+	return group, member
+}
+
+func statefulBackupNamesFromKey(key string) (string, string) {
+	group, backup, _ := statefulBackupFromRecordKey(key)
+	return group, backup
+}
+
 func KeyForService(service string) string {
 	return serviceKey(service)
+}
+
+func KeyForStatefulGroup(group string) string {
+	return "stateful/" + group + "/control.json"
+}
+
+func KeyForStatefulMember(group string, member int) string {
+	return fmt.Sprintf("stateful/%s/members/%d/control.json", group, member)
+}
+
+func KeyForStatefulBackup(group, backup string) string {
+	return "stateful/" + group + "/backups/" + backup + "/record.json"
 }
 
 func KeyForSaga(saga string) string {

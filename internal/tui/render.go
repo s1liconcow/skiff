@@ -78,6 +78,8 @@ func renderBody(m Model, p palette, width int) string {
 		return lipgloss.JoinVertical(lipgloss.Left,
 			renderServices(m, p, width),
 			"",
+			renderStatefulGroups(m, p, width),
+			"",
 			renderSagas(m, p, width),
 			"",
 			renderServiceDetail(m, p, width),
@@ -92,6 +94,7 @@ func renderBody(m Model, p palette, width int) string {
 	rightW := width - leftW - gap
 	left := lipgloss.JoinVertical(lipgloss.Left,
 		renderServices(m, p, leftW),
+		renderStatefulGroups(m, p, leftW),
 		renderSagas(m, p, leftW),
 	)
 	right := lipgloss.JoinVertical(lipgloss.Left,
@@ -137,6 +140,7 @@ func renderStats(m Model, p palette, width int) string {
 	findings := findingsCount(m)
 	chips := []statChip{
 		{Label: "Services", Value: fmt.Sprintf("%d", len(m.dashboard.Status.Services)), Detail: fmt.Sprintf("%d ok / %d watch / %d fail", healthy, watch, failed)},
+		{Label: "Stateful", Value: fmt.Sprintf("%d", len(m.dashboard.Status.StatefulGroups)), Detail: statefulGroupSummary(m.dashboard.Status.StatefulGroups)},
 		{Label: "Active Sagas", Value: fmt.Sprintf("%d", len(m.dashboard.Sagas)), Detail: sagaStatusSummary(m.dashboard.Sagas)},
 		{Label: "Recent Events", Value: fmt.Sprintf("%d", len(m.dashboard.Events)), Detail: firstNonEmpty(m.dashboard.Source, m.dashboard.Freshness.Source, "object state")},
 		{Label: "Findings", Value: fmt.Sprintf("%d", findings), Detail: findingsSummary(findings)},
@@ -187,6 +191,38 @@ func renderServices(m Model, p palette, width int) string {
 		lines = append(lines, style.Width(inner).Render(line))
 	}
 	return renderBox(panelForFocus(m, p, focusServices), width, strings.Join(lines, "\n"))
+}
+
+func renderStatefulGroups(m Model, p palette, width int) string {
+	lines := []string{panelTitle(p, "StatefulGroups", len(m.dashboard.Status.StatefulGroups))}
+	inner := panelInnerWidth(p, width)
+	if len(m.dashboard.Status.StatefulGroups) == 0 {
+		lines = append(lines, p.meta.Render("No StatefulGroups in object state"))
+		return renderBox(panelForFocus(m, p, focusStateful), width, strings.Join(lines, "\n"))
+	}
+	limit := listLimit(m.height, 6)
+	for i, group := range m.dashboard.Status.StatefulGroups {
+		if i >= limit {
+			lines = append(lines, p.meta.Render(fmt.Sprintf("... %d more groups", len(m.dashboard.Status.StatefulGroups)-limit)))
+			break
+		}
+		prefix := "  "
+		style := p.row
+		if m.focus == focusStateful && i == m.selected {
+			prefix = "> "
+			style = p.selected
+		}
+		lines = append(lines, style.Width(inner).Render(renderStatefulGroupRow(p, prefix, group, inner)))
+		memberLimit := min(3, len(group.Members))
+		for j := 0; j < memberLimit; j++ {
+			lines = append(lines, p.meta.Render(renderStatefulMemberLine(group.Members[j], inner)))
+		}
+		if len(group.Backups) > 0 {
+			backup := group.Backups[0]
+			lines = append(lines, p.meta.Render(fit(fmt.Sprintf("  backup %s member %d %s", backup.BackupID, backup.Member, firstNonEmpty(backup.ProviderID, backup.SnapshotID, backup.Status)), inner)))
+		}
+	}
+	return renderBox(panelForFocus(m, p, focusStateful), width, strings.Join(lines, "\n"))
 }
 
 func renderSagas(m Model, p palette, width int) string {
@@ -641,6 +677,42 @@ func renderServiceRow(p palette, prefix string, service client.ServiceStatus, wi
 		column(firstNonEmpty(op, "-"), opW)
 }
 
+func renderStatefulGroupRow(p palette, prefix string, group client.StatefulGroup, width int) string {
+	available := max(1, width-lipgloss.Width(prefix))
+	nameW := clamp(available-31, 12, 24)
+	memberW := 8
+	backupW := 8
+	opW := max(8, available-nameW-memberW-backupW-13)
+	op := firstNonEmpty(group.OperationID, "-")
+	if group.OperationState != "" && group.OperationID != "" {
+		op = group.OperationID + ":" + group.OperationState
+	}
+	return prefix +
+		column(group.Group, nameW) + " " +
+		healthCell(p, group.Health, 10) + " " +
+		column(fmt.Sprintf("%d/%d", nominalStatefulMembers(group), group.Replicas), memberW) + " " +
+		column(fmt.Sprintf("%d", len(group.Backups)), backupW) + " " +
+		column(op, opW)
+}
+
+func renderStatefulMemberLine(member client.StatefulMember, width int) string {
+	status := firstNonEmpty(member.Health, member.Phase, "unknown")
+	target := firstNonEmpty(member.InstanceID, member.ExpectedInstanceID, "<instance>")
+	volume := firstNonEmpty(member.VolumeID, member.ExpectedVolumeID, "<volume>")
+	dns := firstNonEmpty(member.DNSName, member.ExpectedDNSName, "<dns>")
+	return fit(fmt.Sprintf("  member %d %s inst=%s vol=%s dns=%s", member.Member, status, target, volume, dns), width)
+}
+
+func nominalStatefulMembers(group client.StatefulGroup) int {
+	count := 0
+	for _, member := range group.Members {
+		if member.Health == "nominal" || member.Health == "healthy" || member.Health == "ready" {
+			count++
+		}
+	}
+	return count
+}
+
 func serviceColumns(width int) (int, int, int) {
 	nameW := clamp(width-39, 12, 26)
 	releaseW := clamp((width-nameW)/3, 10, 18)
@@ -747,6 +819,26 @@ func sagaStatusSummary(sagas []client.SagaSummary) string {
 	return fmt.Sprintf("%d running", running)
 }
 
+func statefulGroupSummary(groups []client.StatefulGroup) string {
+	if len(groups) == 0 {
+		return "none configured"
+	}
+	nominal := 0
+	updating := 0
+	degraded := 0
+	for _, group := range groups {
+		switch group.Health {
+		case "nominal", "healthy", "ready":
+			nominal++
+		case "updating":
+			updating++
+		case "degraded", "failed", "critical", "unhealthy":
+			degraded++
+		}
+	}
+	return fmt.Sprintf("%d ok / %d update / %d degraded", nominal, updating, degraded)
+}
+
 func sagaStatusToken(p palette, status schema.SagaStatus) string {
 	switch status {
 	case schema.SagaSucceeded:
@@ -771,6 +863,12 @@ func findingsCount(m Model) int {
 	count := len(m.dashboard.Status.Findings)
 	for _, service := range m.dashboard.Status.Services {
 		count += len(service.Findings)
+	}
+	for _, group := range m.dashboard.Status.StatefulGroups {
+		count += len(group.Findings)
+		for _, member := range group.Members {
+			count += len(member.Findings)
+		}
 	}
 	return count
 }
