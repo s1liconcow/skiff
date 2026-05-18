@@ -23,6 +23,7 @@ func TestOpsListJSONReadsOperationControls(t *testing.T) {
 	clearSkiffEnv(t)
 	store := memory.New()
 	createCLIOperation(t, store, "payments-api", "op_cli", schema.OperationRunning)
+	createCLIOperation(t, store, "payments-api", "op_done", schema.OperationSucceeded)
 	restoreStore := openOpsObjectStore
 	openOpsObjectStore = func(cfg config.Config) (objstore.ObjectStore, error) { return store, nil }
 	t.Cleanup(func() { openOpsObjectStore = restoreStore })
@@ -45,8 +46,43 @@ func TestOpsListJSONReadsOperationControls(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
 		t.Fatalf("decode output: %v\n%s", err, stdout.String())
 	}
-	if !out.OK || out.TraceID != "tr_ops" || len(out.Operations) != 1 || out.Operations[0].OperationID != "op_cli" {
+	if !out.OK || out.TraceID != "tr_ops" || len(out.Operations) != 2 {
 		t.Fatalf("unexpected output: %+v", out)
+	}
+	if out.Operations[0].OperationID != "op_cli" || out.Operations[1].OperationID != "op_done" {
+		t.Fatalf("unexpected output: %+v", out)
+	}
+}
+
+func TestOpsListActiveFiltersTerminalOperations(t *testing.T) {
+	clearSkiffEnv(t)
+	store := memory.New()
+	createCLIOperation(t, store, "payments-api", "op_running", schema.OperationRunning)
+	createCLIOperation(t, store, "payments-api", "op_failed", schema.OperationFailed)
+	restoreStore := openOpsObjectStore
+	openOpsObjectStore = func(cfg config.Config) (objstore.ObjectStore, error) { return store, nil }
+	t.Cleanup(func() { openOpsObjectStore = restoreStore })
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"ops", "list",
+		"--active",
+		"--direct",
+		"--env", "prod",
+		"--provider", "aws",
+		"--region", "us-west-2",
+		"--state", "memory://ops",
+		"--format", "json",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var out opsListOutput
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, stdout.String())
+	}
+	if len(out.Operations) != 1 || out.Operations[0].OperationID != "op_running" {
+		t.Fatalf("unexpected active operations: %+v", out.Operations)
 	}
 }
 

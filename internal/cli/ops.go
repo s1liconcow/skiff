@@ -91,7 +91,8 @@ func runOpsList(binary string, args []string, root rootOptions, stdout, stderr i
 	fs.SetOutput(io.Discard)
 	flags := addClientFlags(fs, root)
 	service := fs.String("service", "", "service name")
-	all := fs.Bool("all", false, "include terminal operations")
+	all := fs.Bool("all", true, "include terminal operations")
+	active := fs.Bool("active", false, "only include non-terminal operations")
 	limit := fs.Int("limit", 0, "maximum operations to return")
 
 	flagArgs, positionals, err := splitOpsArgs(args)
@@ -113,7 +114,11 @@ func runOpsList(binary string, args []string, root rootOptions, stdout, stderr i
 	if exit != ExitSuccess {
 		return exit
 	}
-	items, err := opsstate.NewStore(store).List(nilContext(), opsstate.ListOptions{Service: *service, IncludeTerminal: *all, Limit: *limit})
+	includeTerminal := *all
+	if *active {
+		includeTerminal = false
+	}
+	items, err := opsstate.NewStore(store).List(nilContext(), opsstate.ListOptions{Service: *service, IncludeTerminal: includeTerminal, Limit: *limit})
 	if err != nil {
 		return writeClientError(binary, "ops", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
