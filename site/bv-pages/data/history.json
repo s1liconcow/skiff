@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-18T03:06:39Z",
+  "generated_at": "2026-05-18T18:54:34Z",
   "commits": [
     {
       "sha": "004e75635c8727416c210eb34322a6ac80dfe99d",
@@ -54,10 +54,10 @@
       "date": "2026-05-16T12:18:26-07:00",
       "message": "Implement runner manifest bootstrap",
       "beads_added": [
-        "skiff-fko",
         "skiff-p78",
-        "skiff-ylc",
-        "skiff-lbf"
+        "skiff-lbf",
+        "skiff-fko",
+        "skiff-ylc"
       ]
     },
     {
@@ -523,11 +523,11 @@
       "date": "2026-05-17T19:20:51-07:00",
       "message": "Implement stateful groups and sandbox updates",
       "beads_added": [
+        "skiff-statefulgroup-compile-plan-vcj",
+        "skiff-statefulgroup-object-apply-ub6",
         "skiff-statefulgroup-provider-plan-6lv",
         "skiff-statefulgroup-aws-lifecycle-f2u",
-        "skiff-statefulgroup-runner-runtime-981",
-        "skiff-statefulgroup-object-apply-ub6",
-        "skiff-statefulgroup-compile-plan-vcj"
+        "skiff-statefulgroup-runner-runtime-981"
       ]
     },
     {
@@ -552,6 +552,46 @@
       "message": "Productionize stateful replacement saga",
       "beads_added": [
         "skiff-statefulgroup-replace-recovery-saga-6wv"
+      ]
+    },
+    {
+      "sha": "d2f9ad3296d4c11772b9c89952edf93360159c3b",
+      "date": "2026-05-17T20:15:04-07:00",
+      "message": "Add stateful backup and restore workflows",
+      "beads_added": [
+        "skiff-statefulgroup-backup-restore-b65"
+      ]
+    },
+    {
+      "sha": "9e14ded034d9e0e7cea02e4233774c4fd4011965",
+      "date": "2026-05-18T08:02:49-07:00",
+      "message": "Add stateful observability commands",
+      "beads_added": [
+        "skiff-statefulgroup-status-doctor-solve-2zz"
+      ]
+    },
+    {
+      "sha": "1bb940a56fc64e528cf9bd5d675fd56879358716",
+      "date": "2026-05-18T09:43:38-07:00",
+      "message": "Add stateful adoption and cleanup support",
+      "beads_added": [
+        "skiff-statefulgroup-adoption-terraform-drift-gc-245"
+      ]
+    },
+    {
+      "sha": "307f9a75f304cdd9514ea440208c0b5ab02442b3",
+      "date": "2026-05-18T09:52:28-07:00",
+      "message": "Expose stateful groups in skiffd and TUI",
+      "beads_added": [
+        "skiff-statefulgroup-skiffd-tui-worker-ph2"
+      ]
+    },
+    {
+      "sha": "3eb689c5bc34554442c94f22b3ae64dbe7bee0e7",
+      "date": "2026-05-18T10:00:23-07:00",
+      "message": "Add stateful group release gate docs",
+      "beads_added": [
+        "skiff-statefulgroup-docs-examples-release-gate-86m"
       ]
     }
   ]

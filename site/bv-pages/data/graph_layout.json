@@ -2,19 +2,19 @@
   "positions": {
     "skiff-07s": [
       200,
-      40
+      280
     ],
     "skiff-0vi": [
       200,
-      200
+      -280
     ],
     "skiff-1a2": [
       200,
-      280
+      -200
     ],
     "skiff-1pb": [
       400,
-      -360
+      120
     ],
     "skiff-1y3": [
       1000,
@@ -22,23 +22,23 @@
     ],
     "skiff-2cc": [
       800,
-      120
+      200
     ],
     "skiff-2zf": [
       1200,
-      80
+      160
     ],
     "skiff-3qy": [
       0,
-      -200
+      -360
     ],
     "skiff-4fr": [
       400,
-      -200
+      -360
     ],
     "skiff-4ls": [
       0,
-      120
+      200
     ],
     "skiff-66e": [
       1800,
@@ -46,15 +46,15 @@
     ],
     "skiff-767": [
       200,
-      -360
+      520
     ],
     "skiff-78q": [
       1400,
-      120
+      40
     ],
     "skiff-7gp": [
       0,
-      -280
+      280
     ],
     "skiff-7z5": [
       200,
@@ -62,71 +62,71 @@
     ],
     "skiff-8xl": [
       600,
-      160
+      0
     ],
     "skiff-92g": [
       200,
-      360
+      440
     ],
     "skiff-9dd": [
       200,
-      520
+      -40
     ],
     "skiff-9it": [
       600,
-      320
+      -160
     ],
     "skiff-9u1": [
       200,
-      440
+      120
     ],
     "skiff-a79": [
       600,
-      240
+      -80
     ],
     "skiff-a91": [
       200,
-      -280
+      200
     ],
     "skiff-a9o": [
       1000,
-      80
+      0
     ],
     "skiff-aff": [
       800,
-      -40
+      40
     ],
     "skiff-bga": [
       0,
-      600
+      -520
     ],
     "skiff-cik": [
       800,
-      200
+      280
     ],
     "skiff-cww": [
       0,
-      -680
+      680
     ],
     "skiff-cyk": [
       0,
-      -440
+      -280
     ],
     "skiff-d89": [
       1400,
-      40
+      120
     ],
     "skiff-ddq": [
       0,
-      -600
+      360
     ],
     "skiff-dui": [
       400,
-      280
+      360
     ],
     "skiff-eeh": [
       0,
-      200
+      520
     ],
     "skiff-ehk": [
       600,
@@ -134,31 +134,31 @@
     ],
     "skiff-ew2": [
       0,
-      40
+      600
     ],
     "skiff-fko": [
       0,
-      280
+      120
     ],
     "skiff-fpl": [
       600,
-      0
+      -320
     ],
     "skiff-full-statefulgroup-support-lp3": [
       0,
-      -40
+      -600
     ],
     "skiff-geu": [
       600,
-      -320
+      240
     ],
     "skiff-ghd": [
       0,
-      -360
+      -680
     ],
     "skiff-hj9": [
       200,
-      -520
+      360
     ],
     "skiff-iau": [
       2000,
@@ -166,27 +166,27 @@
     ],
     "skiff-ihr": [
       1000,
-      160
+      80
     ],
     "skiff-irk": [
       0,
-      440
+      -440
     ],
     "skiff-jb6": [
       400,
-      360
+      40
     ],
     "skiff-jkx": [
       1000,
-      0
+      -160
     ],
     "skiff-jss": [
       1000,
-      -160
+      -240
     ],
     "skiff-jtj": [
       600,
-      80
+      160
     ],
     "skiff-kws": [
       1600,
@@ -194,55 +194,55 @@
     ],
     "skiff-lbf": [
       0,
-      -120
+      40
     ],
     "skiff-n3s": [
       400,
-      -120
+      -280
     ],
     "skiff-n54": [
       400,
-      -280
+      280
     ],
     "skiff-oib": [
       800,
-      -200
+      120
     ],
     "skiff-on7": [
       400,
-      -40
+      -120
     ],
     "skiff-p78": [
       800,
-      -280
+      360
     ],
     "skiff-p8c": [
       400,
-      40
+      -200
     ],
     "skiff-q33": [
       200,
-      -40
+      40
     ],
     "skiff-q8p": [
       200,
-      -200
+      -360
     ],
     "skiff-qby": [
       400,
-      120
+      -40
     ],
     "skiff-qj8": [
       0,
-      360
+      -200
     ],
     "skiff-r3m": [
       800,
-      -360
+      -200
     ],
     "skiff-rr7": [
       200,
-      120
+      -520
     ],
     "skiff-statefulgroup-adoption-terraform-drift-gc-245": [
       1800,
@@ -250,7 +250,7 @@
     ],
     "skiff-statefulgroup-aws-lifecycle-f2u": [
       1000,
-      -240
+      160
     ],
     "skiff-statefulgroup-backup-restore-b65": [
       1600,
@@ -266,23 +266,23 @@
     ],
     "skiff-statefulgroup-object-apply-ub6": [
       800,
-      280
+      -360
     ],
     "skiff-statefulgroup-ordered-update-saga-vg8": [
       1400,
-      -40
+      -120
     ],
     "skiff-statefulgroup-provider-plan-6lv": [
       600,
-      -160
+      80
     ],
     "skiff-statefulgroup-replace-recovery-saga-6wv": [
       1400,
-      -120
+      -40
     ],
     "skiff-statefulgroup-runner-runtime-981": [
       1200,
-      -80
+      0
     ],
     "skiff-statefulgroup-skiffd-tui-worker-ph2": [
       2000,
@@ -294,7 +294,7 @@
     ],
     "skiff-syg": [
       1200,
-      0
+      -80
     ],
     "skiff-txx": [
       200,
@@ -302,7 +302,7 @@
     ],
     "skiff-u4b": [
       800,
-      40
+      -40
     ],
     "skiff-v0a": [
       1000,
@@ -310,7 +310,7 @@
     ],
     "skiff-v3l": [
       800,
-      360
+      -280
     ],
     "skiff-vdm": [
       800,
@@ -322,35 +322,35 @@
     ],
     "skiff-wku": [
       0,
-      680
+      440
     ],
     "skiff-wrp": [
       1200,
-      160
+      80
     ],
     "skiff-x2p": [
       600,
-      -80
+      320
     ],
     "skiff-ylc": [
       0,
-      -520
+      -40
     ],
     "skiff-zmx": [
       0,
-      520
+      -120
     ]
   },
   "metrics": {
     "skiff-07s": [
-      0.011632347549115017,
+      0.011632347549115019,
       3,
       1,
       2,
       0
     ],
     "skiff-0vi": [
-      0.034481715325863645,
+      0.03448171532586365,
       8.238095238095237,
       1,
       4,
@@ -364,56 +364,56 @@
       0
     ],
     "skiff-1pb": [
-      0.006739825622118674,
+      0.006739825622118675,
       1,
       1,
       2,
       0
     ],
     "skiff-1y3": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       3,
       0,
       0
     ],
     "skiff-2cc": [
-      0.0077435373337472625,
+      0.007743537333747263,
       6,
       2,
       2,
       0
     ],
     "skiff-2zf": [
-      0.006699903701182595,
+      0.0066999037011825965,
       27.166666666666668,
       6,
       2,
       0
     ],
     "skiff-3qy": [
-      0.03486407435970887,
+      0.034864074359708876,
       0,
       0,
       3,
       0
     ],
     "skiff-4fr": [
-      0.006755200771317211,
+      0.006755200771317212,
       0,
       1,
       1,
       0
     ],
     "skiff-4ls": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       0,
       0,
       0
     ],
     "skiff-66e": [
-      0.00830846155543008,
+      0.008308461555430083,
       42,
       5,
       1,
@@ -427,28 +427,28 @@
       0
     ],
     "skiff-78q": [
-      0.005745553486226854,
+      0.005745553486226855,
       51,
       6,
       1,
       0
     ],
     "skiff-7gp": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       0,
       0,
       0
     ],
     "skiff-7z5": [
-      0.005327389222686942,
+      0.005327389222686943,
       0.5,
       1,
       1,
       0
     ],
     "skiff-8xl": [
-      0.00634726297522724,
+      0.006347262975227242,
       2.666666666666667,
       2,
       2,
@@ -469,21 +469,21 @@
       0
     ],
     "skiff-9it": [
-      0.005327389222686942,
+      0.005327389222686943,
       3,
       2,
       1,
       0
     ],
     "skiff-9u1": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       1,
       0,
       0
     ],
     "skiff-a79": [
-      0.00735411134047434,
+      0.007354111340474341,
       4.166666666666666,
       3,
       2,
@@ -497,14 +497,14 @@
       0
     ],
     "skiff-a9o": [
-      0.006033926076992747,
+      0.0060339260769927475,
       3,
       3,
       1,
       0
     ],
     "skiff-aff": [
-      0.005903497095038849,
+      0.00590349709503885,
       12,
       6,
       1,
@@ -525,7 +525,7 @@
       0
     ],
     "skiff-cww": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       0,
       0,
@@ -539,7 +539,7 @@
       0
     ],
     "skiff-d89": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       4,
       0,
@@ -553,14 +553,14 @@
       0
     ],
     "skiff-dui": [
-      0.02339965742131345,
+      0.023399657421313454,
       6.785714285714285,
       1,
       5,
       0
     ],
     "skiff-eeh": [
-      0.019831052057221063,
+      0.019831052057221066,
       0,
       0,
       1,
@@ -574,42 +574,42 @@
       0
     ],
     "skiff-ew2": [
-      0.005327389222686942,
+      0.005327389222686943,
       0,
       0,
       1,
       0
     ],
     "skiff-fko": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       0,
       0,
       0
     ],
     "skiff-fpl": [
-      0.018156055839272447,
+      0.01815605583927245,
       17,
       1,
       6,
       0
     ],
     "skiff-full-statefulgroup-support-lp3": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       0,
       0,
       0
     ],
     "skiff-geu": [
-      0.007850349749667878,
+      0.00785034974966788,
       5.595238095238095,
       2,
       3,
       0
     ],
     "skiff-ghd": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       0,
       0,
@@ -623,70 +623,70 @@
       0
     ],
     "skiff-iau": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       1,
       0,
       0
     ],
     "skiff-ihr": [
-      0.009209895758814928,
+      0.00920989575881493,
       10.166666666666666,
       3,
       4,
       0
     ],
     "skiff-irk": [
-      0.005327389222686942,
+      0.005327389222686943,
       0,
       0,
       1,
       0
     ],
     "skiff-jb6": [
-      0.006200671952361634,
+      0.0062006719523616345,
       1,
       1,
       1,
       0
     ],
     "skiff-jkx": [
-      0.007559644156804539,
+      0.007559644156804541,
       3.5,
       1,
       2,
       0
     ],
     "skiff-jss": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       1,
       0,
       0
     ],
     "skiff-jtj": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       2,
       0,
       0
     ],
     "skiff-kws": [
-      0.005903497095038849,
+      0.00590349709503885,
       58,
       4,
       1,
       0
     ],
     "skiff-lbf": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       0,
       0,
       0
     ],
     "skiff-n3s": [
-      0.02087285997188941,
+      0.020872859971889413,
       10,
       1,
       2,
@@ -714,21 +714,21 @@
       0
     ],
     "skiff-p78": [
-      0.011730705981693105,
+      0.011730705981693106,
       17.833333333333332,
       3,
       2,
       0
     ],
     "skiff-p8c": [
-      0.006399761125518599,
+      0.0063997611255186,
       2,
       1,
       1,
       0
     ],
     "skiff-q33": [
-      0.018047062043123726,
+      0.01804706204312373,
       8,
       1,
       5,
@@ -742,49 +742,49 @@
       0
     ],
     "skiff-qby": [
-      0.016742179399126686,
+      0.01674217939912669,
       11.238095238095237,
       2,
       4,
       0
     ],
     "skiff-qj8": [
-      0.00830846155543008,
+      0.008308461555430083,
       0,
       0,
       1,
       0
     ],
     "skiff-r3m": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       2,
       0,
       0
     ],
     "skiff-rr7": [
-      0.006399761125518599,
+      0.0063997611255186,
       1,
       1,
       1,
       0
     ],
     "skiff-statefulgroup-adoption-terraform-drift-gc-245": [
-      0.005763527648881439,
+      0.00576352764888144,
       5.833333333333333,
       3,
       1,
       0
     ],
     "skiff-statefulgroup-aws-lifecycle-f2u": [
-      0.019602865710190875,
+      0.01960286571019088,
       15.5,
       2,
       4,
       0
     ],
     "skiff-statefulgroup-backup-restore-b65": [
-      0.008451080065338764,
+      0.008451080065338765,
       4.166666666666667,
       2,
       2,
@@ -798,35 +798,35 @@
       0
     ],
     "skiff-statefulgroup-docs-examples-release-gate-86m": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       3,
       0,
       0
     ],
     "skiff-statefulgroup-object-apply-ub6": [
-      0.022223943080880652,
-      11.333333333333334,
+      0.022223943080880656,
+      11.333333333333332,
       1,
       3,
       0
     ],
     "skiff-statefulgroup-ordered-update-saga-vg8": [
-      0.009267579160716796,
+      0.009267579160716799,
       10.5,
       2,
       2,
       0
     ],
     "skiff-statefulgroup-provider-plan-6lv": [
-      0.033345644748541035,
+      0.03334564474854104,
       30,
       1,
       3,
       0
     ],
     "skiff-statefulgroup-replace-recovery-saga-6wv": [
-      0.010409789775742289,
+      0.01040978977574229,
       5,
       2,
       2,
@@ -840,14 +840,14 @@
       0
     ],
     "skiff-statefulgroup-skiffd-tui-worker-ph2": [
-      0.005763527648881439,
+      0.00576352764888144,
       1.1666666666666665,
       2,
       1,
       0
     ],
     "skiff-statefulgroup-status-doctor-solve-2zz": [
-      0.008213024935015535,
+      0.008213024935015537,
       5.666666666666666,
       3,
       2,
@@ -861,14 +861,14 @@
       0
     ],
     "skiff-txx": [
-      0.005745553486226854,
+      0.005745553486226855,
       3,
       1,
       1,
       0
     ],
     "skiff-u4b": [
-      0.005763527648881439,
+      0.00576352764888144,
       0,
       2,
       1,
@@ -882,14 +882,14 @@
       0
     ],
     "skiff-v3l": [
-      0.01409389851376537,
+      0.014093898513765375,
       15.666666666666666,
       3,
       5,
       0
     ],
     "skiff-vdm": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       4,
       0,
@@ -903,14 +903,14 @@
       0
     ],
     "skiff-wku": [
-      0.009374780492825915,
+      0.009374780492825916,
       0,
       0,
       1,
       0
     ],
     "skiff-wrp": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       3,
       0,
@@ -924,14 +924,14 @@
       0
     ],
     "skiff-ylc": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       0,
       0,
       0
     ],
     "skiff-zmx": [
-      0.004491060695607118,
+      0.004491060695607119,
       0,
       0,
       0,
@@ -939,6 +939,50 @@
     ]
   },
   "links": [
+    [
+      "skiff-statefulgroup-skiffd-tui-worker-ph2",
+      "skiff-statefulgroup-docs-examples-release-gate-86m"
+    ],
+    [
+      "skiff-statefulgroup-adoption-terraform-drift-gc-245",
+      "skiff-statefulgroup-docs-examples-release-gate-86m"
+    ],
+    [
+      "skiff-statefulgroup-status-doctor-solve-2zz",
+      "skiff-statefulgroup-docs-examples-release-gate-86m"
+    ],
+    [
+      "skiff-statefulgroup-status-doctor-solve-2zz",
+      "skiff-statefulgroup-skiffd-tui-worker-ph2"
+    ],
+    [
+      "skiff-statefulgroup-ordered-update-saga-vg8",
+      "skiff-statefulgroup-skiffd-tui-worker-ph2"
+    ],
+    [
+      "skiff-statefulgroup-provider-plan-6lv",
+      "skiff-statefulgroup-adoption-terraform-drift-gc-245"
+    ],
+    [
+      "skiff-statefulgroup-aws-lifecycle-f2u",
+      "skiff-statefulgroup-adoption-terraform-drift-gc-245"
+    ],
+    [
+      "skiff-statefulgroup-backup-restore-b65",
+      "skiff-statefulgroup-adoption-terraform-drift-gc-245"
+    ],
+    [
+      "skiff-statefulgroup-ordered-update-saga-vg8",
+      "skiff-statefulgroup-status-doctor-solve-2zz"
+    ],
+    [
+      "skiff-statefulgroup-replace-recovery-saga-6wv",
+      "skiff-statefulgroup-status-doctor-solve-2zz"
+    ],
+    [
+      "skiff-statefulgroup-backup-restore-b65",
+      "skiff-statefulgroup-status-doctor-solve-2zz"
+    ],
     [
       "skiff-statefulgroup-replace-recovery-saga-6wv",
       "skiff-statefulgroup-backup-restore-b65"
@@ -990,50 +1034,6 @@
     [
       "skiff-767",
       "skiff-statefulgroup-compile-plan-vcj"
-    ],
-    [
-      "skiff-statefulgroup-skiffd-tui-worker-ph2",
-      "skiff-statefulgroup-docs-examples-release-gate-86m"
-    ],
-    [
-      "skiff-statefulgroup-adoption-terraform-drift-gc-245",
-      "skiff-statefulgroup-docs-examples-release-gate-86m"
-    ],
-    [
-      "skiff-statefulgroup-status-doctor-solve-2zz",
-      "skiff-statefulgroup-docs-examples-release-gate-86m"
-    ],
-    [
-      "skiff-statefulgroup-provider-plan-6lv",
-      "skiff-statefulgroup-adoption-terraform-drift-gc-245"
-    ],
-    [
-      "skiff-statefulgroup-aws-lifecycle-f2u",
-      "skiff-statefulgroup-adoption-terraform-drift-gc-245"
-    ],
-    [
-      "skiff-statefulgroup-backup-restore-b65",
-      "skiff-statefulgroup-adoption-terraform-drift-gc-245"
-    ],
-    [
-      "skiff-statefulgroup-status-doctor-solve-2zz",
-      "skiff-statefulgroup-skiffd-tui-worker-ph2"
-    ],
-    [
-      "skiff-statefulgroup-ordered-update-saga-vg8",
-      "skiff-statefulgroup-skiffd-tui-worker-ph2"
-    ],
-    [
-      "skiff-statefulgroup-ordered-update-saga-vg8",
-      "skiff-statefulgroup-status-doctor-solve-2zz"
-    ],
-    [
-      "skiff-statefulgroup-replace-recovery-saga-6wv",
-      "skiff-statefulgroup-status-doctor-solve-2zz"
-    ],
-    [
-      "skiff-statefulgroup-backup-restore-b65",
-      "skiff-statefulgroup-status-doctor-solve-2zz"
     ],
     [
       "skiff-66e",
@@ -1501,7 +1501,7 @@
     ]
   ],
   "version": "1.0.0",
-  "generated_at": "2026-05-18T03:06:37Z",
+  "generated_at": "2026-05-18T18:54:33Z",
   "node_count": 85,
   "edge_count": 140
 }

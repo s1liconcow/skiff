@@ -283,6 +283,11 @@
       color: #dff7ff;
       padding: 16px;
     }
+    code {
+      font-family: var(--mono);
+      color: #dff7ff;
+      font-size: .92em;
+    }
     .cmd { color: var(--brand-2); }
     .muted { color: var(--muted-2); }
     .ok { color: var(--ok); }
@@ -1359,7 +1364,7 @@
         <aside id="hero-motion-root" class="hero-card hero-motion-root" aria-label="Skiff customer journey animation">
           <div class="hero-motion-app hero-motion-fallback">
             <div class="hero-motion-topline">
-              <div class="hero-motion-command"><span>$</span><span>skiff service up payments-api</span></div>
+              <div class="hero-motion-command"><span>$</span><span>skiff deploy skiff.yaml --canary</span></div>
               <div class="hero-stage-pill"><span class="hero-stage-dot"></span> service live</div>
             </div>
             <div class="hero-flow-canvas">
@@ -1370,9 +1375,9 @@
                 <path d="M46 59 C36 75 29 81 19 82" />
               </svg>
               <div class="hero-node intent active">
-                <span class="hero-node-kicker">bring up</span>
-                <span class="hero-node-title">service live</span>
-                <span class="hero-node-meta">deploy, route, health check</span>
+                <span class="hero-node-kicker">deploy</span>
+                <span class="hero-node-title">release live</span>
+                <span class="hero-node-meta">plan, publish, health check</span>
               </div>
               <div class="hero-node bucket active">
                 <div class="hero-bucket-rings"><span></span><span></span></div>
@@ -1399,13 +1404,13 @@
             </div>
             <div class="hero-live-note">
               <b>Bring a service up without building a platform first.</b>
-              <span>Skiff turns the common operator journey into one explicit flow: deploy, watch, inspect, and repair.</span>
+              <span>Skiff turns the common operator journey into one explicit flow: deploy, watch, inspect, promote, and repair.</span>
             </div>
             <div class="hero-value-row">
-              <div class="hero-value active"><b>Service up</b><span>route, identity, logs, health</span></div>
-              <div class="hero-value active"><b>Canary gated</b><span>metrics decide promotion</span></div>
+              <div class="hero-value active"><b>Deploy</b><span>route, identity, logs, health</span></div>
+              <div class="hero-value active"><b>Ops watch</b><span>events decide promotion</span></div>
               <div class="hero-value"><b>Status + logs</b><span>one command to evidence</span></div>
-              <div class="hero-value"><b>Auto repair</b><span>agent runs low-risk fixes</span></div>
+              <div class="hero-value"><b>Doctor</b><span>agent-safe next actions</span></div>
             </div>
           </div>
         </aside>
@@ -1606,7 +1611,7 @@
   "recommended_actions": [
     {
       "id": "rollback",
-      "command": "skiff saga start rollback --service payments-api --to previous-stable --yes --format json",
+      "command": "skiff rollback payments-api --to previous-stable --yes --format json",
       "mutating": true,
       "safety": "reversible",
       "confidence": 0.91
@@ -1624,7 +1629,12 @@
             <div class="kicker">CLI and TUI</div>
             <h2>A beautiful cockpit for deployments, sagas, logs, metrics, and recovery.</h2>
           </div>
-          <p>The TUI is a frontend over the same deterministic API and object-state model. There is no separate magic path for humans.</p>
+          <p>The root CLI stays small: common operator commands are immediate, while niche recovery, adoption, and developer tools stay discoverable through topic help and the <code>ops</code> hub.</p>
+        </div>
+        <div class="grid-3" style="margin-top:18px;">
+          <div class="card strong"><h3>Root menu stays small</h3><p>Everyday work lives at the top level: <code>deploy</code>, <code>release</code>, <code>status</code>, <code>logs</code>, <code>metrics</code>, <code>doctor</code>, <code>cost</code>, <code>rollback</code>, <code>ops</code>, <code>config</code>, and <code>tui</code>.</p></div>
+          <div class="card"><h3>Ops is the live workbench</h3><p><code>skiff ops events</code>, <code>ops watch</code>, <code>ops inspect</code>, <code>ops approve</code>, and <code>ops resume</code> cover operation and saga follow-up without crowding the root menu.</p></div>
+          <div class="card"><h3>Topics hold niche tools</h3><p><code>skiff help workflows</code>, <code>help adoption</code>, <code>help dev</code>, and <code>help all</code> keep restore, rotation, failover, import, Terraform, and recovery helpers close by.</p></div>
         </div>
         <div class="tui">
           <div class="tui-header"><span>skiff tui</span><span>prod · us-west-2 · state bucket healthy</span></div>
@@ -1701,25 +1711,25 @@
         <div class="recipe-grid">
           <div class="card recipe-card">
             <div class="recipe-top"><div class="recipe-num">01</div><div><h3>API server + managed database</h3><p>Deploy an API, create a managed database, wire secrets, emit logs/metrics, and get default restore, rotate, and canary sagas.</p></div></div>
-            <div class="terminal"><pre><span class="cmd">$ skiff init stack api-db payments</span>
+            <div class="terminal"><pre><span class="cmd">$ skiff init stack api-database payments</span>
 <span class="cmd">$ skiff deploy</span>
-<span class="cmd">$ skiff restore database payments-db --to latest</span></pre></div>
+<span class="cmd">$ skiff database restore payments-db --to latest</span></pre></div>
           </div>
           <div class="card recipe-card">
             <div class="recipe-top"><div class="recipe-num">02</div><div><h3>Multi-region API + regional database</h3><p>Run services in two regions, maintain database replication, test failover, and promote through explicit high-risk sagas.</p></div></div>
-            <div class="terminal"><pre><span class="cmd">$ skiff failover stack payments --to us-east-1</span>
+            <div class="terminal"><pre><span class="cmd">$ skiff failover --stack payments --to-region us-east-1</span>
 <span class="warn">!</span> replica promotion is irreversible after new writes</pre></div>
           </div>
           <div class="card recipe-card">
             <div class="recipe-top"><div class="recipe-num">03</div><div><h3>Queue worker with autoscaling</h3><p>Scale worker VMs from queue depth or age, keep logs and metrics normalized, and debug failures without clusters.</p></div></div>
-            <div class="terminal"><pre><span class="cmd">$ skiff init worker invoice-worker</span>
-<span class="cmd">$ skiff metrics invoice-worker queue-lag</span></pre></div>
+            <div class="terminal"><pre><span class="cmd">$ skiff validate invoice-worker.yaml</span>
+<span class="cmd">$ skiff metrics invoice-worker --metric queue_lag</span></pre></div>
           </div>
           <div class="card recipe-card">
             <div class="recipe-top"><div class="recipe-num">04</div><div><h3>Kubernetes service migration</h3><p>Import, deploy shadow, compare health, shift traffic, and decommission the old service only after evidence says it is safe.</p></div></div>
             <div class="terminal"><pre><span class="cmd">$ skiff import kube ./k8s --out skiff.yaml</span>
-<span class="cmd">$ skiff deploy --shadow</span>
-<span class="cmd">$ skiff saga start traffic-cutover --steps 5,25,50,100</span></pre></div>
+<span class="cmd">$ skiff deploy --file skiff.yaml --shadow</span>
+<span class="cmd">$ skiff cutover payments-api --from kube --to skiff --percent 25</span></pre></div>
           </div>
         </div>
       </div>
@@ -1777,7 +1787,7 @@
         <div class="section-head">
           <div>
             <div class="kicker">Roadmap</div>
-            <h2>Build the core until the five commands feel magical.</h2>
+            <h2>Build the core until the root surface feels obvious.</h2>
           </div>
           <p>The first version should be narrow and excellent: AWS, stateless services, object state, signed releases, runner, logs, doctor, rollback, and sagas.</p>
         </div>
@@ -1830,23 +1840,23 @@
 
       const stages = [
         {
-          key: 'service-up',
-          command: 'skiff service up payments-api',
-          label: 'service live',
-          title: 'Bring up a production service',
-          detail: 'Skiff creates the service shape, wires routing and identity, starts VMs, and waits for health.',
+          key: 'deploy',
+          command: 'skiff deploy skiff.yaml --canary',
+          label: 'release live',
+          title: 'Deploy through the small root surface',
+          detail: 'Skiff publishes a signed release, creates an auditable operation, starts the canary, and waits for health.',
           nodes: ['intent'],
-          values: ['service'],
+          values: ['deploy'],
           packet: { from: { left: '18%', top: '34%' }, to: { left: '48%', top: '50%' } }
         },
         {
-          key: 'canary',
-          command: 'skiff deploy skiff.yaml --canary',
-          label: 'metric gate',
-          title: 'Promote only when the canary earns it',
-          detail: 'Traffic advances through 5%, 25%, 50%, and 100% only while latency, errors, and health stay inside policy.',
+          key: 'ops-watch',
+          command: 'skiff ops watch payments-api --operation op_01J',
+          label: 'ops stream',
+          title: 'Follow live work from the ops hub',
+          detail: 'Operators watch service, operation, or saga events from one operational namespace.',
           nodes: ['intent', 'bucket', 'cloud'],
-          values: ['service', 'canary'],
+          values: ['deploy', 'ops'],
           packet: { from: { left: '26%', top: '34%' }, to: { left: '50%', top: '50%' } }
         },
         {
@@ -1856,12 +1866,12 @@
           title: 'Pull status before guessing',
           detail: 'Operators get rollout state, target health, current traffic split, recent findings, and recommended next commands.',
           nodes: ['bucket', 'skiffd'],
-          values: ['canary', 'inspect'],
+          values: ['ops', 'inspect'],
           packet: { from: { left: '52%', top: '48%' }, to: { left: '82%', top: '20%' } }
         },
         {
           key: 'logs',
-          command: 'skiff logs payments-api',
+          command: 'skiff logs payments-api --follow',
           label: 'logs linked',
           title: 'Jump from status to the logs that matter',
           detail: 'Skiff scopes logs to the rollout, unhealthy targets, and current trace so diagnosis starts at the failure.',
@@ -1870,11 +1880,11 @@
           packet: { from: { left: '54%', top: '53%' }, to: { left: '84%', top: '75%' } }
         },
         {
-          key: 'agent',
-          command: 'skiff solve payments-api',
-          label: 'agent repair',
-          title: 'Let an agent handle safe remediation',
-          detail: 'The agent reads structured facts, pauses risky rollout movement, applies approved low-risk fixes, and reports the exact action trail.',
+          key: 'doctor',
+          command: 'skiff doctor payments-api --format json',
+          label: 'safe repair',
+          title: 'Give agents structured facts and next actions',
+          detail: 'Doctor output separates facts from hypotheses, classifies risk, and recommends resumable commands instead of log scraping.',
           nodes: ['bucket', 'skiffd', 'recovery'],
           values: ['inspect', 'agent'],
           packet: { from: { left: '48%', top: '56%' }, to: { left: '20%', top: '82%' } }
@@ -1882,10 +1892,10 @@
       ];
 
       const values = [
-        { key: 'service', title: 'Service up', detail: 'route, identity, logs, health' },
-        { key: 'canary', title: 'Canary gated', detail: 'metrics decide promotion' },
+        { key: 'deploy', title: 'Deploy', detail: 'route, identity, logs, health' },
+        { key: 'ops', title: 'Ops watch', detail: 'events decide promotion' },
         { key: 'inspect', title: 'Status + logs', detail: 'one command to evidence' },
-        { key: 'agent', title: 'Auto repair', detail: 'agent runs low-risk fixes' }
+        { key: 'agent', title: 'Doctor', detail: 'agent-safe next actions' }
       ];
 
       function HeroMotionApp() {
@@ -1955,7 +1965,7 @@
                 transition: { duration: reduceMotion ? .2 : 1.2, ease: 'easeInOut' }
               })
             ),
-            renderNode('intent', 'bring up', 'service live', 'deploy, route, health check'),
+            renderNode('intent', 'deploy', 'release live', 'plan, publish, health check'),
             h(motion.div, {
               className: `hero-node bucket ${isActive('bucket') ? 'active' : ''}`,
               key: 'bucket',
@@ -1966,9 +1976,9 @@
                 h(motion.span, { key: 'ring-1', animate: { scale: isActive('bucket') && !reduceMotion ? [1, 1.08, 1] : 1, opacity: isActive('bucket') ? [.62, 1, .62] : .45 }, transition: { duration: 1.7, repeat: reduceMotion ? 0 : Infinity, ease: 'easeInOut' } }),
                 h(motion.span, { key: 'ring-2', animate: { scale: isActive('bucket') && !reduceMotion ? [1, 1.12, 1] : 1, opacity: isActive('bucket') ? [.48, .86, .48] : .36 }, transition: { duration: 2.1, repeat: reduceMotion ? 0 : Infinity, ease: 'easeInOut' } })
               ]),
-              h('span', { className: 'hero-node-kicker', key: 'kicker' }, 'canary gate'),
-              h('span', { className: 'hero-node-title', key: 'title' }, 'metrics decide'),
-              h('span', { className: 'hero-node-meta', key: 'meta' }, 'advance, pause, or repair'),
+              h('span', { className: 'hero-node-kicker', key: 'kicker' }, 'ops hub'),
+              h('span', { className: 'hero-node-title', key: 'title' }, 'events decide'),
+              h('span', { className: 'hero-node-meta', key: 'meta' }, 'watch, approve, resume'),
               h('div', { className: 'hero-ledger-mini', key: 'ledger' }, [
                 h('span', { key: 'p95' }, 'p95'),
                 h('span', { key: 'error' }, 'error'),
@@ -1985,7 +1995,7 @@
                 h('span', { key: 'hundred' }, '100%')
               ])
             ),
-            renderNode('recovery', 'agent', 'auto remediate', 'pause, diagnose, fix safe steps')
+            renderNode('recovery', 'doctor', 'structured repair', 'facts, risk, next commands')
           ]),
           h(AnimatePresence, { mode: 'wait', key: 'note-presence' },
             h(motion.div, {
