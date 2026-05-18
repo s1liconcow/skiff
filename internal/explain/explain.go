@@ -139,6 +139,148 @@ func AWS(resources *aws.ServiceResources) Result {
 			Source:         item.Source,
 		})
 	}
+	for _, item := range resources.StatefulMembers {
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           aws.ResourceKindEC2Instance,
+			LogicalID:      item.LogicalID,
+			Name:           item.Name,
+			CloudPrimitive: "EC2 stateful member",
+			Why:            "represents one StatefulGroup member VM with a stable ordinal, DNS identity, and replacement strategy",
+			Source:         item.Source,
+		})
+	}
+	for _, item := range resources.EBSVolumes {
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           aws.ResourceKindEBSVolume,
+			LogicalID:      item.LogicalID,
+			Name:           item.Name,
+			CloudPrimitive: "EBS volume",
+			Why:            "stores member data independently from EC2 instance replacement and is not planned for automatic deletion",
+			Source:         item.Source,
+		})
+	}
+	for _, item := range resources.VolumeAttachments {
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           aws.ResourceKindEBSAttachment,
+			LogicalID:      item.LogicalID,
+			Name:           item.Name,
+			CloudPrimitive: "EBS volume attachment",
+			Why:            "attaches the durable member volume to the replacement member VM after fencing has completed",
+			Source:         item.Source,
+		})
+	}
+	for _, item := range resources.Route53Records {
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           aws.ResourceKindRoute53Record,
+			LogicalID:      item.LogicalID,
+			Name:           item.Name,
+			CloudPrimitive: "Route53 DNS record",
+			Why:            "keeps the stateful member address stable across replacement and recovery operations",
+			Source:         item.Source,
+		})
+	}
+	for _, item := range resources.SnapshotPolicies {
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           aws.ResourceKindSnapshotPolicy,
+			LogicalID:      item.LogicalID,
+			Name:           item.Name,
+			CloudPrimitive: "EBS snapshot policy",
+			Why:            "makes StatefulGroup backup cadence and retained volume set visible before backup sagas run",
+			Source:         item.Source,
+		})
+	}
+	for _, item := range resources.FencingPolicies {
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           aws.ResourceKindFencingPolicy,
+			LogicalID:      item.LogicalID,
+			Name:           item.Name,
+			CloudPrimitive: "stateful fencing policy",
+			Why:            "records the provider-level termination and detach requirements before a volume can attach to a replacement",
+			Source:         item.Source,
+		})
+	}
+	return out
+}
+
+func StatefulReadOnly(providerName string, graph *ir.Graph) Result {
+	if graph == nil {
+		return Result{Provider: providerName}
+	}
+	out := Result{
+		Provider: providerName,
+		Service:  graph.Service,
+		Env:      graph.Env,
+	}
+	for _, item := range graph.Resources.StatefulGroups {
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           ir.ResourceKindStatefulGroup,
+			LogicalID:      item.Meta.LogicalID,
+			Name:           item.Meta.Name,
+			CloudPrimitive: "Skiff StatefulGroup",
+			Why:            "keeps the stateful workload graph explicit before any provider-specific lowering or mutation",
+			Source:         item.Meta.Source,
+		})
+	}
+	for _, item := range graph.Resources.StatefulMembers {
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           ir.ResourceKindStatefulMember,
+			LogicalID:      item.Meta.LogicalID,
+			Name:           item.Meta.Name,
+			CloudPrimitive: "stateful member VM",
+			Why:            "represents one isolated workload member with a stable ordinal, DNS identity, and durable volume",
+			Source:         item.Meta.Source,
+		})
+	}
+	for _, item := range graph.Resources.StatefulVolumes {
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           ir.ResourceKindStatefulVolume,
+			LogicalID:      item.Meta.LogicalID,
+			Name:           item.Meta.Name,
+			CloudPrimitive: "durable block volume",
+			Why:            "preserves member data independently from replacement VM lifecycle",
+			Source:         item.Meta.Source,
+		})
+	}
+	for _, item := range graph.Resources.StatefulDNS {
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           ir.ResourceKindStatefulDNS,
+			LogicalID:      item.Meta.LogicalID,
+			Name:           item.Meta.Name,
+			CloudPrimitive: "stable DNS identity",
+			Why:            "keeps member addressing stable across replacement and recovery operations",
+			Source:         item.Meta.Source,
+		})
+	}
+	for _, item := range graph.Resources.StatefulRecipes {
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           ir.ResourceKindStatefulRecipe,
+			LogicalID:      item.Meta.LogicalID,
+			Name:           item.Meta.Name,
+			CloudPrimitive: "stateful recipe runtime",
+			Why:            "captures the recipe artifact, runtime, health, metrics, and opaque recipe config without hiding them in a controller",
+			Source:         item.Meta.Source,
+		})
+	}
+	for _, item := range graph.Resources.SnapshotPolicies {
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           ir.ResourceKindSnapshotPolicy,
+			LogicalID:      item.Meta.LogicalID,
+			Name:           item.Meta.Name,
+			CloudPrimitive: "snapshot policy",
+			Why:            "makes backup cadence and retention visible before backup sagas are enabled",
+			Source:         item.Meta.Source,
+		})
+	}
+	for _, item := range graph.Resources.UpdatePolicies {
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           ir.ResourceKindUpdatePolicy,
+			LogicalID:      item.Meta.LogicalID,
+			Name:           item.Meta.Name,
+			CloudPrimitive: "ordered update policy",
+			Why:            "records that StatefulGroup updates must proceed explicitly and serially",
+			Source:         item.Meta.Source,
+		})
+	}
 	return out
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/s1liconcow/skiff/internal/client"
 	"github.com/s1liconcow/skiff/internal/state/schema"
+	servicestatus "github.com/s1liconcow/skiff/internal/status"
 )
 
 const minRenderWidth = 64
@@ -58,7 +59,7 @@ func render(m Model) string {
 		width = minRenderWidth
 	}
 	if m.err != nil {
-		return p.shell.Width(width).Render(p.panel.Width(width).Render("TUI error: "+m.err.Error())) + "\n"
+		return p.shell.Width(width).Render(renderBox(p.panel, width, "TUI error: "+m.err.Error())) + "\n"
 	}
 
 	header := renderHeader(m, p, width)
@@ -102,12 +103,13 @@ func renderBody(m Model, p palette, width int) string {
 }
 
 func renderHeader(m Model, p palette, width int) string {
+	inner := boxInnerWidth(p.header, width)
 	status := "ready"
 	if m.loading {
 		status = strings.TrimSpace(m.spinner.View()) + " refreshing"
 	}
 	left := p.brandMark.Render("::") + " " + p.brand.Render("Skiff") + " " + p.title.Render("Operations Deck")
-	top := joinSpaced(left, statusPill(p, status), max(1, width-4))
+	top := joinSpaced(left, statusPill(p, status), inner)
 
 	meta := []string{renderSignal(p, "env", firstNonEmpty(m.dashboard.Status.Env, "unknown"))}
 	meta = append(meta,
@@ -125,9 +127,9 @@ func renderHeader(m Model, p palette, width int) string {
 		meta = append(meta, p.warnPill.Render("read-only"))
 	}
 
-	tagline := p.subtitle.Render(fit("object storage truth / typed sagas / direct recovery", max(1, width-4)))
-	metaLine := renderMetaChips(p, meta, max(1, width-4))
-	return p.header.Width(width).Render(lipgloss.JoinVertical(lipgloss.Left, top, tagline, metaLine))
+	tagline := p.subtitle.Render(fit("object storage truth / typed sagas / direct recovery", inner))
+	metaLine := renderMetaChips(p, meta, inner)
+	return renderBox(p.header, width, lipgloss.JoinVertical(lipgloss.Left, top, tagline, metaLine))
 }
 
 func renderStats(m Model, p palette, width int) string {
@@ -163,10 +165,10 @@ func renderStats(m Model, p palette, width int) string {
 
 func renderServices(m Model, p palette, width int) string {
 	lines := []string{panelTitle(p, "Services", len(m.dashboard.Status.Services))}
-	inner := innerWidth(width)
+	inner := panelInnerWidth(p, width)
 	if len(m.dashboard.Status.Services) == 0 {
 		lines = append(lines, p.meta.Render("No services in object state"))
-		return panelForFocus(m, p, focusServices).Width(width).Render(strings.Join(lines, "\n"))
+		return renderBox(panelForFocus(m, p, focusServices), width, strings.Join(lines, "\n"))
 	}
 	lines = append(lines, p.tableHead.Render(serviceHeader(inner)))
 	limit := listLimit(m.height, 8)
@@ -184,15 +186,15 @@ func renderServices(m Model, p palette, width int) string {
 		line := renderServiceRow(p, prefix, service, inner)
 		lines = append(lines, style.Width(inner).Render(line))
 	}
-	return panelForFocus(m, p, focusServices).Width(width).Render(strings.Join(lines, "\n"))
+	return renderBox(panelForFocus(m, p, focusServices), width, strings.Join(lines, "\n"))
 }
 
 func renderSagas(m Model, p palette, width int) string {
 	lines := []string{panelTitle(p, "Sagas", len(m.dashboard.Sagas))}
-	inner := innerWidth(width)
+	inner := panelInnerWidth(p, width)
 	if len(m.dashboard.Sagas) == 0 {
 		lines = append(lines, p.meta.Render("No active saga controls"))
-		return panelForFocus(m, p, focusSagas).Width(width).Render(strings.Join(lines, "\n"))
+		return renderBox(panelForFocus(m, p, focusSagas), width, strings.Join(lines, "\n"))
 	}
 	lines = append(lines, p.tableHead.Render(sagaHeader(inner)))
 	limit := listLimit(m.height, 7)
@@ -210,16 +212,16 @@ func renderSagas(m Model, p palette, width int) string {
 		line := renderSagaRow(p, prefix, saga, inner)
 		lines = append(lines, style.Width(inner).Render(line))
 	}
-	return panelForFocus(m, p, focusSagas).Width(width).Render(strings.Join(lines, "\n"))
+	return renderBox(panelForFocus(m, p, focusSagas), width, strings.Join(lines, "\n"))
 }
 
 func renderServiceDetail(m Model, p palette, width int) string {
 	service := m.selectedService()
 	lines := []string{panelTitle(p, "Selected Service", 0)}
-	inner := innerWidth(width)
+	inner := panelInnerWidth(p, width)
 	if service.Service == "" {
 		lines = append(lines, p.meta.Render("Select a service to inspect rollout, provider resources, logs, metrics, and recovery actions."))
-		return p.panel.Width(width).Render(strings.Join(lines, "\n"))
+		return renderBox(p.panel, width, strings.Join(lines, "\n"))
 	}
 
 	lines = append(lines,
@@ -227,48 +229,60 @@ func renderServiceDetail(m Model, p palette, width int) string {
 		renderReleaseRail(p, service, inner),
 	)
 	if service.OperationID != "" {
-		lines = append(lines, "operation "+p.command.Render(service.OperationID)+"  "+p.meta.Render(firstNonEmpty(service.OperationKind, "operation")+" / "+firstNonEmpty(service.OperationState, "running")))
+		plain := "operation " + service.OperationID + "  " + firstNonEmpty(service.OperationKind, "operation") + " / " + firstNonEmpty(service.OperationState, "running")
+		if lipgloss.Width(plain) > inner {
+			lines = append(lines, fit(plain, inner))
+		} else {
+			lines = append(lines, "operation "+p.command.Render(service.OperationID)+"  "+p.meta.Render(firstNonEmpty(service.OperationKind, "operation")+" / "+firstNonEmpty(service.OperationState, "running")))
+		}
 	}
 	if service.Rollout != nil {
-		lines = append(lines, "rollout "+p.warn.Render(firstNonEmpty(service.Rollout.Status, "unknown"))+"  provider "+p.command.Render(firstNonEmpty(service.Rollout.ProviderID, "<none>")))
+		plain := "rollout " + firstNonEmpty(service.Rollout.Status, "unknown") + "  provider " + firstNonEmpty(service.Rollout.ProviderID, "<none>")
+		if lipgloss.Width(plain) > inner {
+			lines = append(lines, fit(plain, inner))
+		} else {
+			lines = append(lines, "rollout "+p.warn.Render(firstNonEmpty(service.Rollout.Status, "unknown"))+"  provider "+p.command.Render(firstNonEmpty(service.Rollout.ProviderID, "<none>")))
+		}
 		if service.Rollout.Summary != "" {
-			lines = append(lines, p.meta.Render(service.Rollout.Summary))
+			lines = append(lines, p.meta.Render(fit(service.Rollout.Summary, inner)))
 		}
 	}
 
 	lines = append(lines,
 		"",
 		sectionTitle(p, "Cloud primitives"),
-		dependencyLine(p, "capacity/asg", service.Capacity),
-		dependencyLine(p, "target group", service.TargetHealth),
+		dependencyLine(p, "capacity/asg", service.Capacity, inner),
+		dependencyLine(p, "target group", service.TargetHealth, inner),
 	)
 	if service.Database.Status != "" {
-		lines = append(lines, dependencyLine(p, "database", service.Database))
+		lines = append(lines, dependencyLine(p, "database", service.Database, inner))
 	}
 	lines = append(lines,
-		dependencyLine(p, "logs", service.Logs),
-		dependencyLine(p, "metrics", service.Metrics),
+		dependencyLine(p, "logs", service.Logs, inner),
+		dependencyLine(p, "metrics", service.Metrics, inner),
 	)
 	if len(service.Resources) > 0 {
 		for _, resource := range service.Resources {
-			lines = append(lines, "resource "+p.command.Render(firstNonEmpty(resource.Kind, resource.LogicalKind))+"  "+p.meta.Render(firstNonEmpty(resource.ProviderID, resource.LogicalName)))
+			lines = append(lines, resourceLine(p, resource, inner))
 		}
 	}
 	if len(service.Findings) > 0 {
 		lines = append(lines, "", sectionTitle(p, "Findings"))
 		for _, finding := range service.Findings {
-			lines = append(lines, "  "+fit(finding.Code, 26)+"  "+finding.Summary)
+			code := fit(finding.Code, min(26, max(8, inner/3)))
+			summaryW := max(8, inner-lipgloss.Width(code)-4)
+			lines = append(lines, "  "+code+"  "+fit(finding.Summary, summaryW))
 		}
 	}
-	return p.panel.Width(width).Render(strings.Join(lines, "\n"))
+	return renderBox(p.panel, width, strings.Join(lines, "\n"))
 }
 
 func renderEvents(m Model, p palette, width int) string {
 	lines := []string{panelTitle(p, "Recent Events", len(m.dashboard.Events))}
-	inner := innerWidth(width)
+	inner := panelInnerWidth(p, width)
 	if len(m.dashboard.Events) == 0 {
 		lines = append(lines, p.meta.Render("No recent events"))
-		return panelForFocus(m, p, focusEvents).Width(width).Render(strings.Join(lines, "\n"))
+		return renderBox(panelForFocus(m, p, focusEvents), width, strings.Join(lines, "\n"))
 	}
 	limit := listLimit(m.height, 8)
 	for i, event := range m.dashboard.Events {
@@ -284,25 +298,26 @@ func renderEvents(m Model, p palette, width int) string {
 		}
 		lines = append(lines, style.Width(inner).Render(renderEventRow(p, prefix, event, inner)))
 	}
-	return panelForFocus(m, p, focusEvents).Width(width).Render(strings.Join(lines, "\n"))
+	return renderBox(panelForFocus(m, p, focusEvents), width, strings.Join(lines, "\n"))
 }
 
 func renderCommandPalette(m Model, p palette, width int) string {
 	title := panelTitle(p, "Command Palette", 0)
+	inner := panelInnerWidth(p, width)
 	if m.action == nil {
 		lines := []string{
 			title,
 			renderActionHints(p, []ActionHint{
 				{Key: "d", Label: "doctor"}, {Key: "l", Label: "logs"}, {Key: "m", Label: "metrics"}, {Key: "e", Label: "events"},
 				{Key: "x", Label: "saga"}, {Key: "b", Label: "rollback"}, {Key: "a", Label: "approve"},
-			}, innerWidth(width)),
+			}, inner),
 		}
 		if m.readOnly {
 			lines = append(lines, p.warn.Render("Mutating actions are blocked by read-only mode."))
 		} else {
 			lines = append(lines, p.meta.Render("Mutating actions still emit explicit, auditable Skiff commands."))
 		}
-		return p.panel.Width(width).Render(strings.Join(lines, "\n"))
+		return renderBox(p.panel, width, strings.Join(lines, "\n"))
 	}
 
 	action := *m.action
@@ -319,15 +334,16 @@ func renderCommandPalette(m Model, p palette, width int) string {
 
 	md := fmt.Sprintf("**%s** - %s\n\n%s", action.Label, state, firstNonEmpty(action.Summary, "Ready"))
 	lines := []string{title}
-	if rendered, err := renderMarkdown(md, innerWidth(width), m.noColor); err == nil && strings.TrimSpace(rendered) != "" {
+	if rendered, err := renderMarkdown(md, inner, m.noColor); err == nil && strings.TrimSpace(rendered) != "" {
 		lines = append(lines, strings.TrimSpace(rendered))
 	} else {
 		lines = append(lines, style.Render(action.Label+"  "+state))
 	}
-	command := p.command.Render(wrapWords(action.Command, max(12, innerWidth(width)-4)))
-	lines = append(lines, p.divider.Render(strings.Repeat("-", max(1, innerWidth(width)))))
-	lines = append(lines, p.commandBox.Width(innerWidth(width)).Render(command))
-	return p.panel.Width(width).Render(strings.Join(lines, "\n"))
+	commandInner := boxInnerWidth(p.commandBox, inner)
+	command := p.command.Render(wrapWords(action.Command, max(12, commandInner)))
+	lines = append(lines, p.divider.Render(strings.Repeat("-", max(1, inner))))
+	lines = append(lines, renderBox(p.commandBox, inner, command))
+	return renderBox(p.panel, width, strings.Join(lines, "\n"))
 }
 
 func renderFooter(m Model, p palette, width int) string {
@@ -546,10 +562,22 @@ func renderEventRow(p palette, prefix string, event schema.Event, width int) str
 		p.meta.Render(fit(firstNonEmpty(event.Summary, "-"), summaryW))
 }
 
-func dependencyLine(p palette, label string, dep client.DependencyStatus) string {
+func dependencyLine(p palette, label string, dep client.DependencyStatus, width int) string {
 	status := firstNonEmpty(dep.Status, "unknown")
 	target := firstNonEmpty(dep.ProviderID, dep.Summary, dep.Source)
-	return column(label, 13) + " " + p.command.Render(column(status, 12)) + " " + p.meta.Render(firstNonEmpty(target, "<not observed>"))
+	labelW := min(13, max(7, width/4))
+	statusW := min(12, max(7, (width-labelW-2)/3))
+	targetW := max(1, width-labelW-statusW-2)
+	return column(label, labelW) + " " + p.command.Render(column(status, statusW)) + " " + p.meta.Render(fit(firstNonEmpty(target, "<not observed>"), targetW))
+}
+
+func resourceLine(p palette, resource servicestatus.ResourceSummary, width int) string {
+	prefix := "resource "
+	kind := firstNonEmpty(resource.Kind, resource.LogicalKind)
+	target := firstNonEmpty(resource.ProviderID, resource.LogicalName)
+	kindW := min(20, max(8, (width-lipgloss.Width(prefix))/3))
+	targetW := max(1, width-lipgloss.Width(prefix)-kindW-1)
+	return prefix + p.command.Render(column(kind, kindW)) + " " + p.meta.Render(fit(target, targetW))
 }
 
 func renderMarkdown(markdown string, width int, noColor bool) (string, error) {
@@ -680,14 +708,14 @@ func renderActionHints(p palette, hints []ActionHint, width int) string {
 }
 
 func renderStatChip(p palette, label, value, detail string, width int) string {
-	inner := max(1, width-4)
+	inner := boxInnerWidth(p.stat, width)
 	if width > 0 {
 		detail = fit(detail, inner)
 	}
 	top := joinSpaced(p.statLabel.Render(strings.ToUpper(label)), p.statValue.Render(value), inner)
 	body := top + "\n" + p.meta.Render(detail)
 	if width > 0 {
-		return p.stat.Width(width).Render(body)
+		return renderBox(p.stat, width, body)
 	}
 	return body
 }
@@ -776,8 +804,16 @@ func listLimit(height, fallback int) int {
 	return clamp((height-14)/3, 4, fallback)
 }
 
-func innerWidth(width int) int {
-	return max(1, width-4)
+func panelInnerWidth(p palette, outerWidth int) int {
+	return boxInnerWidth(p.panel, outerWidth)
+}
+
+func boxInnerWidth(style lipgloss.Style, outerWidth int) int {
+	return max(1, outerWidth-style.GetHorizontalFrameSize())
+}
+
+func renderBox(style lipgloss.Style, outerWidth int, body string) string {
+	return style.Width(boxInnerWidth(style, outerWidth)).Render(body)
 }
 
 func joinSpaced(left, right string, width int) string {

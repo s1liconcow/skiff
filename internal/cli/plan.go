@@ -95,13 +95,18 @@ func runPlan(binary string, args []string, root rootOptions, stdout, stderr io.W
 	if *providerName != aws.Name {
 		return writeSpecError(binary, "PLAN_INVALID", *format, *traceID, fmt.Errorf("unsupported provider %q; expected aws", *providerName), nil, stdout, stderr)
 	}
-	awsProvider, err := aws.NewFromConfig(config.Config{Region: *region, StateBucket: *stateBucket})
-	if err != nil {
-		return writeSpecError(binary, "PLAN_INVALID", *format, *traceID, err, nil, stdout, stderr)
-	}
-	plan, err := awsProvider.Plan(nilContext(), graph)
-	if err != nil {
-		return writeSpecError(binary, "PLAN_FAILED", *format, *traceID, err, nil, stdout, stderr)
+	var plan *provider.Plan
+	if doc.Kind == spec.KindStatefulGroup && *region == "" {
+		plan = statefulReadOnlyPlan(*providerName, graph)
+	} else {
+		awsProvider, err := aws.NewFromConfig(config.Config{Region: *region, StateBucket: *stateBucket})
+		if err != nil {
+			return writeSpecError(binary, "PLAN_INVALID", *format, *traceID, err, nil, stdout, stderr)
+		}
+		plan, err = awsProvider.Plan(nilContext(), graph)
+		if err != nil {
+			return writeSpecError(binary, "PLAN_FAILED", *format, *traceID, err, nil, stdout, stderr)
+		}
 	}
 	advisorWarnings := skiffcost.PlanWarnings(skiffcost.InputFromGraph(graph))
 

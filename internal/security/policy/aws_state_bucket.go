@@ -113,6 +113,7 @@ func DeployerPolicy(bucket, kmsAlias string) Document {
 		Statement: compactStatements([]Statement{
 			bucketLocationStatement(bucket),
 			listPrefixStatement("ListServiceState", bucket, "services/*"),
+			listPrefixStatement("ListStatefulState", bucket, "stateful/*"),
 			listPrefixStatement("ListSagaState", bucket, "sagas/*"),
 			readOperatorStateStatement(bucket),
 			createOnlyStateStatement("CreateImmutableState", bucket),
@@ -128,6 +129,7 @@ func RunnerPolicy(bucket, kmsAlias string) Document {
 		Statement: compactStatements([]Statement{
 			bucketLocationStatement(bucket),
 			listPrefixStatement("ListServiceState", bucket, "services/*"),
+			listPrefixStatement("ListStatefulState", bucket, "stateful/*"),
 			{
 				Sid:    "ReadServiceControlAndReleases",
 				Effect: "Allow",
@@ -137,6 +139,8 @@ func RunnerPolicy(bucket, kmsAlias string) Document {
 					bucketARN(bucket) + "/services/*/control.json",
 					bucketARN(bucket) + "/services/*/releases/*/release.json",
 					bucketARN(bucket) + "/services/*/releases/*/runtime-manifest.json",
+					bucketARN(bucket) + "/stateful/*/control.json",
+					bucketARN(bucket) + "/stateful/*/members/*/control.json",
 				},
 			},
 			kmsStatement(kmsAlias, false),
@@ -207,6 +211,8 @@ func readOperatorStateStatement(bucket string) Statement {
 			bucketARN(bucket) + "/services/*/operations/*/intent.json",
 			bucketARN(bucket) + "/services/*/operations/*/control.json",
 			bucketARN(bucket) + "/services/*/operations/*/events/*",
+			bucketARN(bucket) + "/stateful/*/control.json",
+			bucketARN(bucket) + "/stateful/*/members/*/control.json",
 			bucketARN(bucket) + "/sagas/*/intent.json",
 			bucketARN(bucket) + "/sagas/*/graph.json",
 			bucketARN(bucket) + "/sagas/*/control.json",
@@ -280,7 +286,7 @@ func ifMatchCondition() map[string]map[string]string {
 func conditionalWriteResources(bucket string) []string {
 	resources := append(createOnlyResources(bucket), casResources(bucket)...)
 	resources = append(resources, indexResources(bucket)...)
-	return sortedStrings(resources)
+	return sortedUniqueStrings(resources)
 }
 
 func createOnlyResources(bucket string) []string {
@@ -290,6 +296,8 @@ func createOnlyResources(bucket string) []string {
 		bucketARN(bucket) + "/services/*/releases/*/runtime-manifest.json",
 		bucketARN(bucket) + "/services/*/operations/*/intent.json",
 		bucketARN(bucket) + "/services/*/operations/*/events/*",
+		bucketARN(bucket) + "/stateful/*/control.json",
+		bucketARN(bucket) + "/stateful/*/members/*/control.json",
 		bucketARN(bucket) + "/sagas/*/intent.json",
 		bucketARN(bucket) + "/sagas/*/graph.json",
 		bucketARN(bucket) + "/sagas/*/events/*",
@@ -303,6 +311,8 @@ func casResources(bucket string) []string {
 	return sortedStrings([]string{
 		bucketARN(bucket) + "/services/*/control.json",
 		bucketARN(bucket) + "/services/*/operations/*/control.json",
+		bucketARN(bucket) + "/stateful/*/control.json",
+		bucketARN(bucket) + "/stateful/*/members/*/control.json",
 		bucketARN(bucket) + "/sagas/*/control.json",
 	})
 }
@@ -330,6 +340,20 @@ func compactStatements(statements []Statement) []Statement {
 
 func sortedStrings(values []string) []string {
 	out := append([]string(nil), values...)
+	sort.Strings(out)
+	return out
+}
+
+func sortedUniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
 	sort.Strings(out)
 	return out
 }

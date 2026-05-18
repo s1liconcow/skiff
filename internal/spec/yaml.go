@@ -133,7 +133,7 @@ func parseYAMLSeq(lines []yamlLine, index, indent int) ([]any, int, error) {
 			index = next
 			continue
 		}
-		if key, rest, ok := strings.Cut(item, ":"); ok && strings.TrimSpace(key) != "" {
+		if key, rest, ok := strings.Cut(item, ":"); ok && strings.TrimSpace(key) != "" && yamlSeqItemLooksLikeMap(rest) {
 			m := map[string]any{strings.TrimSpace(key): parseYAMLScalar(strings.TrimSpace(rest))}
 			index++
 			if index < len(lines) && lines[index].indent > indent {
@@ -153,6 +153,10 @@ func parseYAMLSeq(lines []yamlLine, index, indent int) ([]any, int, error) {
 		index++
 	}
 	return out, index, nil
+}
+
+func yamlSeqItemLooksLikeMap(rest string) bool {
+	return rest == "" || strings.HasPrefix(rest, " ") || strings.HasPrefix(rest, "\t")
 }
 
 func parseYAMLScalar(value string) any {

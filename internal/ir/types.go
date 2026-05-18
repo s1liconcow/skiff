@@ -1,6 +1,8 @@
 // Package ir contains Skiff's provider-neutral implementation graph.
 package ir
 
+import "encoding/json"
+
 const SchemaVersion = "skiff.ir/v1alpha1"
 
 type Graph struct {
@@ -25,6 +27,13 @@ type Resources struct {
 	InstanceTemplates  []InstanceTemplate `json:"instance_templates,omitempty"`
 	AutoscalingGroups  []AutoscalingGroup `json:"autoscaling_groups,omitempty"`
 	RuntimeManifests   []RuntimeManifest  `json:"runtime_manifests,omitempty"`
+	StatefulGroups     []StatefulGroup    `json:"stateful_groups,omitempty"`
+	StatefulMembers    []StatefulMember   `json:"stateful_members,omitempty"`
+	StatefulVolumes    []StatefulVolume   `json:"stateful_volumes,omitempty"`
+	StatefulDNS        []StatefulDNS      `json:"stateful_dns,omitempty"`
+	StatefulRecipes    []StatefulRecipe   `json:"stateful_recipes,omitempty"`
+	SnapshotPolicies   []SnapshotPolicy   `json:"snapshot_policies,omitempty"`
+	UpdatePolicies     []UpdatePolicy     `json:"update_policies,omitempty"`
 }
 
 type SourceRef struct {
@@ -196,6 +205,70 @@ type RuntimeManifest struct {
 	SecretRefs  []SecretRef       `json:"secret_refs,omitempty"`
 	HealthCheck HealthCheck       `json:"health_check"`
 	Metrics     AppMetrics        `json:"metrics,omitempty"`
+}
+
+type StatefulGroup struct {
+	Meta              ResourceMeta `json:"meta"`
+	Replicas          int          `json:"replicas"`
+	MemberRefs        []string     `json:"member_refs"`
+	VolumeRefs        []string     `json:"volume_refs"`
+	DNSIdentityRefs   []string     `json:"dns_identity_refs,omitempty"`
+	RecipeRuntimeRef  string       `json:"recipe_runtime_ref"`
+	SnapshotPolicyRef string       `json:"snapshot_policy_ref,omitempty"`
+	UpdatePolicyRef   string       `json:"update_policy_ref"`
+}
+
+type StatefulMember struct {
+	Meta             ResourceMeta `json:"meta"`
+	Ordinal          int          `json:"ordinal"`
+	Zone             string       `json:"zone,omitempty"`
+	DNSName          string       `json:"dns_name,omitempty"`
+	VolumeRef        string       `json:"volume_ref"`
+	DNSIdentityRef   string       `json:"dns_identity_ref,omitempty"`
+	RecipeRuntimeRef string       `json:"recipe_runtime_ref"`
+	UpdatePolicyRef  string       `json:"update_policy_ref"`
+}
+
+type StatefulVolume struct {
+	Meta          ResourceMeta `json:"meta"`
+	MemberOrdinal int          `json:"member_ordinal"`
+	Size          string       `json:"size"`
+	Type          string       `json:"type"`
+	MountPath     string       `json:"mount_path"`
+	Encrypted     bool         `json:"encrypted"`
+}
+
+type StatefulDNS struct {
+	Meta           ResourceMeta `json:"meta"`
+	MemberOrdinal  int          `json:"member_ordinal"`
+	DNSZoneRef     string       `json:"dns_zone_ref,omitempty"`
+	HostnamePrefix string       `json:"hostname_prefix"`
+	DNSName        string       `json:"dns_name,omitempty"`
+}
+
+type StatefulRecipe struct {
+	Meta        ResourceMeta      `json:"meta"`
+	Name        string            `json:"name,omitempty"`
+	Ref         string            `json:"ref,omitempty"`
+	Artifact    Artifact          `json:"artifact,omitempty"`
+	Command     []string          `json:"command,omitempty"`
+	Ports       map[string]int    `json:"ports,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	HealthCheck HealthCheck       `json:"health_check,omitempty"`
+	Metrics     AppMetrics        `json:"metrics,omitempty"`
+	Config      json.RawMessage   `json:"config,omitempty"`
+}
+
+type SnapshotPolicy struct {
+	Meta      ResourceMeta `json:"meta"`
+	Enabled   bool         `json:"enabled"`
+	Interval  string       `json:"interval,omitempty"`
+	Retention string       `json:"retention,omitempty"`
+}
+
+type UpdatePolicy struct {
+	Meta     ResourceMeta `json:"meta"`
+	Strategy string       `json:"strategy"`
 }
 
 type Artifact struct {

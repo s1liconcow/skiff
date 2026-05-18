@@ -69,6 +69,13 @@ remain live after the command exits. Stop them with:
 make demo-apple-down
 ```
 
+To remove every Skiff Apple Container demo/e2e container and RustFS volume that
+matches the generated Skiff names, use:
+
+```bash
+make clean-apple-containers
+```
+
 For a cleanup-safe smoke run that stops the Apple containers and in-process
 `skiffd` before it exits, use:
 

@@ -124,6 +124,36 @@ func desiredServiceResources(resources *ServiceResources) ([]DesiredServiceResou
 			return nil, err
 		}
 	}
+	for _, item := range resources.StatefulMembers {
+		if err := appendDesired(ResourceKindEC2Instance, item.LogicalID, item.Name, item.Tags, fmt.Sprintf("EC2 stateful member %d with stable identity %s", item.MemberOrdinal, item.DNSName), item); err != nil {
+			return nil, err
+		}
+	}
+	for _, item := range resources.EBSVolumes {
+		if err := appendDesired(ResourceKindEBSVolume, item.LogicalID, item.Name, item.Tags, fmt.Sprintf("EBS volume for stateful member %d mounted at %s", item.MemberOrdinal, item.MountPath), item); err != nil {
+			return nil, err
+		}
+	}
+	for _, item := range resources.VolumeAttachments {
+		if err := appendDesired(ResourceKindEBSAttachment, item.LogicalID, item.Name, item.Tags, fmt.Sprintf("EBS volume attachment for stateful member %d", item.MemberOrdinal), item); err != nil {
+			return nil, err
+		}
+	}
+	for _, item := range resources.Route53Records {
+		if err := appendDesired(ResourceKindRoute53Record, item.LogicalID, item.Name, item.Tags, fmt.Sprintf("Route53 DNS record %s for stateful member %d", item.DNSName, item.MemberOrdinal), item); err != nil {
+			return nil, err
+		}
+	}
+	for _, item := range resources.SnapshotPolicies {
+		if err := appendDesired(ResourceKindSnapshotPolicy, item.LogicalID, item.Name, item.Tags, "snapshot policy for stateful volumes", item); err != nil {
+			return nil, err
+		}
+	}
+	for _, item := range resources.FencingPolicies {
+		if err := appendDesired(ResourceKindFencingPolicy, item.LogicalID, item.Name, item.Tags, fmt.Sprintf("fencing policy for stateful member %d", item.MemberOrdinal), item); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
 }
 

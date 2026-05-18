@@ -417,6 +417,255 @@ func TestPlanAWSJSON(t *testing.T) {
 	}
 }
 
+func TestStatefulGroupPlanAndExplainReadOnlyJSON(t *testing.T) {
+	clearSkiffEnv(t)
+	specPath := filepath.Join("..", "..", "examples", "stateful", "jetstream", "skiff.yaml")
+	var planOut, explainOut, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"plan",
+		specPath,
+		"--format", "json",
+		"--trace-id", "tr_stateful_plan",
+	}, &planOut, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("plan exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), planOut.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("plan stderr = %q, want empty", stderr.String())
+	}
+	var planned planOutput
+	if err := json.Unmarshal(planOut.Bytes(), &planned); err != nil {
+		t.Fatalf("plan output is not valid JSON: %v\n%s", err, planOut.String())
+	}
+	if !planned.OK || planned.TraceID != "tr_stateful_plan" || planned.Plan.Provider != "aws" || planned.Plan.Service != "orders-stream" {
+		t.Fatalf("unexpected stateful plan envelope: %+v", planned)
+	}
+	foundMember := false
+	for _, resource := range planned.Plan.Resources {
+		if resource.Action != provider.ActionReadOnly || len(resource.Desired) == 0 || resource.Fingerprint == "" {
+			t.Fatalf("stateful plan resource not read-only/canonical: %+v", resource)
+		}
+		if resource.Kind == "StatefulMember" && resource.Tags["skiff.dev/member-ordinal"] == "0" {
+			foundMember = true
+		}
+	}
+	if !foundMember {
+		t.Fatalf("stateful plan missing member resource: %+v", planned.Plan.Resources)
+	}
+
+	stderr.Reset()
+	code = Run("skiff", []string{
+		"explain",
+		specPath,
+		"--format", "json",
+		"--trace-id", "tr_stateful_explain",
+	}, &explainOut, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("explain exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), explainOut.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("explain stderr = %q, want empty", stderr.String())
+	}
+	var explained explainOutput
+	if err := json.Unmarshal(explainOut.Bytes(), &explained); err != nil {
+		t.Fatalf("explain output is not valid JSON: %v\n%s", err, explainOut.String())
+	}
+	if !explained.OK || explained.TraceID != "tr_stateful_explain" || explained.Result.Service != "orders-stream" {
+		t.Fatalf("unexpected stateful explain envelope: %+v", explained)
+	}
+	if !explainHasPrimitive(explained.Result.Resources, "durable block volume") || !explainHasPrimitive(explained.Result.Resources, "ordered update policy") {
+		t.Fatalf("stateful explain missing primitives: %+v", explained.Result.Resources)
+	}
+	if explained.AWS != nil {
+		t.Fatalf("stateful read-only explain should not include AWS lowering: %+v", explained.AWS)
+	}
+}
+
+func TestStatefulGroupDeployJSONWritesObjectState(t *testing.T) {
+	clearSkiffEnv(t)
+	root := t.TempDir()
+	specPath := filepath.Join("..", "..", "examples", "stateful", "jetstream", "skiff.yaml")
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"deploy",
+		specPath,
+		"--direct",
+		"--state", "file://" + root,
+		"--env", "prod",
+		"--provider", "aws",
+		"--region", "us-west-2",
+		"--format", "json",
+		"--trace-id", "tr_stateful_deploy",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var got struct {
+		OK      bool   `json:"ok"`
+		TraceID string `json:"trace_id"`
+		Result  struct {
+			OK            bool   `json:"ok"`
+			Group         string `json:"group"`
+			Env           string `json:"env"`
+			OperationID   string `json:"operation_id"`
+			Risk          string `json:"risk"`
+			Reversibility string `json:"reversibility"`
+			GroupControl  struct {
+				Replicas  int `json:"replicas"`
+				Operation struct {
+					ID    string `json:"id"`
+					State string `json:"state"`
+				} `json:"operation"`
+			} `json:"group_control"`
+			MemberControls []struct {
+				Member  int    `json:"member"`
+				DNSName string `json:"dns_name"`
+				Phase   string `json:"phase"`
+			} `json:"member_controls"`
+			RecommendedActions []recommendedAction `json:"recommended_actions"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("deploy output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_stateful_deploy" || !got.Result.OK || got.Result.Group != "orders-stream" || got.Result.OperationID == "" {
+		t.Fatalf("unexpected deploy envelope: %+v", got)
+	}
+	if got.Result.Risk != "medium" || got.Result.Reversibility != "compensatable" {
+		t.Fatalf("stateful deploy missing risk/reversibility: %+v", got.Result)
+	}
+	if got.Result.GroupControl.Replicas != 3 || got.Result.GroupControl.Operation.ID != got.Result.OperationID || got.Result.GroupControl.Operation.State != "succeeded" {
+		t.Fatalf("stateful deploy missing group operation: %+v", got.Result.GroupControl)
+	}
+	if len(got.Result.MemberControls) != 3 || got.Result.MemberControls[0].DNSName == "" || got.Result.MemberControls[0].Phase != "ready" {
+		t.Fatalf("stateful deploy missing member controls: %+v", got.Result.MemberControls)
+	}
+	if len(got.Result.RecommendedActions) < 3 || !got.Result.RecommendedActions[2].Mutating || got.Result.RecommendedActions[2].Risk != schema.RiskHigh {
+		t.Fatalf("stateful deploy missing agent-safe recommendations: %+v", got.Result.RecommendedActions)
+	}
+	for _, key := range []string{
+		"stateful/orders-stream/control.json",
+		"stateful/orders-stream/members/0/control.json",
+		"services/orders-stream/operations/" + got.Result.OperationID + "/intent.json",
+		"services/orders-stream/operations/" + got.Result.OperationID + "/control.json",
+	} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(key))); err != nil {
+			t.Fatalf("stateful deploy did not write %s: %v", key, err)
+		}
+	}
+	audits, err := countFilesUnder(filepath.Join(root, "audit"))
+	if err != nil {
+		t.Fatalf("stateful deploy did not write audit objects: %v", err)
+	}
+	if audits < 2 {
+		t.Fatalf("audit count = %d, want at least 2", audits)
+	}
+}
+
+func TestStatefulApplyAndInspectDirectJSON(t *testing.T) {
+	clearSkiffEnv(t)
+	root := t.TempDir()
+	specPath := filepath.Join("..", "..", "examples", "stateful", "jetstream", "skiff.yaml")
+	var applyOut, inspectOut, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"stateful",
+		"apply",
+		specPath,
+		"--direct",
+		"--state", "file://" + root,
+		"--env", "prod",
+		"--provider", "fake",
+		"--region", "local",
+		"--operation-id", "op_stateful_cli",
+		"--format", "json",
+		"--trace-id", "tr_stateful_cli",
+	}, &applyOut, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("apply exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), applyOut.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("apply stderr = %q, want empty", stderr.String())
+	}
+	var applied struct {
+		OK      bool   `json:"ok"`
+		TraceID string `json:"trace_id"`
+		Result  struct {
+			Group             string `json:"group"`
+			OperationID       string `json:"operation_id"`
+			ProviderResources []struct {
+				Kind       string `json:"kind"`
+				ProviderID string `json:"provider_id"`
+			} `json:"provider_resources"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(applyOut.Bytes(), &applied); err != nil {
+		t.Fatalf("stateful apply output is not valid JSON: %v\n%s", err, applyOut.String())
+	}
+	if !applied.OK || applied.TraceID != "tr_stateful_cli" || applied.Result.Group != "orders-stream" || applied.Result.OperationID != "op_stateful_cli" {
+		t.Fatalf("unexpected stateful apply output: %+v", applied)
+	}
+	foundProviderID := false
+	for _, resource := range applied.Result.ProviderResources {
+		if resource.Kind == "StatefulMember" && resource.ProviderID != "" {
+			foundProviderID = true
+		}
+	}
+	if !foundProviderID {
+		t.Fatalf("stateful apply missing provider-visible resource IDs: %+v", applied.Result.ProviderResources)
+	}
+
+	stderr.Reset()
+	code = Run("skiff", []string{
+		"stateful",
+		"inspect",
+		"orders-stream",
+		"--direct",
+		"--state", "file://" + root,
+		"--env", "prod",
+		"--provider", "fake",
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", "tr_stateful_inspect",
+	}, &inspectOut, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("inspect exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), inspectOut.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("inspect stderr = %q, want empty", stderr.String())
+	}
+	var inspected struct {
+		OK      bool   `json:"ok"`
+		TraceID string `json:"trace_id"`
+		Result  struct {
+			Group            string                         `json:"group"`
+			OperationID      string                         `json:"operation_id"`
+			Status           schema.OperationStatus         `json:"status"`
+			Risk             schema.Risk                    `json:"risk"`
+			Reversibility    schema.Reversibility           `json:"reversibility"`
+			MemberControls   []schema.StatefulMemberControl `json:"member_controls"`
+			OperationControl *schema.OperationControl       `json:"operation_control"`
+			Events           []struct {
+				Type string `json:"type"`
+			} `json:"events"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(inspectOut.Bytes(), &inspected); err != nil {
+		t.Fatalf("stateful inspect output is not valid JSON: %v\n%s", err, inspectOut.String())
+	}
+	if !inspected.OK || inspected.TraceID != "tr_stateful_inspect" || inspected.Result.Group != "orders-stream" || inspected.Result.OperationID != "op_stateful_cli" {
+		t.Fatalf("unexpected stateful inspect output: %+v", inspected)
+	}
+	if inspected.Result.Status != schema.OperationSucceeded || inspected.Result.Risk != schema.RiskMedium || inspected.Result.Reversibility != schema.Compensatable {
+		t.Fatalf("stateful inspect missing operation safety details: %+v", inspected.Result)
+	}
+	if len(inspected.Result.MemberControls) != 3 || inspected.Result.OperationControl == nil || len(inspected.Result.Events) < 2 {
+		t.Fatalf("stateful inspect missing direct recovery state: %+v", inspected.Result)
+	}
+}
+
 func TestDeployDryRunJSON(t *testing.T) {
 	root := t.TempDir()
 	specPath := filepath.Join("..", "..", "examples", "service", "skiff.yaml")
@@ -542,4 +791,18 @@ func writeStateObject(t *testing.T, root, key string, value any) {
 	if err := os.WriteFile(path, append(body, '\n'), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func countFilesUnder(root string) (int, error) {
+	count := 0
+	err := filepath.WalkDir(root, func(_ string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			count++
+		}
+		return nil
+	})
+	return count, err
 }

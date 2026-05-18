@@ -7,6 +7,8 @@ func ApplyDefaults(doc *Document) {
 	switch doc.Kind {
 	case KindManagedDatabase:
 		applyManagedDatabaseDefaults(doc.ManagedDatabase)
+	case KindStatefulGroup:
+		applyStatefulGroupDefaults(doc.Metadata.Name, doc.StatefulGroup)
 	case KindStack:
 		if doc.Stack != nil {
 			for i := range doc.Stack.Services {
@@ -117,6 +119,25 @@ func usesWorkloadDefaults(kind Kind) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func applyStatefulGroupDefaults(name string, group *StatefulGroup) {
+	if group == nil {
+		return
+	}
+	if group.Volume.Type == "" {
+		group.Volume.Type = "gp3"
+	}
+	if group.Volume.MountPath == "" {
+		group.Volume.MountPath = "/var/lib/skiff/state"
+	}
+	group.Volume.Encrypted = true
+	if group.Identity.HostnamePrefix == "" {
+		group.Identity.HostnamePrefix = name
+	}
+	if group.Update.Strategy == "" {
+		group.Update.Strategy = "ordered"
 	}
 }
 

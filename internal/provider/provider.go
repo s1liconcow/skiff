@@ -72,6 +72,7 @@ const (
 	ActionCreate             = "create"
 	ActionUpdate             = "update"
 	ActionNoop               = "no-op"
+	ActionReadOnly           = "read-only"
 	ActionDeleteNotSupported = "delete-not-supported"
 )
 

@@ -70,7 +70,9 @@
         "arn:aws:s3:::skiff-state-prod/services/*/operations/*/events/*",
         "arn:aws:s3:::skiff-state-prod/services/*/operations/*/intent.json",
         "arn:aws:s3:::skiff-state-prod/services/*/releases/*/release.json",
-        "arn:aws:s3:::skiff-state-prod/services/*/releases/*/runtime-manifest.json"
+        "arn:aws:s3:::skiff-state-prod/services/*/releases/*/runtime-manifest.json",
+        "arn:aws:s3:::skiff-state-prod/stateful/*/control.json",
+        "arn:aws:s3:::skiff-state-prod/stateful/*/members/*/control.json"
       ],
       "Condition": {
         "Null": {

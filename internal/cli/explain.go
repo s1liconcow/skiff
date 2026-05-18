@@ -92,19 +92,30 @@ func runExplain(binary string, args []string, root rootOptions, stdout, stderr i
 	if *providerName != "aws" {
 		return writeSpecError(binary, "EXPLAIN_INVALID", *format, *traceID, fmt.Errorf("unsupported provider %q; expected aws", *providerName), nil, stdout, stderr)
 	}
-	lowered, err := aws.LowerService(graph, aws.LowerOptions{
-		Region:      *region,
-		StateBucket: *stateBucket,
-		ReleaseID:   *releaseID,
-	})
-	if err != nil {
-		return writeSpecError(binary, "EXPLAIN_FAILED", *format, *traceID, err, nil, stdout, stderr)
+	var result explain.Result
+	var awsDetails any
+	if doc.Kind == spec.KindStatefulGroup && *region == "" {
+		result = explain.StatefulReadOnly(*providerName, graph)
+	} else {
+		lowered, err := aws.LowerService(graph, aws.LowerOptions{
+			Region:      *region,
+			StateBucket: *stateBucket,
+			ReleaseID:   *releaseID,
+		})
+		if err != nil {
+			return writeSpecError(binary, "EXPLAIN_FAILED", *format, *traceID, err, nil, stdout, stderr)
+		}
+		result = explain.AWS(lowered)
+		awsDetails = lowered
 	}
-	result := explain.AWS(lowered)
 
 	switch *format {
 	case "human", "text":
-		fmt.Fprintf(stdout, "%s service %s/%s maps to AWS primitives:\n", result.Provider, result.Env, result.Service)
+		if doc.Kind == spec.KindStatefulGroup {
+			fmt.Fprintf(stdout, "%s stateful group %s/%s read-only plan:\n", result.Provider, result.Env, result.Service)
+		} else {
+			fmt.Fprintf(stdout, "%s service %s/%s maps to AWS primitives:\n", result.Provider, result.Env, result.Service)
+		}
 		for _, resource := range result.Resources {
 			fmt.Fprintf(stdout, "- %s %s: %s\n", resource.CloudPrimitive, resource.Name, resource.Why)
 		}
@@ -113,7 +124,7 @@ func runExplain(binary string, args []string, root rootOptions, stdout, stderr i
 		}
 		return ExitSuccess
 	case "json":
-		if err := json.NewEncoder(stdout).Encode(explainOutput{OK: true, TraceID: *traceID, Result: result, AWS: lowered, PluginPatches: patchExplanations}); err != nil {
+		if err := json.NewEncoder(stdout).Encode(explainOutput{OK: true, TraceID: *traceID, Result: result, AWS: awsDetails, PluginPatches: patchExplanations}); err != nil {
 			fmt.Fprintf(stderr, "%s explain: %v\n", binary, err)
 			return ExitInternalError
 		}

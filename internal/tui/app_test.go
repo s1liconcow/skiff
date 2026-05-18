@@ -6,9 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/s1liconcow/skiff/internal/client"
 	"github.com/s1liconcow/skiff/internal/config"
 	"github.com/s1liconcow/skiff/internal/state/schema"
+	servicestatus "github.com/s1liconcow/skiff/internal/status"
 )
 
 func TestRenderDashboardSnapshot(t *testing.T) {
@@ -38,6 +40,39 @@ func TestRenderDashboardSnapshot(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestRenderDashboardFitsWindowWidth(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		width   int
+		noColor bool
+	}{
+		{name: "narrow", width: 80, noColor: true},
+		{name: "wide", width: 138, noColor: true},
+		{name: "color", width: 138, noColor: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := New(Options{
+				Client:  fakeDashboardClient{},
+				Sagas:   fakeSagaClient{},
+				TraceID: "tr_tui",
+				NoColor: tc.noColor,
+				Width:   tc.width,
+				Height:  34,
+				Now:     tuiTestNow,
+			})
+			loaded, err := model.Load(context.Background())
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			for i, line := range strings.Split(strings.TrimRight(loaded.View(), "\n"), "\n") {
+				if got := lipgloss.Width(line); got > tc.width {
+					t.Fatalf("line %d width=%d, want <= %d:\n%s\n\nfull view:\n%s", i+1, got, tc.width, line, loaded.View())
+				}
+			}
+		})
 	}
 }
 
@@ -92,6 +127,12 @@ func (fakeDashboardClient) Status(ctx context.Context, opts client.StatusOptions
 			TargetHealth:   client.DependencyStatus{Status: "configured", ProviderID: "tg-123"},
 			Logs:           client.DependencyStatus{Status: "configured", ProviderID: "log-123"},
 			Metrics:        client.DependencyStatus{Status: "configured", ProviderID: "metric-123"},
+			Resources: []servicestatus.ResourceSummary{
+				{Kind: "autoscaling-group", ProviderID: "skiff-e2e-44720-1779067497068491000-asg"},
+				{Kind: "log-group", ProviderID: "skiff-e2e-44720-1779067497068491000-logs"},
+				{Kind: "metric-config", ProviderID: "skiff-e2e-44720-1779067497068491000-metrics"},
+				{Kind: "target-group", ProviderID: "fake-target-group-caddy-web"},
+			},
 		}},
 	}, nil
 }

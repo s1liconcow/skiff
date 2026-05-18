@@ -88,6 +88,7 @@ type StatefulGroupControl struct {
 	Env           string                  `json:"env"`
 	Replicas      int                     `json:"replicas"`
 	Members       []StatefulMemberSummary `json:"members,omitempty"`
+	Operation     *ActiveOperation        `json:"operation,omitempty"`
 	Lease         *Lease                  `json:"lease,omitempty"`
 	Version       int64                   `json:"version"`
 	UpdatedAt     string                  `json:"updated_at"`

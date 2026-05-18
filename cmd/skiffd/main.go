@@ -24,6 +24,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/objstore/memory"
 	"github.com/s1liconcow/skiff/internal/provider"
+	"github.com/s1liconcow/skiff/internal/provider/applecontainer"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
 	fakeprovider "github.com/s1liconcow/skiff/internal/provider/fake"
 	"github.com/s1liconcow/skiff/internal/skiffd"
@@ -209,6 +210,9 @@ func openServeObjectStore(cfg config.Config) (objstore.ObjectStore, error) {
 func newServeProvider(cfg config.Config, store objstore.ObjectStore) (provider.Provider, error) {
 	if strings.EqualFold(strings.TrimSpace(cfg.Provider), fakeprovider.Name) {
 		return fakeprovider.New(fakeprovider.WithStateStore(store)), nil
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.Provider), applecontainer.Name) {
+		return applecontainer.New(applecontainer.WithStateStore(store)), nil
 	}
 	return aws.NewFromConfig(cfg, aws.WithStateStore(store))
 }

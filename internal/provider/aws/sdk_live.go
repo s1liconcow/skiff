@@ -136,12 +136,14 @@ func NewSDKClients(ctx context.Context, cfg Config) (Clients, error) {
 		cloudwatchlogs.NewFromConfig(loaded),
 	)
 	return Clients{
-		AutoScaling:      manager,
-		EC2:              manager,
-		ELBV2:            manager,
-		IAM:              manager,
-		Logs:             manager,
-		ServiceResources: manager,
+		AutoScaling:        manager,
+		EC2:                manager,
+		ELBV2:              manager,
+		IAM:                manager,
+		Logs:               manager,
+		ServiceResources:   manager,
+		StatefulResources:  manager,
+		StatefulOperations: manager,
 	}, nil
 }
 

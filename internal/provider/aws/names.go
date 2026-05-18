@@ -28,6 +28,13 @@ var resourceNameLimits = map[string]int{
 	ResourceKindLogGroup:           512,
 	ResourceKindRDSInstance:        63,
 	ResourceKindSecret:             512,
+	ResourceKindEC2Instance:        255,
+	ResourceKindEBSVolume:          255,
+	ResourceKindEBSAttachment:      255,
+	ResourceKindRoute53Record:      255,
+	ResourceKindSnapshotPolicy:     255,
+	ResourceKindFencingPolicy:      255,
+	ResourceKindSecurityGroup:      255,
 	ir.ResourceKindSecurityGroup:   255,
 	ir.ResourceKindListener:        128,
 	ir.ResourceKindMetricConfig:    255,
@@ -54,6 +61,13 @@ var resourceKindSuffixes = map[string]string{
 	ResourceKindLogGroup:            "logs",
 	ResourceKindRDSInstance:         "db",
 	ResourceKindSecret:              "secret",
+	ResourceKindEC2Instance:         "member",
+	ResourceKindEBSVolume:           "volume",
+	ResourceKindEBSAttachment:       "volume-attachment",
+	ResourceKindRoute53Record:       "dns",
+	ResourceKindSnapshotPolicy:      "snapshot-policy",
+	ResourceKindFencingPolicy:       "fencing",
+	ResourceKindSecurityGroup:       "sg",
 }
 
 func NameForResource(service, env string, meta ir.ResourceMeta) (string, error) {

@@ -17,11 +17,18 @@ const (
 	ResourceKindListenerRule       = "listener-rule"
 	ResourceKindIAMInstanceProfile = "iam-instance-profile"
 	ResourceKindMetricConfig       = "metric-config"
+	ResourceKindEC2Instance        = "ec2-instance"
+	ResourceKindEBSVolume          = "ebs-volume"
+	ResourceKindEBSAttachment      = "ebs-volume-attachment"
+	ResourceKindRoute53Record      = "route53-record"
+	ResourceKindSnapshotPolicy     = "snapshot-policy"
+	ResourceKindFencingPolicy      = "fencing-policy"
 )
 
 type LowerOptions struct {
 	Region                       string
 	StateBucket                  string
+	KMSKey                       string
 	ReleaseID                    string
 	ControlKey                   string
 	LoadBalancerSecurityGroupRef string
@@ -32,21 +39,27 @@ type LowerOptions struct {
 }
 
 type ServiceResources struct {
-	Provider          string             `json:"provider"`
-	Service           string             `json:"service"`
-	Env               string             `json:"env"`
-	Region            string             `json:"region,omitempty"`
-	IAMRoles          []IAMRoleResource  `json:"iam_roles,omitempty"`
-	InstanceProfiles  []InstanceProfile  `json:"instance_profiles,omitempty"`
-	SecurityGroups    []SecurityGroupAWS `json:"security_groups,omitempty"`
-	LogGroups         []LogGroup         `json:"log_groups,omitempty"`
-	MetricConfigs     []MetricConfigAWS  `json:"metric_configs,omitempty"`
-	TargetGroups      []TargetGroupAWS   `json:"target_groups,omitempty"`
-	ListenerRules     []ListenerRule     `json:"listener_rules,omitempty"`
-	Databases         []DatabaseAWS      `json:"databases,omitempty"`
-	Secrets           []SecretAWS        `json:"secrets,omitempty"`
-	LaunchTemplates   []LaunchTemplate   `json:"launch_templates,omitempty"`
-	AutoScalingGroups []AutoScalingGroup `json:"auto_scaling_groups,omitempty"`
+	Provider          string              `json:"provider"`
+	Service           string              `json:"service"`
+	Env               string              `json:"env"`
+	Region            string              `json:"region,omitempty"`
+	IAMRoles          []IAMRoleResource   `json:"iam_roles,omitempty"`
+	InstanceProfiles  []InstanceProfile   `json:"instance_profiles,omitempty"`
+	SecurityGroups    []SecurityGroupAWS  `json:"security_groups,omitempty"`
+	LogGroups         []LogGroup          `json:"log_groups,omitempty"`
+	MetricConfigs     []MetricConfigAWS   `json:"metric_configs,omitempty"`
+	TargetGroups      []TargetGroupAWS    `json:"target_groups,omitempty"`
+	ListenerRules     []ListenerRule      `json:"listener_rules,omitempty"`
+	Databases         []DatabaseAWS       `json:"databases,omitempty"`
+	Secrets           []SecretAWS         `json:"secrets,omitempty"`
+	LaunchTemplates   []LaunchTemplate    `json:"launch_templates,omitempty"`
+	AutoScalingGroups []AutoScalingGroup  `json:"auto_scaling_groups,omitempty"`
+	StatefulMembers   []StatefulMemberAWS `json:"stateful_members,omitempty"`
+	EBSVolumes        []EBSVolume         `json:"ebs_volumes,omitempty"`
+	VolumeAttachments []VolumeAttachment  `json:"volume_attachments,omitempty"`
+	Route53Records    []Route53Record     `json:"route53_records,omitempty"`
+	SnapshotPolicies  []SnapshotPolicyAWS `json:"snapshot_policies,omitempty"`
+	FencingPolicies   []FencingPolicyAWS  `json:"fencing_policies,omitempty"`
 }
 
 type IAMRoleResource struct {
@@ -421,6 +434,9 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 			Source:            append([]ir.SourceRef(nil), asg.Meta.Source...),
 		})
 	}
+	if err := lowerStatefulResources(out, graph, opts, releaseID, controlKey); err != nil {
+		return nil, err
+	}
 	sortServiceResources(out)
 	return out, nil
 }
@@ -459,6 +475,24 @@ func (r ServiceResources) PlannedResources() []plannedAWSResource {
 	}
 	for _, item := range r.AutoScalingGroups {
 		out = append(out, plannedAWSResource{Kind: ResourceKindAutoScalingGroup, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: "Auto Scaling Group representing the service replica pool"})
+	}
+	for _, item := range r.StatefulMembers {
+		out = append(out, plannedAWSResource{Kind: ResourceKindEC2Instance, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: fmt.Sprintf("EC2 member %d for StatefulGroup identity %s", item.MemberOrdinal, item.DNSName)})
+	}
+	for _, item := range r.EBSVolumes {
+		out = append(out, plannedAWSResource{Kind: ResourceKindEBSVolume, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: fmt.Sprintf("EBS volume for member %d mounted at %s", item.MemberOrdinal, item.MountPath)})
+	}
+	for _, item := range r.VolumeAttachments {
+		out = append(out, plannedAWSResource{Kind: ResourceKindEBSAttachment, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: fmt.Sprintf("EBS volume attachment for member %d", item.MemberOrdinal)})
+	}
+	for _, item := range r.Route53Records {
+		out = append(out, plannedAWSResource{Kind: ResourceKindRoute53Record, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: fmt.Sprintf("Route53 record %s for member %d", item.DNSName, item.MemberOrdinal)})
+	}
+	for _, item := range r.SnapshotPolicies {
+		out = append(out, plannedAWSResource{Kind: ResourceKindSnapshotPolicy, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: "Snapshot policy for StatefulGroup volumes"})
+	}
+	for _, item := range r.FencingPolicies {
+		out = append(out, plannedAWSResource{Kind: ResourceKindFencingPolicy, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: fmt.Sprintf("Fencing policy for member %d", item.MemberOrdinal)})
 	}
 	return out
 }
@@ -688,6 +722,8 @@ func stateObjectResourceARNs(bucket, service, controlKey string) []string {
 	return []string{
 		fmt.Sprintf("arn:aws:s3:::%s/%s", bucket, controlKey),
 		fmt.Sprintf("arn:aws:s3:::%s/%s", bucket, releasePrefix),
+		fmt.Sprintf("arn:aws:s3:::%s/stateful/%s/control.json", bucket, service),
+		fmt.Sprintf("arn:aws:s3:::%s/stateful/%s/members/*/control.json", bucket, service),
 	}
 }
 
@@ -805,5 +841,23 @@ func sortServiceResources(resources *ServiceResources) {
 	})
 	sort.Slice(resources.AutoScalingGroups, func(i, j int) bool {
 		return resources.AutoScalingGroups[i].LogicalID < resources.AutoScalingGroups[j].LogicalID
+	})
+	sort.Slice(resources.StatefulMembers, func(i, j int) bool {
+		return resources.StatefulMembers[i].LogicalID < resources.StatefulMembers[j].LogicalID
+	})
+	sort.Slice(resources.EBSVolumes, func(i, j int) bool {
+		return resources.EBSVolumes[i].LogicalID < resources.EBSVolumes[j].LogicalID
+	})
+	sort.Slice(resources.VolumeAttachments, func(i, j int) bool {
+		return resources.VolumeAttachments[i].LogicalID < resources.VolumeAttachments[j].LogicalID
+	})
+	sort.Slice(resources.Route53Records, func(i, j int) bool {
+		return resources.Route53Records[i].LogicalID < resources.Route53Records[j].LogicalID
+	})
+	sort.Slice(resources.SnapshotPolicies, func(i, j int) bool {
+		return resources.SnapshotPolicies[i].LogicalID < resources.SnapshotPolicies[j].LogicalID
+	})
+	sort.Slice(resources.FencingPolicies, func(i, j int) bool {
+		return resources.FencingPolicies[i].LogicalID < resources.FencingPolicies[j].LogicalID
 	})
 }

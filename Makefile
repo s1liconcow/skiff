@@ -10,7 +10,7 @@ INSTALL ?= install
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 
-.PHONY: build install test readiness e2e-local e2e-apple-container e2e-aws demo-local demo-test demo-apple-container demo-apple-context demo-apple-up demo-apple-down codex-apple-sandbox codex-apple-sandbox-playwright vet fmt lint generate smoke clean
+.PHONY: build install test readiness e2e-local e2e-apple-container e2e-aws demo-local demo-test demo-apple-container demo-apple-context demo-apple-up demo-apple-down clean-apple-containers codex-apple-sandbox codex-apple-sandbox-playwright vet fmt lint generate smoke clean
 
 build:
 	mkdir -p bin
@@ -52,6 +52,9 @@ demo-apple-context demo-apple-up:
 
 demo-apple-down:
 	./demos/apple-container-down.sh
+
+clean-apple-containers:
+	./demos/apple-container-down.sh --all
 
 codex-apple-sandbox:
 	./scripts/codex-apple-sandbox.sh

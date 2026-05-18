@@ -17,18 +17,21 @@ const (
 )
 
 type Clients struct {
-	AutoScaling      AutoScalingClient
-	EC2              EC2Client
-	ELBV2            ELBV2Client
-	IAM              IAMClient
-	Logs             LogsClient
-	LogQueries       LogQueryClient
-	MetricQueries    MetricQueryClient
-	DebugSessions    DebugSessionClient
-	Rollouts         ASGRolloutClient
-	ServiceResources ServiceResourceManager
-	Databases        DatabaseClient
-	Secrets          SecretClient
+	AutoScaling        AutoScalingClient
+	EC2                EC2Client
+	ELBV2              ELBV2Client
+	IAM                IAMClient
+	Logs               LogsClient
+	LogQueries         LogQueryClient
+	MetricQueries      MetricQueryClient
+	DebugSessions      DebugSessionClient
+	Rollouts           ASGRolloutClient
+	ServiceResources   ServiceResourceManager
+	StatefulResources  StatefulResourceManager
+	StatefulOperations provider.StatefulOperations
+	Route53            Route53Client
+	Databases          DatabaseClient
+	Secrets            SecretClient
 }
 
 type AutoScalingClient interface {
@@ -49,6 +52,15 @@ type IAMClient interface {
 
 type LogsClient interface {
 	FindLogGroups(ctx context.Context, filters []TagFilter) ([]DiscoveredResource, error)
+}
+
+type StatefulResourceManager interface {
+	ApplyStatefulResource(ctx context.Context, desired DesiredServiceResource) (*AppliedResource, error)
+	FindStatefulResources(ctx context.Context, filters []TagFilter) ([]DiscoveredResource, error)
+}
+
+type Route53Client interface {
+	UpsertARecord(ctx context.Context, req Route53RecordUpdate) (*Route53RecordChange, error)
 }
 
 type DatabaseClient interface {
@@ -123,11 +135,18 @@ func (p *Provider) DiscoverService(ctx context.Context, service, env string) ([]
 		}
 		out = appendKind(out, ResourceKindLogGroup, resources)
 	}
+	if p.clients.StatefulResources != nil {
+		resources, err := p.clients.StatefulResources.FindStatefulResources(ctx, filters)
+		if err != nil {
+			return nil, ClassifyError("discover_stateful_resources", err)
+		}
+		out = append(out, resources...)
+	}
 	return out, nil
 }
 
 func (c Clients) Empty() bool {
-	return c.AutoScaling == nil && c.EC2 == nil && c.ELBV2 == nil && c.IAM == nil && c.Logs == nil && c.LogQueries == nil && c.MetricQueries == nil && c.Rollouts == nil && c.ServiceResources == nil && c.Databases == nil && c.Secrets == nil
+	return c.AutoScaling == nil && c.EC2 == nil && c.ELBV2 == nil && c.IAM == nil && c.Logs == nil && c.LogQueries == nil && c.MetricQueries == nil && c.Rollouts == nil && c.ServiceResources == nil && c.StatefulResources == nil && c.StatefulOperations == nil && c.Route53 == nil && c.Databases == nil && c.Secrets == nil
 }
 
 func appendKind(out []DiscoveredResource, kind string, resources []DiscoveredResource) []DiscoveredResource {

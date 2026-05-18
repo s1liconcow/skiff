@@ -8,6 +8,7 @@ import (
 
 	"github.com/s1liconcow/skiff/internal/compiler"
 	"github.com/s1liconcow/skiff/internal/ir"
+	"github.com/s1liconcow/skiff/internal/provider"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
 	"github.com/s1liconcow/skiff/internal/spec"
 )
@@ -230,6 +231,131 @@ func TestProviderPlanUsesConcreteAWSLowering(t *testing.T) {
 	}
 }
 
+func TestLowerStatefulGroupAWSResources(t *testing.T) {
+	graph := compileSpec(t, statefulGroupSpec)
+	lowered, err := aws.LowerService(graph, aws.LowerOptions{
+		Region:      "us-west-2",
+		StateBucket: "s3://skiff-state-prod",
+		KMSKey:      "alias/skiff-stateful",
+		VPCID:       "vpc-123",
+		SubnetIDs:   []string{"subnet-a", "subnet-b"},
+		AMIID:       "ami-123",
+	})
+	if err != nil {
+		t.Fatalf("lower stateful group: %v", err)
+	}
+	assertLen(t, "iam roles", lowered.IAMRoles, 1)
+	assertLen(t, "instance profiles", lowered.InstanceProfiles, 1)
+	assertLen(t, "security groups", lowered.SecurityGroups, 1)
+	assertLen(t, "log groups", lowered.LogGroups, 1)
+	assertLen(t, "metric configs", lowered.MetricConfigs, 1)
+	assertLen(t, "target groups", lowered.TargetGroups, 1)
+	assertLen(t, "launch templates", lowered.LaunchTemplates, 1)
+	assertLen(t, "stateful members", lowered.StatefulMembers, 3)
+	assertLen(t, "ebs volumes", lowered.EBSVolumes, 3)
+	assertLen(t, "volume attachments", lowered.VolumeAttachments, 3)
+	assertLen(t, "route53 records", lowered.Route53Records, 3)
+	assertLen(t, "snapshot policies", lowered.SnapshotPolicies, 1)
+	assertLen(t, "fencing policies", lowered.FencingPolicies, 3)
+	if lowered.EBSVolumes[0].DeleteOnDestroy || !lowered.EBSVolumes[0].Encrypted || lowered.EBSVolumes[0].KMSKeyID != "alias/skiff-stateful" {
+		t.Fatalf("stateful EBS volume missing safe retention/encryption defaults: %+v", lowered.EBSVolumes[0])
+	}
+	if lowered.Route53Records[0].DNSName != "orders-stream-0.state.prod.internal.example.com" || lowered.Route53Records[0].HostedZoneRef == "" {
+		t.Fatalf("stateful DNS record missing stable identity: %+v", lowered.Route53Records[0])
+	}
+	if lowered.FencingPolicies[0].VolumeRef == "" || !lowered.FencingPolicies[0].RequiresInstanceTermination || !lowered.FencingPolicies[0].RequiresVolumeDetach {
+		t.Fatalf("fencing policy missing provider fence requirements: %+v", lowered.FencingPolicies[0])
+	}
+	for _, resource := range lowered.PlannedResources() {
+		if limit := aws.ResourceNameLimit(resource.Kind); limit > 0 && len(resource.Name) > limit {
+			t.Fatalf("%s name exceeds limit %d: %q", resource.Kind, limit, resource.Name)
+		}
+	}
+	if err := aws.ValidateLiveApplyInputs(lowered); err != nil {
+		t.Fatalf("stateful live apply inputs should validate with explicit inputs: %v", err)
+	}
+}
+
+func TestProviderPlanStatefulGroupIncludesAWSPrimitives(t *testing.T) {
+	graph := compileSpec(t, statefulGroupSpec)
+	p, err := aws.New(aws.Config{Region: "us-west-2", StateBucket: "s3://skiff-state-prod"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := p.Plan(context.Background(), graph)
+	if err != nil {
+		t.Fatalf("plan stateful group: %v", err)
+	}
+	wantKinds := map[string]bool{
+		aws.ResourceKindIAMRole:            false,
+		aws.ResourceKindIAMInstanceProfile: false,
+		aws.ResourceKindSecurityGroup:      false,
+		aws.ResourceKindLogGroup:           false,
+		aws.ResourceKindMetricConfig:       false,
+		aws.ResourceKindTargetGroup:        false,
+		aws.ResourceKindLaunchTemplate:     false,
+		aws.ResourceKindEC2Instance:        false,
+		aws.ResourceKindEBSVolume:          false,
+		aws.ResourceKindEBSAttachment:      false,
+		aws.ResourceKindRoute53Record:      false,
+		aws.ResourceKindSnapshotPolicy:     false,
+		aws.ResourceKindFencingPolicy:      false,
+	}
+	for _, resource := range plan.Resources {
+		if _, ok := wantKinds[resource.Kind]; ok {
+			wantKinds[resource.Kind] = true
+		}
+		if resource.Action != provider.ActionCreate || resource.Fingerprint == "" || len(resource.Desired) == 0 {
+			t.Fatalf("stateful planned resource missing deterministic desired body: %+v", resource)
+		}
+		if resource.Tags[ir.TagStatefulGroup] != "orders-stream" {
+			t.Fatalf("stateful planned resource missing group tag: %+v", resource)
+		}
+	}
+	for kind, found := range wantKinds {
+		if !found {
+			t.Fatalf("stateful plan missing kind %s: %+v", kind, plan.Resources)
+		}
+	}
+}
+
+func TestStatefulLiveApplyValidationReportsMissingInputs(t *testing.T) {
+	graph := compileSpec(t, statefulGroupSpecNoDNSZone)
+	p, err := aws.New(aws.Config{
+		Region:      "us-west-2",
+		StateBucket: "s3://skiff-state-prod",
+		LiveApply:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Plan(context.Background(), graph)
+	var validation aws.LiveApplyValidationError
+	if !errors.As(err, &validation) {
+		t.Fatalf("plan error = %T %[1]v, want LiveApplyValidationError", err)
+	}
+	want := map[string]bool{
+		"aws_vpc_id":                   false,
+		"aws_subnet_ids":               false,
+		"aws_ami_id":                   false,
+		"kms_key":                      false,
+		"stateful.identity.dnsZoneRef": false,
+	}
+	for _, missing := range validation.Missing {
+		if _, ok := want[missing.Field]; ok {
+			want[missing.Field] = true
+		}
+		if missing.Kind == "" || missing.LogicalID == "" || missing.Reason == "" {
+			t.Fatalf("missing stateful input should be actionable: %+v", missing)
+		}
+	}
+	for field, found := range want {
+		if !found {
+			t.Fatalf("missing field %s not reported: %+v", field, validation.Missing)
+		}
+	}
+}
+
 func assertPolicyIsLeastPrivilege(t *testing.T, role aws.IAMRoleResource) {
 	t.Helper()
 	for _, stmt := range role.InlinePolicy.Statement {
@@ -243,9 +369,11 @@ func assertPolicyIsLeastPrivilege(t *testing.T, role aws.IAMRoleResource) {
 	for _, stmt := range role.InlinePolicy.Statement {
 		if stmt.Sid == "ReadServiceState" {
 			foundState = true
-			if len(stmt.Resource) != 2 ||
+			if len(stmt.Resource) != 4 ||
 				stmt.Resource[0] != "arn:aws:s3:::skiff-state-prod/services/payments-api/control.json" ||
-				stmt.Resource[1] != "arn:aws:s3:::skiff-state-prod/services/payments-api/releases/*" {
+				stmt.Resource[1] != "arn:aws:s3:::skiff-state-prod/services/payments-api/releases/*" ||
+				stmt.Resource[2] != "arn:aws:s3:::skiff-state-prod/stateful/payments-api/control.json" ||
+				stmt.Resource[3] != "arn:aws:s3:::skiff-state-prod/stateful/payments-api/members/*/control.json" {
 				t.Fatalf("state policy is not scoped to service state: %+v", stmt)
 			}
 		}
@@ -324,6 +452,83 @@ secrets:
     ref: aws-secretsmanager://arn:aws:secretsmanager:us-west-2:123456789012:secret:payments/db-password
   - name: api-token
     ref: aws-ssm://arn:aws:ssm:us-west-2:123456789012:parameter/payments/api-token
+`
+
+const statefulGroupSpec = `
+apiVersion: skiff.dev/v1alpha1
+kind: StatefulGroup
+metadata:
+  name: orders-stream
+  env: prod
+stateful:
+  replicas: 3
+  members:
+    - ordinal: 0
+      zone: us-west-2a
+      dnsName: orders-stream-0.state.prod.internal.example.com
+    - ordinal: 1
+      zone: us-west-2b
+      dnsName: orders-stream-1.state.prod.internal.example.com
+    - ordinal: 2
+      zone: us-west-2c
+      dnsName: orders-stream-2.state.prod.internal.example.com
+  volume:
+    size: 250Gi
+    type: gp3
+    mountPath: /var/lib/nats
+    encrypted: true
+  identity:
+    dnsZoneRef: route53://Z0123456789EXAMPLE/prod.internal.example.com
+    hostnamePrefix: orders-stream
+  recipe:
+    name: nats-jetstream
+    config:
+      artifact:
+        type: oci
+        ref: docker.io/library/nats:2.14.0@sha256:ddb480f4b97d90f183123e96bbc7c96ab2a126883f7a380531cc208fc8ba9ca7
+      runtime:
+        command:
+          - /usr/local/bin/nats-server
+          - --config
+          - /etc/nats/server.conf
+        ports:
+          client: 4222
+          cluster: 6222
+          monitoring: 8222
+        health:
+          path: /healthz
+          port: 8222
+        metrics:
+          path: /metrics
+          port: 8222
+      snapshots:
+        enabled: true
+        interval: 15m
+        retention: 7d
+  update:
+    strategy: ordered
+`
+
+const statefulGroupSpecNoDNSZone = `
+apiVersion: skiff.dev/v1alpha1
+kind: StatefulGroup
+metadata:
+  name: ledger
+  env: prod
+stateful:
+  replicas: 1
+  volume:
+    size: 10Gi
+    encrypted: true
+  recipe:
+    name: sqlite
+    config:
+      runtime:
+        health:
+          path: /healthz
+          port: 9000
+  update:
+    strategy: ordered
 `
 
 const minimalServiceSpec = `

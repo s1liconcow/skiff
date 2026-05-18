@@ -63,6 +63,7 @@ type ServiceStatus = servicestatus.Service
 type Freshness = servicestatus.Freshness
 type Finding = servicestatus.Finding
 type DependencyStatus = servicestatus.DependencyStatus
+type ResourceSummary = servicestatus.ResourceSummary
 
 type DoctorOptions struct {
 	Service string

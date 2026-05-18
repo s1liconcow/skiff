@@ -18,6 +18,7 @@ const Name = "aws"
 type Config struct {
 	Region         string
 	StateBucket    string
+	KMSKey         string
 	Endpoint       string
 	ForcePathStyle bool
 	Credentials    baseaws.Credentials
@@ -61,6 +62,7 @@ func NewFromConfig(cfg config.Config, opts ...Option) (*Provider, error) {
 	awsCfg := Config{
 		Region:      cfg.Region,
 		StateBucket: cfg.StateBucket,
+		KMSKey:      cfg.KMSKey,
 		LiveApply:   cfg.AWSLiveApply,
 		Live: LiveConfig{
 			VPCID:                        cfg.AWSVPCID,
@@ -123,6 +125,7 @@ func (p *Provider) lowerOptions() LowerOptions {
 	return LowerOptions{
 		Region:                       p.cfg.Region,
 		StateBucket:                  p.cfg.StateBucket,
+		KMSKey:                       p.cfg.KMSKey,
 		VPCID:                        p.cfg.Live.VPCID,
 		SubnetIDs:                    append([]string(nil), p.cfg.Live.SubnetIDs...),
 		AMIID:                        p.cfg.Live.AMIID,
@@ -178,7 +181,7 @@ func (p *Provider) Plan(ctx context.Context, graph *ir.Graph) (*provider.Plan, e
 	changes := make([]provider.PlannedChange, 0, len(desired))
 	for _, resource := range desired {
 		var resourcePlan *ResourcePlan
-		if p.clients.ServiceResources != nil {
+		if p.clients.ServiceResources != nil && !isStatefulPlanKind(resource.Kind) {
 			op := "plan_" + resource.Kind
 			if err := retryProviderCall(ctx, op, func() error {
 				var planErr error
@@ -210,7 +213,7 @@ func (p *Provider) Apply(ctx context.Context, plan *provider.Plan) (*provider.Ap
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if p.clients.ServiceResources == nil {
+	if p.clients.ServiceResources == nil && p.clients.StatefulResources == nil && p.clients.Route53 == nil {
 		if err := validatePlanForApply(plan); err != nil {
 			return nil, provider.Unsupported(Name, "apply")
 		}
@@ -286,12 +289,18 @@ func (p *Provider) Apply(ctx context.Context, plan *provider.Plan) (*provider.Ap
 				Summary:  "unsupported planned action " + change.Action,
 			}
 		}
-		desired := desiredFromPlannedChange(change)
 		var applied *AppliedResource
 		op := "apply_" + change.Kind
 		if err := retryProviderCall(ctx, op, func() error {
 			var applyErr error
-			applied, applyErr = p.clients.ServiceResources.ApplyResource(ctx, desired)
+			if isStatefulPlanKind(change.Kind) {
+				applied, applyErr = p.applyStatefulResource(ctx, plan, change)
+			} else {
+				if p.clients.ServiceResources == nil {
+					return provider.Unsupported(Name, "apply "+change.Kind)
+				}
+				applied, applyErr = p.clients.ServiceResources.ApplyResource(ctx, desiredFromPlannedChange(change))
+			}
 			return applyErr
 		}); err != nil {
 			return nil, err

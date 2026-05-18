@@ -655,6 +655,27 @@ func graphMetas(graph *ir.Graph) []ir.ResourceMeta {
 	for _, item := range graph.Resources.RuntimeManifests {
 		metas = append(metas, item.Meta)
 	}
+	for _, item := range graph.Resources.StatefulGroups {
+		metas = append(metas, item.Meta)
+	}
+	for _, item := range graph.Resources.StatefulMembers {
+		metas = append(metas, item.Meta)
+	}
+	for _, item := range graph.Resources.StatefulVolumes {
+		metas = append(metas, item.Meta)
+	}
+	for _, item := range graph.Resources.StatefulDNS {
+		metas = append(metas, item.Meta)
+	}
+	for _, item := range graph.Resources.StatefulRecipes {
+		metas = append(metas, item.Meta)
+	}
+	for _, item := range graph.Resources.SnapshotPolicies {
+		metas = append(metas, item.Meta)
+	}
+	for _, item := range graph.Resources.UpdatePolicies {
+		metas = append(metas, item.Meta)
+	}
 	out := metas[:0]
 	for _, meta := range metas {
 		if strings.TrimSpace(meta.Kind) == "" || strings.TrimSpace(firstNonEmpty(meta.LogicalID, meta.Name)) == "" {

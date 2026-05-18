@@ -37,6 +37,26 @@ func TestRunnerPolicyCannotWriteStateObjects(t *testing.T) {
 	}
 }
 
+func TestStatefulPoliciesAreLeastPrivilege(t *testing.T) {
+	runner := policy.RunnerPolicy("skiff-state-prod", "alias/skiff-prod-state")
+	if !statementHasResource(runner, "ReadServiceControlAndReleases", "arn:aws:s3:::skiff-state-prod/stateful/*/members/*/control.json") {
+		t.Fatalf("runner policy must read stateful member controls: %+v", runner.Statement)
+	}
+
+	deployer := policy.DeployerPolicy("skiff-state-prod", "alias/skiff-prod-state")
+	for _, want := range []struct {
+		sid      string
+		resource string
+	}{
+		{sid: "CreateImmutableState", resource: "arn:aws:s3:::skiff-state-prod/stateful/*/members/*/control.json"},
+		{sid: "CASControlState", resource: "arn:aws:s3:::skiff-state-prod/stateful/*/members/*/control.json"},
+	} {
+		if !statementHasResource(deployer, want.sid, want.resource) {
+			t.Fatalf("deployer policy %s missing %s: %+v", want.sid, want.resource, deployer.Statement)
+		}
+	}
+}
+
 func TestLinterBlocksDangerousPolicyRegressions(t *testing.T) {
 	doc := policy.Document{
 		Version: "2012-10-17",
@@ -113,6 +133,25 @@ func hasAction(value any, want string) bool {
 		for _, item := range typed {
 			if item == want {
 				return true
+			}
+		}
+	}
+	return false
+}
+
+func statementHasResource(doc policy.Document, sid, want string) bool {
+	for _, statement := range doc.Statement {
+		if statement.Sid != sid {
+			continue
+		}
+		switch resources := statement.Resource.(type) {
+		case string:
+			return resources == want
+		case []string:
+			for _, resource := range resources {
+				if resource == want {
+					return true
+				}
 			}
 		}
 	}

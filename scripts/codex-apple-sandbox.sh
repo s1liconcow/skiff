@@ -30,7 +30,17 @@ Options:
                          Default: ${CODEX_PLAYWRIGHT_CACHE:-$HOME/.cache/skiff-codex-playwright}
   --cap-add CAP          Add a Linux capability. Repeatable. Not needed for
                          trusted headless Playwright's default Chromium path.
+  --codex-tools-cache DIR
+                         Host directory for the Linux Codex CLI install cache.
+                         Default: ${CODEX_TOOLS_CACHE:-$HOME/.cache/skiff-codex-tools}
+  --codex-package PKG    npm package to install when codex is missing.
+                         Default: ${CODEX_NPM_PACKAGE:-@openai/codex}
+  --no-codex-bootstrap   Do not auto-install Codex CLI in the sandbox shell.
   --mount-gh             Bind-mount ~/.config/gh read-only for HTTPS gh auth.
+  --mount-ssh-dir        Copy ~/.ssh into a short-lived temp directory and
+                         mount that at /root/.ssh. This exposes private keys to
+                         the sandbox; use only when SSH agent forwarding is not
+                         enough for GitHub pushes.
   --no-gitconfig         Do not bind-mount ~/.gitconfig read-only.
   --no-ssh-agent         Do not forward the host SSH agent.
   --no-virtualization    Do not expose nested virtualization.
@@ -40,6 +50,8 @@ Options:
 Environment:
   CODEX_SANDBOX_IMAGE    Overrides the default image.
   CODEX_SANDBOX_NAME     Overrides the default container name.
+  CODEX_NPM_PACKAGE      npm package used for Codex CLI bootstrap.
+  CODEX_TOOLS_CACHE      Host cache for the Linux Codex CLI install.
   CODEX_HOME             Host Codex home to mount.
 
 Example:
@@ -110,12 +122,15 @@ codex_home="${CODEX_HOME:-$HOME/.codex}"
 container_workdir="/workspace/skiff"
 container_codex_home="/root/.codex"
 container_playwright_cache="/ms-playwright"
+container_codex_tools="/opt/skiff-codex-tools"
 shell_path="/bin/bash"
 mount_gh=0
+mount_ssh_dir=0
 mount_gitconfig=1
 forward_ssh=1
 enable_virtualization=1
 enable_playwright=0
+bootstrap_codex=1
 dry_run=0
 custom_command=()
 extra_env=()
@@ -124,6 +139,8 @@ cap_adds=()
 memory_limit=""
 cpu_limit=""
 playwright_cache="${CODEX_PLAYWRIGHT_CACHE:-$HOME/.cache/skiff-codex-playwright}"
+codex_tools_cache="${CODEX_TOOLS_CACHE:-$HOME/.cache/skiff-codex-tools}"
+codex_npm_package="${CODEX_NPM_PACKAGE:-@openai/codex}"
 temp_dirs=()
 gitconfig_mount_dir=""
 ssh_mount_dir=""
@@ -207,8 +224,26 @@ while [[ $# -gt 0 ]]; do
       cap_adds+=("$2")
       shift 2
       ;;
+    --codex-tools-cache)
+      [[ $# -ge 2 ]] || { usage; exit 1; }
+      codex_tools_cache="$2"
+      shift 2
+      ;;
+    --codex-package)
+      [[ $# -ge 2 ]] || { usage; exit 1; }
+      codex_npm_package="$2"
+      shift 2
+      ;;
+    --no-codex-bootstrap)
+      bootstrap_codex=0
+      shift
+      ;;
     --mount-gh)
       mount_gh=1
+      shift
+      ;;
+    --mount-ssh-dir)
+      mount_ssh_dir=1
       shift
       ;;
     --no-gitconfig)
@@ -260,12 +295,39 @@ if [[ "$enable_playwright" -eq 1 && "$dry_run" -eq 0 ]]; then
   mkdir -p "$playwright_cache"
 fi
 
+if [[ "$bootstrap_codex" -eq 1 && "$dry_run" -eq 0 ]]; then
+  mkdir -p "$codex_tools_cache"
+fi
+
 if [[ "$mount_gitconfig" -eq 1 && -f "$HOME/.gitconfig" ]]; then
   stage_file_dir "$HOME/.gitconfig" ".gitconfig" 0444
   gitconfig_mount_dir="$staged_file_dir"
 fi
 
-if [[ "$forward_ssh" -eq 1 && -f "$HOME/.ssh/known_hosts" ]]; then
+if [[ "$mount_ssh_dir" -eq 1 ]]; then
+  if [[ ! -d "$HOME/.ssh" ]]; then
+    printf 'SSH directory not found: %s\n' "$HOME/.ssh" >&2
+    exit 1
+  fi
+  ssh_mount_dir="$(mktemp -d "${TMPDIR:-/tmp}/skiff-codex-sandbox-ssh.XXXXXX")"
+  temp_dirs+=("$ssh_mount_dir")
+  while IFS= read -r -d '' ssh_path; do
+    rel_path="${ssh_path#"$HOME/.ssh"}"
+    rel_path="${rel_path#/}"
+    if [[ -z "$rel_path" ]]; then
+      continue
+    fi
+    if [[ -d "$ssh_path" ]]; then
+      mkdir -p "$ssh_mount_dir/$rel_path"
+    elif [[ -f "$ssh_path" ]]; then
+      mkdir -p "$(dirname "$ssh_mount_dir/$rel_path")"
+      cp "$ssh_path" "$ssh_mount_dir/$rel_path"
+    fi
+  done < <(find "$HOME/.ssh" \( -type d -o -type f \) -print0)
+  chmod 0700 "$ssh_mount_dir"
+  find "$ssh_mount_dir" -type d -exec chmod 0700 {} +
+  find "$ssh_mount_dir" -type f -exec chmod 0600 {} +
+elif [[ "$forward_ssh" -eq 1 && -f "$HOME/.ssh/known_hosts" ]]; then
   ssh_mount_dir="$(mktemp -d "${TMPDIR:-/tmp}/skiff-codex-sandbox-ssh.XXXXXX")"
   temp_dirs+=("$ssh_mount_dir")
   cp "$HOME/.ssh/known_hosts" "$ssh_mount_dir/known_hosts"
@@ -282,6 +344,8 @@ cmd=(
   --workdir "$container_workdir"
   --env "CODEX_HOME=$container_codex_home"
   --env "SKIFF_CODEX_SANDBOX=apple-container"
+  --env "SKIFF_SANDBOX_SHELL=$shell_path"
+  --env "SKIFF_MOUNT_SSH_DIR=$mount_ssh_dir"
   --mount "type=bind,source=$repo_dir,target=$container_workdir"
   --mount "type=bind,source=$codex_home,target=$container_codex_home"
 )
@@ -327,16 +391,29 @@ if [[ "$enable_playwright" -eq 1 ]]; then
   )
 fi
 
+if [[ "$bootstrap_codex" -eq 1 ]]; then
+  cmd+=(
+    --env "SKIFF_CODEX_TOOLS_DIR=$container_codex_tools"
+    --env "SKIFF_CODEX_NPM_PACKAGE=$codex_npm_package"
+    --mount "type=bind,source=$codex_tools_cache,target=$container_codex_tools"
+  )
+fi
+
 if [[ "$forward_ssh" -eq 1 ]]; then
   cmd+=(
     --ssh
-    --env "GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=accept-new"
+    --env "GIT_SSH_COMMAND=ssh -o IgnoreUnknown=UseKeychain -o StrictHostKeyChecking=accept-new"
   )
   if [[ -n "$ssh_mount_dir" ]]; then
     cmd+=(--mount "type=bind,source=$ssh_mount_dir,target=/root/.ssh")
   else
     cmd+=(--tmpfs /root/.ssh)
   fi
+elif [[ -n "$ssh_mount_dir" ]]; then
+  cmd+=(
+    --env "GIT_SSH_COMMAND=ssh -o IgnoreUnknown=UseKeychain -o StrictHostKeyChecking=accept-new"
+    --mount "type=bind,source=$ssh_mount_dir,target=/root/.ssh"
+  )
 fi
 
 if [[ -n "$gitconfig_mount_dir" ]]; then
@@ -354,8 +431,46 @@ if [[ "$mount_gh" -eq 1 ]]; then
   cmd+=(--mount "type=bind,source=$HOME/.config/gh,target=/root/.config/gh,readonly")
 fi
 
-if [[ "${#custom_command[@]}" -gt 0 ]]; then
+codex_bootstrap_script='
+export PATH="${SKIFF_CODEX_TOOLS_DIR}/bin:${PATH}"
+mkdir -p "${SKIFF_CODEX_TOOLS_DIR}"
+if ! command -v codex >/dev/null 2>&1; then
+  if command -v npm >/dev/null 2>&1; then
+    printf "Codex CLI not found; installing %s into %s\n" "${SKIFF_CODEX_NPM_PACKAGE}" "${SKIFF_CODEX_TOOLS_DIR}" >&2
+    if ! npm install -g --prefix "${SKIFF_CODEX_TOOLS_DIR}" "${SKIFF_CODEX_NPM_PACKAGE}"; then
+      printf "Codex CLI install failed. Use --image with codex preinstalled or install npm in the image.\n" >&2
+      if [ "$#" -gt 0 ]; then
+        exit 127
+      fi
+    fi
+  else
+    printf "Codex CLI not found and npm is unavailable. Use --image with codex preinstalled.\n" >&2
+    if [ "$#" -gt 0 ]; then
+      exit 127
+    fi
+  fi
+fi
+if [ "${SKIFF_MOUNT_SSH_DIR:-0}" != "1" ] && [ -n "${SSH_AUTH_SOCK:-}" ] && command -v ssh-add >/dev/null 2>&1; then
+  ssh_agent_state="$(ssh-add -l 2>&1 || true)"
+  case "$ssh_agent_state" in
+    *"The agent has no identities"*|*"no identities"*)
+      printf "Warning: forwarded SSH agent has no identities; git@github.com pushes may fail.\n" >&2
+      printf "Load a key into the host agent before launching, or rerun with --mount-ssh-dir to expose a temp copy of ~/.ssh.\n" >&2
+      ;;
+  esac
+fi
+if [ "$#" -gt 0 ]; then
+  exec "$@"
+fi
+exec "${SKIFF_SANDBOX_SHELL}" -l
+'
+
+if [[ "$bootstrap_codex" -eq 1 && "${#custom_command[@]}" -gt 0 ]]; then
+  cmd+=(--entrypoint "$shell_path" "$image" -lc "$codex_bootstrap_script" skiff-codex-sandbox "${custom_command[@]}")
+elif [[ "${#custom_command[@]}" -gt 0 ]]; then
   cmd+=("$image" "${custom_command[@]}")
+elif [[ "$bootstrap_codex" -eq 1 ]]; then
+  cmd+=(--entrypoint "$shell_path" "$image" -lc "$codex_bootstrap_script" skiff-codex-sandbox)
 else
   cmd+=(--entrypoint "$shell_path" "$image" -l)
 fi
@@ -368,8 +483,14 @@ fi
 printf 'Launching %s with repo mounted at %s\n' "$name" "$container_workdir" >&2
 printf 'Codex home is mounted at %s; nested virtualization: %s; SSH agent: %s\n' \
   "$container_codex_home" "$enable_virtualization" "$forward_ssh" >&2
+if [[ "$mount_ssh_dir" -eq 1 ]]; then
+  printf 'A temp copy of ~/.ssh is mounted at /root/.ssh for SSH remotes\n' >&2
+fi
 if [[ "$enable_playwright" -eq 1 ]]; then
   printf 'Playwright browser cache is mounted at %s; /dev/shm tmpfs enabled\n' \
     "$container_playwright_cache" >&2
+fi
+if [[ "$bootstrap_codex" -eq 1 ]]; then
+  printf 'Codex CLI bootstrap cache is mounted at %s\n' "$container_codex_tools" >&2
 fi
 "${cmd[@]}"

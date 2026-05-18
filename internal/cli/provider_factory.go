@@ -6,6 +6,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/config"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/provider"
+	"github.com/s1liconcow/skiff/internal/provider/applecontainer"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
 	fakeprovider "github.com/s1liconcow/skiff/internal/provider/fake"
 )
@@ -17,6 +18,13 @@ func newCLIProvider(cfg config.Config, store objstore.ObjectStore) (provider.Pro
 			opts = append(opts, fakeprovider.WithStateStore(store))
 		}
 		return fakeprovider.New(opts...), nil
+	}
+	if isAppleContainerProvider(cfg.Provider) {
+		opts := []applecontainer.Option{}
+		if store != nil {
+			opts = append(opts, applecontainer.WithStateStore(store))
+		}
+		return applecontainer.New(opts...), nil
 	}
 	opts := []aws.Option{}
 	if store != nil {
@@ -31,4 +39,12 @@ func newCLIProviderNoStore(cfg config.Config) (provider.Provider, error) {
 
 func isFakeProvider(name string) bool {
 	return strings.EqualFold(strings.TrimSpace(name), fakeprovider.Name)
+}
+
+func isAppleContainerProvider(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), applecontainer.Name)
+}
+
+func isLocalEphemeralSignerProvider(name string) bool {
+	return isFakeProvider(name) || isAppleContainerProvider(name)
 }

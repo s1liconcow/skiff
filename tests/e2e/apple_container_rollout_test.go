@@ -26,6 +26,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/objstore/s3"
 	"github.com/s1liconcow/skiff/internal/ops"
+	"github.com/s1liconcow/skiff/internal/provider/applecontainer"
 	fakeprovider "github.com/s1liconcow/skiff/internal/provider/fake"
 	"github.com/s1liconcow/skiff/internal/runner"
 	"github.com/s1liconcow/skiff/internal/security/signing"
@@ -67,6 +68,7 @@ func TestAppleContextArtifactsRenderFilledConfigAndEnv(t *testing.T) {
 		"name: local-apple-vms",
 		"name: local-apple-skiffd-server",
 		"name: local-apple-skiffd",
+		"provider: apple-container",
 		"state: \"s3://skiff-demo-bucket\"",
 		"apiURL: \"http://127.0.0.1:18080\"",
 	} {
@@ -418,27 +420,27 @@ contexts:
     context:
       mode: direct
       env: prod
-      provider: fake
+      provider: %s
       region: local
       state: %s
   - name: %s
     context:
       mode: skiffd
       env: prod
-      provider: fake
+      provider: %s
       region: local
       state: %s
-`, appleDirectContext, appleDirectContext, strconv.Quote(stateURI), appleSkiffdServeContext, strconv.Quote(stateURI))
+`, appleDirectContext, appleDirectContext, applecontainer.Name, strconv.Quote(stateURI), appleSkiffdServeContext, applecontainer.Name, strconv.Quote(stateURI))
 	if apiURL != "" {
 		body += fmt.Sprintf(`  - name: %s
     context:
       mode: api
       env: prod
-      provider: fake
+      provider: %s
       region: local
       state: %s
       apiURL: %s
-`, appleAPIContext, strconv.Quote(stateURI), strconv.Quote(apiURL))
+`, appleAPIContext, applecontainer.Name, strconv.Quote(stateURI), strconv.Quote(apiURL))
 	}
 	return body
 }

@@ -24,12 +24,19 @@ codex --dangerously-bypass-approvals-and-sandbox -C /workspace/skiff \
 - The Skiff git repository is mounted writable at `/workspace/skiff`.
 - `${CODEX_HOME:-$HOME/.codex}` is mounted writable at `/root/.codex` so Codex
   auth, config, sessions, and logs are available.
+- A Linux Codex CLI install cache is mounted at `/opt/skiff-codex-tools`.
+  When `codex` is not already on `PATH`, the launcher installs
+  `${CODEX_NPM_PACKAGE:-@openai/codex}` there with npm before opening the shell.
 - `~/.gitconfig` is copied into a short-lived temp directory and mounted
   read-only when it exists. `GIT_CONFIG_GLOBAL` points Git at that staged file.
 - The host SSH agent is forwarded by default with Apple Container `--ssh`.
 - `/root/.ssh` is a guest-only temp directory. If `~/.ssh/known_hosts` exists,
   it is copied into that directory first; SSH uses
   `StrictHostKeyChecking=accept-new`.
+- If the forwarded host agent has no identities, pass `--mount-ssh-dir` to copy
+  `~/.ssh` into a short-lived temp directory and mount that at `/root/.ssh`.
+  This exposes private keys to the sandbox, so use it only when needed for SSH
+  remotes such as `git@github.com:...`.
 - Nested virtualization is enabled by default with `--virtualization`, allowing
   container runtimes inside the guest when the image supports them.
 - Outbound networking uses the container runtime default network, which is
@@ -42,11 +49,30 @@ tokens. Use `--mount-gh` when HTTPS `gh` auth is needed:
 scripts/codex-apple-sandbox.sh --mount-gh
 ```
 
+For SSH GitHub remotes, prefer loading a key into the host agent before
+starting the sandbox:
+
+```bash
+ssh-add -l
+ssh-add ~/.ssh/id_ed25519
+make codex-apple-sandbox
+```
+
+If the host agent cannot provide a usable key, use the explicit private-key
+mount path:
+
+```bash
+scripts/codex-apple-sandbox.sh --mount-ssh-dir
+```
+
 ## Useful Options
 
 ```bash
 scripts/codex-apple-sandbox.sh --dry-run
 scripts/codex-apple-sandbox.sh --image ghcr.io/openai/codex-universal:latest
+scripts/codex-apple-sandbox.sh --codex-package @openai/codex@latest
+scripts/codex-apple-sandbox.sh --no-codex-bootstrap
+scripts/codex-apple-sandbox.sh --mount-ssh-dir
 scripts/codex-apple-sandbox.sh --no-virtualization
 scripts/codex-apple-sandbox.sh --no-ssh-agent
 scripts/codex-apple-sandbox.sh -- --version
@@ -54,6 +80,10 @@ scripts/codex-apple-sandbox.sh -- --version
 
 Override the image with `CODEX_SANDBOX_IMAGE` if you need a custom toolchain or
 a preinstalled nested container runtime.
+
+The first run may need network access to install the Linux Codex CLI. The
+install is cached under `${CODEX_TOOLS_CACHE:-$HOME/.cache/skiff-codex-tools}`
+and reused by later sandbox shells.
 
 ## Playwright Browser Tests
 

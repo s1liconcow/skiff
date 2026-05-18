@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"reflect"
+	"strconv"
 	"testing"
 
 	sdka "github.com/aws/aws-sdk-go-v2/aws"
@@ -157,6 +158,114 @@ func TestSDKPlanResourceUsesFingerprintTag(t *testing.T) {
 	}
 }
 
+func TestSDKApplyStatefulEC2AndEBSResources(t *testing.T) {
+	fake := &fakeEC2Live{}
+	manager := NewSDKServiceResourceManager(nil, fake, nil, nil, nil)
+	manager.remember(sdkResourceRef{Kind: ResourceKindLaunchTemplate, LogicalID: "stateful-launch-template:orders-stream", ProviderID: "lt-stateful"})
+
+	volume := EBSVolume{
+		LogicalID:        "stateful-volume:orders-stream:0",
+		Name:             "skiff-prod-orders-volume-0",
+		MemberOrdinal:    0,
+		AvailabilityZone: "us-west-2a",
+		Size:             "20Gi",
+		VolumeType:       "gp3",
+		Encrypted:        true,
+		KMSKeyID:         "alias/skiff-stateful",
+		Tags:             map[string]string{"skiff.dev/service": "orders-stream", "skiff.dev/env": "prod"},
+	}
+	volumeDesired, err := desiredServiceResource(ResourceKindEBSVolume, volume.LogicalID, volume.Name, volume.Tags, "volume", volume)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appliedVolume, err := manager.ApplyStatefulResource(context.Background(), volumeDesired)
+	if err != nil {
+		t.Fatalf("ApplyStatefulResource(volume): %v", err)
+	}
+	if appliedVolume.ProviderID != "vol-new" || fake.createdVolume == nil || sdka.ToInt32(fake.createdVolume.Size) != 20 || sdka.ToString(fake.createdVolume.KmsKeyId) != "alias/skiff-stateful" {
+		t.Fatalf("unexpected volume apply: applied=%+v input=%+v", appliedVolume, fake.createdVolume)
+	}
+
+	member := StatefulMemberAWS{
+		LogicalID:         "stateful-member:orders-stream:0",
+		Name:              "skiff-prod-orders-member-0",
+		MemberOrdinal:     0,
+		Zone:              "us-west-2a",
+		LaunchTemplateRef: "stateful-launch-template:orders-stream",
+		SubnetIDs:         []string{"subnet-a"},
+		Tags:              map[string]string{"skiff.dev/service": "orders-stream", "skiff.dev/env": "prod"},
+	}
+	memberDesired, err := desiredServiceResource(ResourceKindEC2Instance, member.LogicalID, member.Name, member.Tags, "member", member)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appliedMember, err := manager.ApplyStatefulResource(context.Background(), memberDesired)
+	if err != nil {
+		t.Fatalf("ApplyStatefulResource(member): %v", err)
+	}
+	if appliedMember.ProviderID != "i-new" || len(fake.runInstances) != 1 || sdka.ToString(fake.runInstances[0].LaunchTemplate.LaunchTemplateId) != "lt-stateful" || sdka.ToString(fake.runInstances[0].SubnetId) != "subnet-a" {
+		t.Fatalf("unexpected member apply: applied=%+v input=%+v", appliedMember, fake.runInstances)
+	}
+
+	attachment := VolumeAttachment{
+		LogicalID:   "stateful-volume-attachment:orders-stream:0",
+		Name:        "skiff-prod-orders-attach-0",
+		InstanceRef: member.LogicalID,
+		VolumeRef:   volume.LogicalID,
+		Device:      "/dev/xvdf",
+		Tags:        map[string]string{"skiff.dev/service": "orders-stream", "skiff.dev/env": "prod"},
+	}
+	attachmentDesired, err := desiredServiceResource(ResourceKindEBSAttachment, attachment.LogicalID, attachment.Name, attachment.Tags, "attachment", attachment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appliedAttachment, err := manager.ApplyStatefulResource(context.Background(), attachmentDesired)
+	if err != nil {
+		t.Fatalf("ApplyStatefulResource(attachment): %v", err)
+	}
+	if appliedAttachment.ProviderID != "vol-new:i-new" || fake.attachedVolume == nil || sdka.ToString(fake.attachedVolume.VolumeId) != "vol-new" || sdka.ToString(fake.attachedVolume.InstanceId) != "i-new" {
+		t.Fatalf("unexpected attachment apply: applied=%+v input=%+v", appliedAttachment, fake.attachedVolume)
+	}
+}
+
+func TestSDKStatefulLifecycleOperationsUseEC2IDs(t *testing.T) {
+	fake := &fakeEC2Live{instances: []ec2types.Instance{{
+		InstanceId:   sdka.String("i-old"),
+		ImageId:      sdka.String("ami-old"),
+		InstanceType: ec2types.InstanceTypeT3Small,
+		SubnetId:     sdka.String("subnet-a"),
+		Placement:    &ec2types.Placement{AvailabilityZone: sdka.String("us-west-2a")},
+		SecurityGroups: []ec2types.GroupIdentifier{{
+			GroupId: sdka.String("sg-stateful"),
+		}},
+		IamInstanceProfile: &ec2types.IamInstanceProfile{Arn: sdka.String("arn:aws:iam::123456789012:instance-profile/skiff-stateful")},
+	}}}
+	manager := NewSDKServiceResourceManager(nil, fake, nil, nil, nil)
+	ref := provider.StatefulMemberRef{Group: "orders-stream", Env: "prod", Member: 0}
+
+	fence, err := manager.FenceInstance(context.Background(), provider.FenceInstanceRequest{Ref: ref, InstanceID: "i-old"})
+	if err != nil {
+		t.Fatalf("FenceInstance: %v", err)
+	}
+	if fence.ProviderOperation.ID != "terminate:i-old" || !reflect.DeepEqual(fake.terminatedInstances, []string{"i-old"}) {
+		t.Fatalf("unexpected fence result: result=%+v terminated=%+v", fence, fake.terminatedInstances)
+	}
+	launch, err := manager.LaunchReplacement(context.Background(), provider.LaunchReplacementRequest{Ref: ref, PreviousID: "i-old", Generation: 2, Zone: "us-west-2a"})
+	if err != nil {
+		t.Fatalf("LaunchReplacement: %v", err)
+	}
+	if launch.InstanceID != "i-new" || len(fake.runInstances) != 1 || sdka.ToString(fake.runInstances[0].ImageId) != "ami-old" || fake.runInstances[0].InstanceType != ec2types.InstanceTypeT3Small {
+		t.Fatalf("unexpected replacement launch: result=%+v input=%+v", launch, fake.runInstances)
+	}
+	snapshot, err := manager.SnapshotVolume(context.Background(), provider.SnapshotVolumeRequest{Ref: ref, VolumeID: "vol-123"})
+	if err != nil {
+		t.Fatalf("SnapshotVolume: %v", err)
+	}
+	if snapshot.SnapshotID != "snap-new" || fake.createdSnapshot == nil || sdka.ToString(fake.createdSnapshot.VolumeId) != "vol-123" {
+		t.Fatalf("unexpected snapshot: result=%+v input=%+v", snapshot, fake.createdSnapshot)
+	}
+}
+
 func TestClassifyErrorHandlesSmithyThrottle(t *testing.T) {
 	err := ClassifyError("sdk_call", &smithy.GenericAPIError{Code: "ThrottlingException", Message: "rate exceeded"})
 	var providerErr *provider.Error
@@ -171,6 +280,14 @@ func TestClassifyErrorHandlesSmithyThrottle(t *testing.T) {
 type fakeEC2Live struct {
 	launchTemplates       []ec2types.LaunchTemplate
 	createdLaunchTemplate *ec2.CreateLaunchTemplateInput
+	instances             []ec2types.Instance
+	volumes               []ec2types.Volume
+	runInstances          []*ec2.RunInstancesInput
+	terminatedInstances   []string
+	createdVolume         *ec2.CreateVolumeInput
+	attachedVolume        *ec2.AttachVolumeInput
+	detachedVolume        *ec2.DetachVolumeInput
+	createdSnapshot       *ec2.CreateSnapshotInput
 }
 
 func (f *fakeEC2Live) DescribeSecurityGroups(context.Context, *ec2.DescribeSecurityGroupsInput, ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
@@ -228,6 +345,76 @@ func (f *fakeEC2Live) ModifyLaunchTemplate(context.Context, *ec2.ModifyLaunchTem
 
 func (f *fakeEC2Live) CreateTags(context.Context, *ec2.CreateTagsInput, ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error) {
 	return &ec2.CreateTagsOutput{}, nil
+}
+
+func (f *fakeEC2Live) DescribeInstances(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+	instances := append([]ec2types.Instance(nil), f.instances...)
+	for i, run := range f.runInstances {
+		instances = append(instances, ec2types.Instance{
+			InstanceId:   sdka.String("i-new"),
+			ImageId:      run.ImageId,
+			InstanceType: run.InstanceType,
+			SubnetId:     run.SubnetId,
+			Placement:    run.Placement,
+			State:        &ec2types.InstanceState{Name: ec2types.InstanceStateNamePending},
+			Tags:         run.TagSpecifications[0].Tags,
+		})
+		if i > 0 {
+			instances[len(instances)-1].InstanceId = sdka.String("i-new-" + strconv.Itoa(i))
+		}
+	}
+	if len(input.InstanceIds) == 0 {
+		return &ec2.DescribeInstancesOutput{Reservations: []ec2types.Reservation{{Instances: instances}}}, nil
+	}
+	var filtered []ec2types.Instance
+	for _, instance := range instances {
+		for _, id := range input.InstanceIds {
+			if sdka.ToString(instance.InstanceId) == id {
+				filtered = append(filtered, instance)
+			}
+		}
+	}
+	return &ec2.DescribeInstancesOutput{Reservations: []ec2types.Reservation{{Instances: filtered}}}, nil
+}
+
+func (f *fakeEC2Live) RunInstances(_ context.Context, input *ec2.RunInstancesInput, _ ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
+	f.runInstances = append(f.runInstances, input)
+	return &ec2.RunInstancesOutput{Instances: []ec2types.Instance{{
+		InstanceId: sdka.String("i-new"),
+		Placement:  input.Placement,
+		State:      &ec2types.InstanceState{Name: ec2types.InstanceStateNamePending},
+	}}}, nil
+}
+
+func (f *fakeEC2Live) TerminateInstances(_ context.Context, input *ec2.TerminateInstancesInput, _ ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {
+	f.terminatedInstances = append([]string(nil), input.InstanceIds...)
+	return &ec2.TerminateInstancesOutput{}, nil
+}
+
+func (f *fakeEC2Live) DescribeVolumes(_ context.Context, input *ec2.DescribeVolumesInput, _ ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
+	return &ec2.DescribeVolumesOutput{Volumes: append([]ec2types.Volume(nil), f.volumes...)}, nil
+}
+
+func (f *fakeEC2Live) CreateVolume(_ context.Context, input *ec2.CreateVolumeInput, _ ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error) {
+	f.createdVolume = input
+	volume := ec2types.Volume{VolumeId: sdka.String("vol-new"), State: ec2types.VolumeStateCreating, Tags: input.TagSpecifications[0].Tags}
+	f.volumes = append(f.volumes, volume)
+	return &ec2.CreateVolumeOutput{VolumeId: volume.VolumeId, State: volume.State}, nil
+}
+
+func (f *fakeEC2Live) AttachVolume(_ context.Context, input *ec2.AttachVolumeInput, _ ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error) {
+	f.attachedVolume = input
+	return &ec2.AttachVolumeOutput{}, nil
+}
+
+func (f *fakeEC2Live) DetachVolume(_ context.Context, input *ec2.DetachVolumeInput, _ ...func(*ec2.Options)) (*ec2.DetachVolumeOutput, error) {
+	f.detachedVolume = input
+	return &ec2.DetachVolumeOutput{}, nil
+}
+
+func (f *fakeEC2Live) CreateSnapshot(_ context.Context, input *ec2.CreateSnapshotInput, _ ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error) {
+	f.createdSnapshot = input
+	return &ec2.CreateSnapshotOutput{SnapshotId: sdka.String("snap-new")}, nil
 }
 
 type fakeASGLive struct {

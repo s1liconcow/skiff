@@ -128,21 +128,21 @@ contexts:
     context:
       mode: direct
       env: prod
-      provider: fake
+      provider: apple-container
       region: local
       state: "s3://<rustfs-bucket>"
   - name: local-apple-skiffd-server
     context:
       mode: skiffd
       env: prod
-      provider: fake
+      provider: apple-container
       region: local
       state: "s3://<rustfs-bucket>"
   - name: local-apple-skiffd
     context:
       mode: api
       env: prod
-      provider: fake
+      provider: apple-container
       region: local
       state: "s3://<rustfs-bucket>"
       apiURL: "http://127.0.0.1:<skiffd-port>"
@@ -168,11 +168,15 @@ export SKIFF_APPLE_SKIFFD_PID="<skiffd-pid>"
 export SKIFF_APPLE_SKIFFD_LOG=".skiff-demo-reports/apple-container/<run>-skiffd.log"
 ```
 
+With that environment sourced, `skiff logs caddy-web` reads the recorded Caddy
+Apple Container logs instead of the fake-provider placeholder.
+
 `make demo-apple-context` is the persistent path. Use `make demo-apple-down` to
 stop the `skiffd` process, Caddy VM, RustFS VM, and RustFS volume recorded in
-the latest generated `.env` file. If you want a cleanup-safe smoke run instead,
-use `make demo-apple-container`; it stops the Apple containers and in-process
-`skiffd` when the command exits.
+the latest generated `.env` file. Use `make clean-apple-containers` to remove
+all Skiff-named Apple Container demo/e2e containers and RustFS volumes. If you
+want a cleanup-safe smoke run instead, use `make demo-apple-container`; it stops
+the Apple containers and in-process `skiffd` when the command exits.
 
 ## Start From A Spec
 

@@ -26,11 +26,13 @@ func Compile(ctx context.Context, doc spec.Document, opts Options) (*ir.Graph, e
 	switch doc.Kind {
 	case spec.KindService:
 		return compileService(doc, opts), nil
+	case spec.KindStatefulGroup:
+		return compileStatefulGroup(doc, opts), nil
 	case spec.KindStack:
 		return compileStack(doc, opts)
 	case spec.KindMultiRegionStack:
 		return compileMultiRegionStack(doc, opts)
 	default:
-		return nil, fmt.Errorf("compile kind %q is not supported yet; Service, Stack, and MultiRegionStack specs compile to IR", doc.Kind)
+		return nil, fmt.Errorf("compile kind %q is not supported yet; Service, StatefulGroup, Stack, and MultiRegionStack specs compile to IR", doc.Kind)
 	}
 }

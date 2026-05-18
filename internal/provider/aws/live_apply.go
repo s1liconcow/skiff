@@ -75,6 +75,26 @@ func ValidateLiveApplyInputs(resources *ServiceResources) error {
 			add(config.FieldAWSSubnetIDs, ResourceKindAutoScalingGroup, asg.LogicalID, "Auto Scaling Groups require at least one subnet ID")
 		}
 	}
+	statefulSubnets := map[int][]string{}
+	for _, member := range resources.StatefulMembers {
+		statefulSubnets[member.MemberOrdinal] = cleanStringSlice(member.SubnetIDs)
+		if len(statefulSubnets[member.MemberOrdinal]) == 0 {
+			add(config.FieldAWSSubnetIDs, ResourceKindEC2Instance, member.LogicalID, "stateful member instances require at least one subnet ID")
+		}
+	}
+	for _, volume := range resources.EBSVolumes {
+		if strings.TrimSpace(volume.AvailabilityZone) == "" && len(statefulSubnets[volume.MemberOrdinal]) == 0 {
+			add(config.FieldAWSSubnetIDs, ResourceKindEBSVolume, volume.LogicalID, "stateful EBS volumes require subnet or availability-zone placement inputs")
+		}
+		if volume.Encrypted && strings.TrimSpace(volume.KMSKeyID) == "" {
+			add(config.FieldKMSKey, ResourceKindEBSVolume, volume.LogicalID, "encrypted stateful EBS volumes require an explicit KMS key for live apply")
+		}
+	}
+	for _, record := range resources.Route53Records {
+		if strings.TrimSpace(record.HostedZoneRef) == "" {
+			add("stateful.identity.dnsZoneRef", ResourceKindRoute53Record, record.LogicalID, "stateful DNS records require a hosted zone reference")
+		}
+	}
 	for _, rule := range resources.ListenerRules {
 		if strings.TrimSpace(rule.ListenerARN) == "" {
 			add(config.FieldAWSALBListenerARN, ResourceKindListenerRule, rule.LogicalID, "listener rules require an existing ALB listener ARN")
@@ -100,6 +120,8 @@ func envVarForLiveField(field string) string {
 		return "SKIFF_AWS_ALB_LISTENER_ARN"
 	case config.FieldAWSLoadBalancerSecurityGroupRef:
 		return "SKIFF_AWS_LOAD_BALANCER_SECURITY_GROUP_REF"
+	case config.FieldKMSKey:
+		return "SKIFF_KMS_KEY"
 	default:
 		return ""
 	}

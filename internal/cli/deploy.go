@@ -92,6 +92,24 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 		}
 		return writeSpecError(binary, "SPEC_COMPILE_FAILED", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 	}
+	if doc.Kind == spec.KindStatefulGroup {
+		store, cloud, err := openStatefulStoreAndProvider(loaded.Config, !*dryRun && !*planOnly)
+		if err != nil {
+			return writeClientError(binary, "deploy", *flags.format, *flags.traceID, err, stdout, stderr)
+		}
+		result, err := (deploy.StatefulApplier{Store: store, Provider: cloud}).Apply(nilContext(), graph, deploy.StatefulRequest{
+			Actor:       schema.Actor{ID: "skiff-cli", Type: "user"},
+			TraceID:     *flags.traceID,
+			OperationID: *operationID,
+			ApprovalID:  *approvalID,
+			DryRun:      *dryRun,
+			PlanOnly:    *planOnly,
+		})
+		if err != nil {
+			return writeStatefulCommandError(binary, "deploy", *flags.format, *flags.traceID, err, stdout, stderr)
+		}
+		return writeStatefulApplyResult(binary, *flags.format, *flags.traceID, result, stdout, stderr)
+	}
 	if *shadow {
 		graph = shadowDeployGraph(graph)
 	}
@@ -270,7 +288,7 @@ func shadowDeployGraph(graph *ir.Graph) *ir.Graph {
 
 func signerForDeploy(cfg config.Config, keyID, seedValue string) (signing.Signer, error) {
 	if seedValue == "" {
-		if isFakeProvider(cfg.Provider) {
+		if isLocalEphemeralSignerProvider(cfg.Provider) {
 			return signing.GenerateLocalSigner(keyID, nil)
 		}
 		return nil, fmt.Errorf("--signing-seed-base64 is required for deploy with provider %q", cfg.Provider)

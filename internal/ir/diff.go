@@ -62,6 +62,13 @@ func NormalizeGraph(graph Graph) Graph {
 	out.Resources.InstanceTemplates = append([]InstanceTemplate(nil), graph.Resources.InstanceTemplates...)
 	out.Resources.AutoscalingGroups = append([]AutoscalingGroup(nil), graph.Resources.AutoscalingGroups...)
 	out.Resources.RuntimeManifests = append([]RuntimeManifest(nil), graph.Resources.RuntimeManifests...)
+	out.Resources.StatefulGroups = append([]StatefulGroup(nil), graph.Resources.StatefulGroups...)
+	out.Resources.StatefulMembers = append([]StatefulMember(nil), graph.Resources.StatefulMembers...)
+	out.Resources.StatefulVolumes = append([]StatefulVolume(nil), graph.Resources.StatefulVolumes...)
+	out.Resources.StatefulDNS = append([]StatefulDNS(nil), graph.Resources.StatefulDNS...)
+	out.Resources.StatefulRecipes = append([]StatefulRecipe(nil), graph.Resources.StatefulRecipes...)
+	out.Resources.SnapshotPolicies = append([]SnapshotPolicy(nil), graph.Resources.SnapshotPolicies...)
+	out.Resources.UpdatePolicies = append([]UpdatePolicy(nil), graph.Resources.UpdatePolicies...)
 	sort.Slice(out.Resources.WorkloadIdentities, func(i, j int) bool {
 		return out.Resources.WorkloadIdentities[i].Meta.LogicalID < out.Resources.WorkloadIdentities[j].Meta.LogicalID
 	})
@@ -103,6 +110,27 @@ func NormalizeGraph(graph Graph) Graph {
 	})
 	sort.Slice(out.Resources.RuntimeManifests, func(i, j int) bool {
 		return out.Resources.RuntimeManifests[i].Meta.LogicalID < out.Resources.RuntimeManifests[j].Meta.LogicalID
+	})
+	sort.Slice(out.Resources.StatefulGroups, func(i, j int) bool {
+		return out.Resources.StatefulGroups[i].Meta.LogicalID < out.Resources.StatefulGroups[j].Meta.LogicalID
+	})
+	sort.Slice(out.Resources.StatefulMembers, func(i, j int) bool {
+		return out.Resources.StatefulMembers[i].Meta.LogicalID < out.Resources.StatefulMembers[j].Meta.LogicalID
+	})
+	sort.Slice(out.Resources.StatefulVolumes, func(i, j int) bool {
+		return out.Resources.StatefulVolumes[i].Meta.LogicalID < out.Resources.StatefulVolumes[j].Meta.LogicalID
+	})
+	sort.Slice(out.Resources.StatefulDNS, func(i, j int) bool {
+		return out.Resources.StatefulDNS[i].Meta.LogicalID < out.Resources.StatefulDNS[j].Meta.LogicalID
+	})
+	sort.Slice(out.Resources.StatefulRecipes, func(i, j int) bool {
+		return out.Resources.StatefulRecipes[i].Meta.LogicalID < out.Resources.StatefulRecipes[j].Meta.LogicalID
+	})
+	sort.Slice(out.Resources.SnapshotPolicies, func(i, j int) bool {
+		return out.Resources.SnapshotPolicies[i].Meta.LogicalID < out.Resources.SnapshotPolicies[j].Meta.LogicalID
+	})
+	sort.Slice(out.Resources.UpdatePolicies, func(i, j int) bool {
+		return out.Resources.UpdatePolicies[i].Meta.LogicalID < out.Resources.UpdatePolicies[j].Meta.LogicalID
 	})
 	return out
 }

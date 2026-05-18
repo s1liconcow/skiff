@@ -141,6 +141,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runSolve(binary, root.Args, root, stdout, stderr)
 	case "state":
 		return runState(binary, root.Args, stdout, stderr)
+	case "stateful":
+		return runStateful(binary, root.Args, root, stdout, stderr)
 	case "status":
 		return runStatus(binary, root.Args, root, stdout, stderr)
 	case "tui":
@@ -283,6 +285,7 @@ func printUsage(w io.Writer, binary string) {
 		fmt.Fprintln(w, "  serve      Start the stateless skiffd API server")
 	}
 	fmt.Fprintln(w, "  state      Inspect object-state paths and developer helpers")
+	fmt.Fprintln(w, "  stateful   Plan, apply, and inspect StatefulGroups")
 	fmt.Fprintln(w, "  status     Show service status through direct or API mode")
 	fmt.Fprintln(w, "  terraform  Generate Terraform modules for Skiff specs")
 	fmt.Fprintln(w, "  tui        Open the terminal operations dashboard")
@@ -1364,7 +1367,7 @@ func runCompile(binary string, args []string, stdout, stderr io.Writer) int {
 
 	switch *format {
 	case "human", "text":
-		fmt.Fprintf(stdout, "compiled Service %s/%s to IR", graph.Env, graph.Service)
+		fmt.Fprintf(stdout, "compiled %s %s/%s to IR", doc.Kind, graph.Env, graph.Service)
 		if *outPath != "" {
 			fmt.Fprintf(stdout, " at %s", *outPath)
 		}
@@ -1815,6 +1818,8 @@ func runStatePath(binary string, args []string, stdout, stderr io.Writer) int {
 	artifact := fs.String("artifact", "", "saga artifact path")
 	step := fs.String("step", "", "saga step ID")
 	doc := fs.String("doc", "", "document selector")
+	group := fs.String("group", "", "stateful group name")
+	member := fs.Int("member", -1, "stateful member ordinal")
 	resourceKind := fs.String("resource-kind", "", "resource kind")
 	name := fs.String("name", "", "logical resource name")
 	provider := fs.String("provider", "", "cloud provider")
@@ -1841,6 +1846,8 @@ func runStatePath(binary string, args []string, stdout, stderr io.Writer) int {
 		artifact:     *artifact,
 		step:         *step,
 		doc:          *doc,
+		group:        *group,
+		member:       *member,
 		resourceKind: *resourceKind,
 		name:         *name,
 		provider:     *provider,
@@ -1873,6 +1880,8 @@ func runStatePath(binary string, args []string, stdout, stderr io.Writer) int {
 				artifact:     *artifact,
 				step:         *step,
 				doc:          *doc,
+				group:        *group,
+				member:       *member,
 				resourceKind: *resourceKind,
 				name:         *name,
 				provider:     *provider,
@@ -1900,6 +1909,8 @@ type statePathInputs struct {
 	artifact     string
 	step         string
 	doc          string
+	group        string
+	member       int
 	resourceKind string
 	name         string
 	provider     string
@@ -1935,6 +1946,15 @@ func statePathFor(kind string, in statePathInputs) (string, error) {
 			return paths.OperationEvent(in.service, in.operation, in.event)
 		default:
 			return "", fmt.Errorf("operation --doc must be intent, control, or event")
+		}
+	case "stateful":
+		switch defaultString(in.doc, "group") {
+		case "group", "control":
+			return paths.StatefulGroupControl(in.group)
+		case "member":
+			return paths.StatefulMemberControl(in.group, in.member)
+		default:
+			return "", fmt.Errorf("stateful --doc must be group, control, or member")
 		}
 	case "saga":
 		switch defaultString(in.doc, "intent") {
@@ -1988,6 +2008,7 @@ func statePathInputMap(in statePathInputs) map[string]string {
 		"artifact":      in.artifact,
 		"step":          in.step,
 		"doc":           in.doc,
+		"group":         in.group,
 		"resource_kind": in.resourceKind,
 		"name":          in.name,
 		"provider":      in.provider,
@@ -2002,7 +2023,13 @@ func statePathInputMap(in statePathInputs) map[string]string {
 		}
 	}
 	if len(out) == 0 {
-		return nil
+		out = nil
+	}
+	if in.member >= 0 {
+		if out == nil {
+			out = map[string]string{}
+		}
+		out["member"] = fmt.Sprintf("%d", in.member)
 	}
 	return out
 }
@@ -2256,6 +2283,7 @@ func printStatePathUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  service             --service <name>")
 	fmt.Fprintln(w, "  release             --service <name> --release <id> [--doc release|runtime-manifest]")
 	fmt.Fprintln(w, "  operation           --service <name> --operation <id> [--doc intent|control|event] [--event <id>]")
+	fmt.Fprintln(w, "  stateful            --group <name> [--doc group|member] [--member <ordinal>]")
 	fmt.Fprintln(w, "  saga                --saga <id> [--doc intent|graph|control|event|artifact|result] [--event <id>] [--artifact <path>] [--step <id>]")
 	fmt.Fprintln(w, "  resource-logical    --resource-kind <kind> --name <name>")
 	fmt.Fprintln(w, "  resource-provider   --provider <name> --resource-kind <kind> --id <provider-id>")
