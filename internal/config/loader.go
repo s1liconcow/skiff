@@ -75,12 +75,22 @@ func applyConfig(loaded *Loaded, cfg Config, source string) {
 		FieldService:                         cfg.Service,
 		FieldControlKey:                      cfg.ControlKey,
 		FieldReleaseID:                       cfg.ReleaseID,
+		FieldReleaseManifestKey:              cfg.ReleaseManifestKey,
+		FieldRuntimeManifestKey:              cfg.RuntimeManifestKey,
 		FieldAWSLiveApply:                    boolConfigValue(cfg.AWSLiveApply),
 		FieldAWSVPCID:                        cfg.AWSVPCID,
 		FieldAWSSubnetIDs:                    strings.Join(cfg.AWSSubnetIDs, ","),
 		FieldAWSAMIID:                        cfg.AWSAMIID,
 		FieldAWSALBListenerARN:               cfg.AWSALBListenerARN,
 		FieldAWSLoadBalancerSecurityGroupRef: cfg.AWSLoadBalancerSecurityGroupRef,
+	}
+	if cfg.StatefulGroup != "" {
+		values[FieldStatefulGroup] = cfg.StatefulGroup
+		values[FieldStatefulMember] = strconv.Itoa(cfg.StatefulMember)
+		values[FieldStatefulGeneration] = strconv.FormatInt(cfg.StatefulGeneration, 10)
+		values[FieldStatefulVolumeMountPath] = cfg.StatefulVolumeMountPath
+		values[FieldStatefulStableHostname] = cfg.StatefulStableHostname
+		values[FieldStatefulRecipe] = cfg.StatefulRecipe
 	}
 	applyValues(loaded, values, source)
 	if cfg.Logs != nil {
@@ -124,6 +134,28 @@ func applyValues(loaded *Loaded, values map[string]string, source string) {
 			loaded.Config.ControlKey = value
 		case FieldReleaseID:
 			loaded.Config.ReleaseID = value
+		case FieldStatefulGroup:
+			loaded.Config.StatefulGroup = strings.TrimSpace(value)
+		case FieldStatefulMember:
+			parsed, err := strconv.Atoi(value)
+			if err == nil {
+				loaded.Config.StatefulMember = parsed
+			}
+		case FieldStatefulGeneration:
+			parsed, err := strconv.ParseInt(value, 10, 64)
+			if err == nil {
+				loaded.Config.StatefulGeneration = parsed
+			}
+		case FieldStatefulVolumeMountPath:
+			loaded.Config.StatefulVolumeMountPath = strings.TrimSpace(value)
+		case FieldStatefulStableHostname:
+			loaded.Config.StatefulStableHostname = strings.TrimSpace(value)
+		case FieldStatefulRecipe:
+			loaded.Config.StatefulRecipe = strings.TrimSpace(value)
+		case FieldReleaseManifestKey:
+			loaded.Config.ReleaseManifestKey = strings.TrimSpace(value)
+		case FieldRuntimeManifestKey:
+			loaded.Config.RuntimeManifestKey = strings.TrimSpace(value)
 		case FieldAWSLiveApply:
 			parsed, err := strconv.ParseBool(value)
 			if err == nil {
@@ -264,6 +296,22 @@ func normalizeFileField(key string) (string, error) {
 		return FieldControlKey, nil
 	case "release_id", "releaseID", "releaseId":
 		return FieldReleaseID, nil
+	case "release_manifest_key", "releaseManifestKey":
+		return FieldReleaseManifestKey, nil
+	case "runtime_manifest_key", "runtimeManifestKey":
+		return FieldRuntimeManifestKey, nil
+	case "stateful_group", "statefulGroup":
+		return FieldStatefulGroup, nil
+	case "stateful_member", "statefulMember":
+		return FieldStatefulMember, nil
+	case "stateful_generation", "statefulGeneration":
+		return FieldStatefulGeneration, nil
+	case "stateful_volume_mount_path", "statefulVolumeMountPath":
+		return FieldStatefulVolumeMountPath, nil
+	case "stateful_stable_hostname", "statefulStableHostname":
+		return FieldStatefulStableHostname, nil
+	case "stateful_recipe", "statefulRecipe":
+		return FieldStatefulRecipe, nil
 	case "aws_live_apply", "awsLiveApply":
 		return FieldAWSLiveApply, nil
 	case "aws_vpc_id", "awsVPCID", "awsVpcID", "awsVpcId":
@@ -295,6 +343,14 @@ func valuesFromEnv(env map[string]string) map[string]string {
 		FieldService:                         env["SKIFF_SERVICE"],
 		FieldControlKey:                      env["SKIFF_CONTROL_KEY"],
 		FieldReleaseID:                       env["SKIFF_RELEASE_ID"],
+		FieldReleaseManifestKey:              env["SKIFF_RELEASE_MANIFEST_KEY"],
+		FieldRuntimeManifestKey:              env["SKIFF_RUNTIME_MANIFEST_KEY"],
+		FieldStatefulGroup:                   env["SKIFF_STATEFUL_GROUP"],
+		FieldStatefulMember:                  env["SKIFF_STATEFUL_MEMBER"],
+		FieldStatefulGeneration:              env["SKIFF_STATEFUL_GENERATION"],
+		FieldStatefulVolumeMountPath:         env["SKIFF_STATEFUL_VOLUME_MOUNT_PATH"],
+		FieldStatefulStableHostname:          env["SKIFF_STATEFUL_STABLE_HOSTNAME"],
+		FieldStatefulRecipe:                  env["SKIFF_STATEFUL_RECIPE"],
 		FieldAWSLiveApply:                    env["SKIFF_AWS_LIVE_APPLY"],
 		FieldAWSVPCID:                        env["SKIFF_AWS_VPC_ID"],
 		FieldAWSSubnetIDs:                    env["SKIFF_AWS_SUBNET_IDS"],

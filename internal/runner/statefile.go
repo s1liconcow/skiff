@@ -36,7 +36,26 @@ type LocalState struct {
 	TraceID                    string                     `json:"trace_id,omitempty"`
 	UpdatedAt                  string                     `json:"updated_at"`
 	Identity                   *Identity                  `json:"identity,omitempty"`
+	Stateful                   *StatefulRuntime           `json:"stateful,omitempty"`
 	Verification               release.VerificationResult `json:"verification"`
+}
+
+type StatefulRuntime struct {
+	Group           string `json:"group"`
+	Env             string `json:"env"`
+	Member          int    `json:"member"`
+	Generation      int64  `json:"generation"`
+	InstanceID      string `json:"instance_id,omitempty"`
+	VolumeID        string `json:"volume_id,omitempty"`
+	VolumeMountPath string `json:"volume_mount_path,omitempty"`
+	StableHostname  string `json:"stable_hostname,omitempty"`
+	Recipe          string `json:"recipe,omitempty"`
+	ControlKey      string `json:"control_key"`
+	ControlETag     string `json:"control_etag,omitempty"`
+	ControlVersion  int64  `json:"control_version,omitempty"`
+	ReleaseManifest string `json:"release_manifest_key,omitempty"`
+	RuntimeManifest string `json:"runtime_manifest_key,omitempty"`
+	LastValidatedAt string `json:"last_validated_at,omitempty"`
 }
 
 type StateStore interface {

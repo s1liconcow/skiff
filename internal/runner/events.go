@@ -29,18 +29,19 @@ const (
 )
 
 type StateEvent struct {
-	SchemaVersion string       `json:"schema_version"`
-	Time          string       `json:"time"`
-	State         State        `json:"state"`
-	Service       string       `json:"service"`
-	Env           string       `json:"env"`
-	ReleaseID     string       `json:"release_id,omitempty"`
-	TraceID       string       `json:"trace_id,omitempty"`
-	Identity      *Identity    `json:"identity,omitempty"`
-	Health        HealthStatus `json:"health,omitempty"`
-	UnitName      string       `json:"unit_name,omitempty"`
-	Summary       string       `json:"summary"`
-	Error         string       `json:"error,omitempty"`
+	SchemaVersion string           `json:"schema_version"`
+	Time          string           `json:"time"`
+	State         State            `json:"state"`
+	Service       string           `json:"service"`
+	Env           string           `json:"env"`
+	ReleaseID     string           `json:"release_id,omitempty"`
+	TraceID       string           `json:"trace_id,omitempty"`
+	Identity      *Identity        `json:"identity,omitempty"`
+	Stateful      *StatefulRuntime `json:"stateful,omitempty"`
+	Health        HealthStatus     `json:"health,omitempty"`
+	UnitName      string           `json:"unit_name,omitempty"`
+	Summary       string           `json:"summary"`
+	Error         string           `json:"error,omitempty"`
 }
 
 type EventSink interface {

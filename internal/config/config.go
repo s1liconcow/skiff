@@ -29,6 +29,14 @@ const (
 	FieldService                         = "service"
 	FieldControlKey                      = "control_key"
 	FieldReleaseID                       = "release_id"
+	FieldStatefulGroup                   = "stateful_group"
+	FieldStatefulMember                  = "stateful_member"
+	FieldStatefulGeneration              = "stateful_generation"
+	FieldStatefulVolumeMountPath         = "stateful_volume_mount_path"
+	FieldStatefulStableHostname          = "stateful_stable_hostname"
+	FieldStatefulRecipe                  = "stateful_recipe"
+	FieldReleaseManifestKey              = "release_manifest_key"
+	FieldRuntimeManifestKey              = "runtime_manifest_key"
 	FieldAWSLiveApply                    = "aws_live_apply"
 	FieldAWSVPCID                        = "aws_vpc_id"
 	FieldAWSSubnetIDs                    = "aws_subnet_ids"
@@ -51,6 +59,14 @@ type Config struct {
 	Service                         string   `json:"service,omitempty"`
 	ControlKey                      string   `json:"control_key,omitempty"`
 	ReleaseID                       string   `json:"release_id,omitempty"`
+	StatefulGroup                   string   `json:"stateful_group,omitempty"`
+	StatefulMember                  int      `json:"stateful_member,omitempty"`
+	StatefulGeneration              int64    `json:"stateful_generation,omitempty"`
+	StatefulVolumeMountPath         string   `json:"stateful_volume_mount_path,omitempty"`
+	StatefulStableHostname          string   `json:"stateful_stable_hostname,omitempty"`
+	StatefulRecipe                  string   `json:"stateful_recipe,omitempty"`
+	ReleaseManifestKey              string   `json:"release_manifest_key,omitempty"`
+	RuntimeManifestKey              string   `json:"runtime_manifest_key,omitempty"`
 	AWSLiveApply                    bool     `json:"aws_live_apply,omitempty"`
 	AWSVPCID                        string   `json:"aws_vpc_id,omitempty"`
 	AWSSubnetIDs                    []string `json:"aws_subnet_ids,omitempty"`
@@ -182,6 +198,25 @@ func Validate(loaded Loaded) error {
 	}
 	if cfg.Service != "" {
 		validateName(&fields, loaded.Sources, FieldService, cfg.Service)
+	}
+	if cfg.StatefulGroup != "" {
+		validateName(&fields, loaded.Sources, FieldStatefulGroup, cfg.StatefulGroup)
+		if cfg.StatefulMember < 0 {
+			fields = append(fields, FieldError{
+				Field:   FieldStatefulMember,
+				Source:  sourceFor(loaded.Sources, FieldStatefulMember),
+				Code:    "INVALID_VALUE",
+				Message: "stateful member ordinal must be non-negative",
+			})
+		}
+		if cfg.StatefulGeneration < 0 {
+			fields = append(fields, FieldError{
+				Field:   FieldStatefulGeneration,
+				Source:  sourceFor(loaded.Sources, FieldStatefulGeneration),
+				Code:    "INVALID_VALUE",
+				Message: "stateful generation must be non-negative",
+			})
+		}
 	}
 
 	if len(fields) > 0 {

@@ -12,17 +12,18 @@ import (
 const RunnerStatusSchemaVersion = "skiff.runner-status/v1"
 
 type RunnerStatus struct {
-	OK            bool         `json:"ok"`
-	SchemaVersion string       `json:"schema_version"`
-	Service       string       `json:"service"`
-	Env           string       `json:"env"`
-	ReleaseID     string       `json:"release"`
-	State         State        `json:"state"`
-	Health        HealthStatus `json:"health"`
-	UnitName      string       `json:"unit_name,omitempty"`
-	TraceID       string       `json:"trace_id,omitempty"`
-	UpdatedAt     string       `json:"updated_at"`
-	Identity      *Identity    `json:"identity,omitempty"`
+	OK            bool             `json:"ok"`
+	SchemaVersion string           `json:"schema_version"`
+	Service       string           `json:"service"`
+	Env           string           `json:"env"`
+	ReleaseID     string           `json:"release"`
+	State         State            `json:"state"`
+	Health        HealthStatus     `json:"health"`
+	UnitName      string           `json:"unit_name,omitempty"`
+	TraceID       string           `json:"trace_id,omitempty"`
+	UpdatedAt     string           `json:"updated_at"`
+	Identity      *Identity        `json:"identity,omitempty"`
+	Stateful      *StatefulRuntime `json:"stateful,omitempty"`
 }
 
 func StatusFromState(state LocalState) RunnerStatus {
@@ -42,6 +43,7 @@ func StatusFromState(state LocalState) RunnerStatus {
 		TraceID:       state.TraceID,
 		UpdatedAt:     state.UpdatedAt,
 		Identity:      state.Identity,
+		Stateful:      state.Stateful,
 	}
 }
 

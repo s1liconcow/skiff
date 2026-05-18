@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
 	"github.com/s1liconcow/skiff/internal/state/schema"
+	"github.com/s1liconcow/skiff/internal/stateful"
 )
 
 const (
@@ -17,6 +19,9 @@ const (
 	CodeSystemdStartFailed    = "SYSTEMD_START_FAILED"
 	CodeSystemdStopFailed     = "SYSTEMD_STOP_FAILED"
 	CodeHealthCheckFailed     = "HEALTH_CHECK_FAILED"
+	CodeStatefulFenceFailed   = "STATEFUL_FENCE_FAILED"
+	CodeStatefulVolumeFailed  = "STATEFUL_VOLUME_FAILED"
+	CodeStatefulRecipeFailed  = "STATEFUL_RECIPE_FAILED"
 )
 
 type ArtifactRequest struct {
@@ -52,12 +57,17 @@ func (NoopArtifactPreparer) PrepareArtifact(ctx context.Context, req ArtifactReq
 type LifecycleRequest struct {
 	RuntimeManifest  schema.RuntimeManifest
 	Artifact         schema.ArtifactRef
+	ControlStore     objstore.ObjectStore
 	StateStore       StateStore
 	EventSink        EventSink
 	Systemd          SystemdManager
 	ArtifactPreparer ArtifactPreparer
+	StatefulVolume   StatefulVolumeManager
+	StatefulRecipe   stateful.Recipe
+	Stateful         *StatefulRuntime
 	HealthChecker    HealthChecker
 	TraceID          string
+	OperationID      string
 	Identity         *Identity
 	UnitName         string
 	HealthAttempts   int
@@ -147,6 +157,10 @@ func RunLifecycle(ctx context.Context, req LifecycleRequest) (*LifecycleResult, 
 			identity := *req.Identity
 			current.Identity = &identity
 		}
+		if req.Stateful != nil {
+			statefulRuntime := *req.Stateful
+			current.Stateful = &statefulRuntime
+		}
 		if err := stateStore.SaveState(ctx, current); err != nil {
 			return &LifecycleError{Code: CodeLocalStateWriteFailed, Summary: "write runner local state", State: state, Err: err}
 		}
@@ -159,6 +173,7 @@ func RunLifecycle(ctx context.Context, req LifecycleRequest) (*LifecycleResult, 
 			ReleaseID:     manifest.ReleaseID,
 			TraceID:       current.TraceID,
 			Identity:      current.Identity,
+			Stateful:      current.Stateful,
 			Health:        health,
 			UnitName:      unitName,
 			Summary:       summary,
@@ -186,6 +201,13 @@ func RunLifecycle(ctx context.Context, req LifecycleRequest) (*LifecycleResult, 
 	if err := transition(StatePreparingArtifact, HealthUnknown, "preparing workload artifact", nil); err != nil {
 		return nil, err
 	}
+	statefulRuntime, err := currentStatefulRuntime(ctx, current, req.Stateful, req.ControlStore, req.Identity, now)
+	if err != nil {
+		return fail(CodeStatefulFenceFailed, "validate stateful member control", StatePreparingArtifact, err)
+	}
+	if statefulRuntime != nil {
+		req.Stateful = statefulRuntime
+	}
 	artifact, err := preparer.PrepareArtifact(ctx, ArtifactRequest{
 		Service:         manifest.Service,
 		Env:             manifest.Env,
@@ -207,6 +229,22 @@ func RunLifecycle(ctx context.Context, req LifecycleRequest) (*LifecycleResult, 
 			envVars = cloneStringMap(artifact.EnvVars)
 		}
 		workingDirectory = artifact.WorkingDirectory
+	}
+	if statefulRuntime != nil {
+		if err := transition(StatePreparingArtifact, HealthUnknown, "preparing stateful durable volume", nil); err != nil {
+			return nil, err
+		}
+		volume := req.StatefulVolume
+		if volume == nil {
+			volume = HostStatefulVolumeManager{}
+		}
+		if _, err := volume.PrepareStatefulVolume(ctx, StatefulVolumeRequest{Runtime: *statefulRuntime}); err != nil {
+			return fail(CodeStatefulVolumeFailed, "prepare stateful durable volume", StatePreparingArtifact, err)
+		}
+		if err := runStatefulRecipeStart(ctx, req.StatefulRecipe, *statefulRuntime, req.OperationID, req.TraceID); err != nil {
+			return fail(CodeStatefulRecipeFailed, "run stateful recipe start hook", StatePreparingArtifact, err)
+		}
+		envVars = statefulEnvVars(envVars, *statefulRuntime)
 	}
 
 	if err := transition(StateRenderingConfig, HealthUnknown, "rendering workload systemd unit", nil); err != nil {
@@ -253,6 +291,17 @@ func RunLifecycle(ctx context.Context, req LifecycleRequest) (*LifecycleResult, 
 	for attempt := 1; attempt <= attempts; attempt++ {
 		last = healthChecker.Check(ctx, manifest.HealthCheck)
 		if last.Status == HealthHealthy {
+			if statefulRuntime != nil {
+				validated, err := currentStatefulRuntime(ctx, current, statefulRuntime, req.ControlStore, req.Identity, now)
+				if err != nil {
+					return fail(CodeStatefulFenceFailed, "validate stateful member before serving", StateWaitingForHealth, err)
+				}
+				statefulRuntime = validated
+				req.Stateful = validated
+				if err := runStatefulRecipeHealth(ctx, req.StatefulRecipe, *statefulRuntime, req.OperationID, req.TraceID); err != nil {
+					return fail(CodeStatefulRecipeFailed, "run stateful recipe health hook", StateWaitingForHealth, err)
+				}
+			}
 			if err := transition(StateServing, HealthHealthy, "workload is serving", nil); err != nil {
 				return nil, err
 			}
@@ -273,17 +322,20 @@ func RunLifecycle(ctx context.Context, req LifecycleRequest) (*LifecycleResult, 
 }
 
 type StopRequest struct {
-	Service    string
-	Env        string
-	ReleaseID  string
-	StateStore StateStore
-	EventSink  EventSink
-	Systemd    SystemdManager
-	UnitName   string
-	TraceID    string
-	Identity   *Identity
-	Drain      func(context.Context) error
-	Now        func() time.Time
+	Service        string
+	Env            string
+	ReleaseID      string
+	StateStore     StateStore
+	EventSink      EventSink
+	Systemd        SystemdManager
+	StatefulRecipe stateful.Recipe
+	Stateful       *StatefulRuntime
+	UnitName       string
+	TraceID        string
+	OperationID    string
+	Identity       *Identity
+	Drain          func(context.Context) error
+	Now            func() time.Time
 }
 
 func StopWorkload(ctx context.Context, req StopRequest) error {
@@ -313,6 +365,9 @@ func StopWorkload(ctx context.Context, req StopRequest) error {
 	if err != nil {
 		return &LifecycleError{Code: CodeLocalStateReadFailed, Summary: "read runner local state", Err: err}
 	}
+	if req.Stateful == nil && current.Stateful != nil {
+		req.Stateful = current.Stateful
+	}
 	transition := func(state State, summary string, cause error) error {
 		current.CurrentState = state
 		current.WorkloadUnit = unitName
@@ -323,6 +378,10 @@ func StopWorkload(ctx context.Context, req StopRequest) error {
 		if req.Identity != nil {
 			identity := *req.Identity
 			current.Identity = &identity
+		}
+		if req.Stateful != nil {
+			statefulRuntime := *req.Stateful
+			current.Stateful = &statefulRuntime
 		}
 		if err := stateStore.SaveState(ctx, current); err != nil {
 			return &LifecycleError{Code: CodeLocalStateWriteFailed, Summary: "write runner local state", State: state, Err: err}
@@ -339,6 +398,7 @@ func StopWorkload(ctx context.Context, req StopRequest) error {
 			ReleaseID:     current.LastAcceptedRelease,
 			TraceID:       current.TraceID,
 			Identity:      current.Identity,
+			Stateful:      current.Stateful,
 			Health:        current.Health,
 			UnitName:      unitName,
 			Summary:       summary,
@@ -358,6 +418,12 @@ func StopWorkload(ctx context.Context, req StopRequest) error {
 		if err := req.Drain(ctx); err != nil {
 			_ = transition(StateFailed, "drain workload", err)
 			return &LifecycleError{Code: CodeSystemdStopFailed, Summary: "drain workload", State: StateDraining, Err: err}
+		}
+	}
+	if req.Stateful != nil {
+		if err := runStatefulRecipeStop(ctx, req.StatefulRecipe, *req.Stateful, req.OperationID, req.TraceID); err != nil {
+			_ = transition(StateFailed, "run stateful recipe stop hook", err)
+			return &LifecycleError{Code: CodeStatefulRecipeFailed, Summary: "run stateful recipe stop hook", State: StateDraining, Err: err}
 		}
 	}
 	if err := transition(StateStopping, "stopping workload through systemd", nil); err != nil {
