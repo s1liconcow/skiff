@@ -54,6 +54,33 @@ func TestStartRolloutStoresProviderIDBeforeWatch(t *testing.T) {
 	}
 }
 
+func TestStartRolloutDefaultsToDesiredRelease(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	createOperationControl(t, store, "payments-api", "prod", "op_rollout")
+	createRolloutServiceControl(t, store, "payments-api", "prod", "rel_desired", "rel_stable", "op_rollout")
+	rollouts := &fakeASGRolloutClient{start: &aws.InstanceRefresh{ID: "ir-123", Status: "Pending", StartedAt: rolloutTestNow()}}
+	deployer := deploy.Deployer{Store: store, Provider: newRolloutAWSProvider(t, rollouts), Clock: rolloutTestNow}
+
+	_, err := deployer.StartRollout(ctx, deploy.StartRolloutRequest{
+		Service:     "payments-api",
+		Env:         "prod",
+		OperationID: "op_rollout",
+		TraceID:     "tr_rollout",
+		Actor:       schema.Actor{ID: "agent-one", Type: "agent"},
+	})
+	if err != nil {
+		t.Fatalf("start rollout: %v", err)
+	}
+	if rollouts.startReq.ReleaseID != "rel_desired" {
+		t.Fatalf("start rollout release = %q, want desired release", rollouts.startReq.ReleaseID)
+	}
+	control := readOperationControl(t, store, "payments-api", "op_rollout")
+	if control.Status != schema.OperationRunning {
+		t.Fatalf("operation status = %s, want running", control.Status)
+	}
+}
+
 func TestWatchRolloutResumesStoredProviderIDAndCompletesOperation(t *testing.T) {
 	ctx := context.Background()
 	store := memory.New()
@@ -198,11 +225,13 @@ func newRolloutAWSProvider(t *testing.T, rollouts *fakeASGRolloutClient) *aws.Pr
 
 type fakeASGRolloutClient struct {
 	start       *aws.InstanceRefresh
+	startReq    aws.StartInstanceRefreshRequest
 	describe    *aws.InstanceRefresh
 	describeReq aws.DescribeInstanceRefreshRequest
 }
 
 func (c *fakeASGRolloutClient) StartInstanceRefresh(ctx context.Context, req aws.StartInstanceRefreshRequest) (*aws.InstanceRefresh, error) {
+	c.startReq = req
 	return c.start, nil
 }
 

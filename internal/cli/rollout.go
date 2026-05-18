@@ -12,6 +12,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/deploy"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/provider"
+	"github.com/s1liconcow/skiff/internal/state"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 )
 
@@ -21,15 +22,26 @@ type rolloutWatchOutput struct {
 	Status  provider.RolloutStatus `json:"status"`
 }
 
+type rolloutStartOutput struct {
+	OK        bool             `json:"ok"`
+	TraceID   string           `json:"trace_id,omitempty"`
+	ReleaseID string           `json:"release_id"`
+	Rollout   provider.Rollout `json:"rollout"`
+}
+
 var newRolloutProvider = func(cfg config.Config, store objstore.ObjectStore) (provider.Provider, error) {
 	return newCLIProvider(cfg, store)
 }
 
+var openRolloutObjectStore = client.OpenObjectStore
+
 func runRollout(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		return writeSpecError(binary, "ROLLOUT_INVALID", root.Format, root.TraceID, errors.New("expected rollout command watch"), nil, stdout, stderr)
+		return writeSpecError(binary, "ROLLOUT_INVALID", root.Format, root.TraceID, errors.New("expected rollout command start or watch"), nil, stdout, stderr)
 	}
 	switch args[0] {
+	case "start":
+		return runRolloutStart(binary, args[1:], root, stdout, stderr)
 	case "watch":
 		return runRolloutWatch(binary, args[1:], root, stdout, stderr)
 	case "help", "-h", "--help":
@@ -37,6 +49,88 @@ func runRollout(binary string, args []string, root rootOptions, stdout, stderr i
 		return ExitSuccess
 	default:
 		return writeSpecError(binary, "ROLLOUT_INVALID", root.Format, root.TraceID, fmt.Errorf("unknown rollout command %q", args[0]), nil, stdout, stderr)
+	}
+}
+
+func runRolloutStart(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" rollout start", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := addClientFlags(fs, root)
+	service := fs.String("service", "", "service name")
+	operationID := fs.String("operation", "", "operation ID")
+	releaseID := fs.String("release-id", "", "release ID to roll out; defaults to the service desired release")
+	minHealthy := fs.Int("min-healthy-percentage", 0, "minimum healthy percentage during rollout")
+	instanceWarmup := fs.Int("instance-warmup", 0, "instance warmup seconds")
+
+	flagArgs, positionals, err := splitRolloutArgs(args)
+	if err != nil {
+		return writeSpecError(binary, "ROLLOUT_INVALID", defaultString(root.Format, "human"), root.TraceID, err, nil, stdout, stderr)
+	}
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
+		return writeSpecError(binary, "ROLLOUT_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeSpecError(binary, "ROLLOUT_INVALID", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), nil, stdout, stderr)
+	}
+	if len(positionals) == 1 && *service == "" {
+		*service = positionals[0]
+	}
+	if *service == "" || *operationID == "" {
+		return writeSpecError(binary, "ROLLOUT_INVALID", *flags.format, *flags.traceID, errors.New("--service and --operation are required"), nil, stdout, stderr)
+	}
+	_ = flags.noColor
+	_ = flags.yes
+
+	loaded, err := flags.load(binary, root, fs)
+	if err != nil {
+		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+	}
+	if loaded.Config.Mode != config.ModeDirect {
+		return writeSpecError(binary, "ROLLOUT_INVALID", *flags.format, *flags.traceID, errors.New("rollout start currently requires --direct mode"), nil, stdout, stderr)
+	}
+	store, err := openRolloutObjectStore(loaded.Config)
+	if err != nil {
+		return writeClientError(binary, "rollout", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	cloud, err := newRolloutProvider(loaded.Config, store)
+	if err != nil {
+		return writeSpecError(binary, "ROLLOUT_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
+	}
+	rollout, err := deploy.Deployer{Store: store, Provider: cloud}.StartRollout(nilContext(), deploy.StartRolloutRequest{
+		Service:              *service,
+		Env:                  loaded.Config.Env,
+		OperationID:          *operationID,
+		ReleaseID:            *releaseID,
+		TraceID:              *flags.traceID,
+		Actor:                schema.Actor{ID: "skiff-cli", Type: "user"},
+		MinHealthyPercentage: *minHealthy,
+		InstanceWarmup:       *instanceWarmup,
+	})
+	if err != nil {
+		return writeSpecError(binary, "ROLLOUT_FAILED", *flags.format, *flags.traceID, err, nil, stdout, stderr)
+	}
+	resolvedRelease := firstNonEmptyString(*releaseID, rolloutReleaseHint(store, *service))
+	switch *flags.format {
+	case "human", "text":
+		fmt.Fprintf(stdout, "rollout %s started\n", rollout.ID)
+		if resolvedRelease != "" {
+			fmt.Fprintf(stdout, "release: %s\n", resolvedRelease)
+		}
+		if rollout.ProviderID != "" {
+			fmt.Fprintf(stdout, "provider_id: %s\n", rollout.ProviderID)
+		}
+		fmt.Fprintf(stdout, "next: %s rollout watch --service %s --operation %s\n", binary, *service, *operationID)
+		return ExitSuccess
+	case "json":
+		if err := json.NewEncoder(stdout).Encode(rolloutStartOutput{OK: true, TraceID: *flags.traceID, ReleaseID: resolvedRelease, Rollout: *rollout}); err != nil {
+			fmt.Fprintf(stderr, "%s rollout start: %v\n", binary, err)
+			return ExitInternalError
+		}
+		return ExitSuccess
+	default:
+		return writeSpecError(binary, "ROLLOUT_INVALID", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), nil, stdout, stderr)
 	}
 }
 
@@ -49,16 +143,20 @@ func runRolloutWatch(binary string, args []string, root rootOptions, stdout, std
 	rolloutID := fs.String("rollout-id", "", "Skiff rollout ID")
 	providerID := fs.String("provider-id", "", "provider rollout ID")
 
-	if handled, err := parseCommandFlags(fs, args, stdout); handled {
+	flagArgs, positionals, err := splitRolloutArgs(args)
+	if err != nil {
+		return writeSpecError(binary, "ROLLOUT_INVALID", defaultString(root.Format, "human"), root.TraceID, err, nil, stdout, stderr)
+	}
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
 		return ExitSuccess
 	} else if err != nil {
 		return writeSpecError(binary, "ROLLOUT_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 	}
-	if fs.NArg() > 1 {
-		return writeSpecError(binary, "ROLLOUT_INVALID", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", fs.Arg(1)), nil, stdout, stderr)
+	if len(positionals) > 1 {
+		return writeSpecError(binary, "ROLLOUT_INVALID", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), nil, stdout, stderr)
 	}
-	if fs.NArg() == 1 && *service == "" {
-		*service = fs.Arg(0)
+	if len(positionals) == 1 && *service == "" {
+		*service = positionals[0]
 	}
 	if *service == "" || *operationID == "" {
 		return writeSpecError(binary, "ROLLOUT_INVALID", *flags.format, *flags.traceID, errors.New("--service and --operation are required"), nil, stdout, stderr)
@@ -73,7 +171,7 @@ func runRolloutWatch(binary string, args []string, root rootOptions, stdout, std
 	if loaded.Config.Mode != config.ModeDirect {
 		return writeSpecError(binary, "ROLLOUT_INVALID", *flags.format, *flags.traceID, errors.New("rollout watch currently requires --direct mode"), nil, stdout, stderr)
 	}
-	store, err := client.OpenObjectStore(loaded.Config)
+	store, err := openRolloutObjectStore(loaded.Config)
 	if err != nil {
 		return writeClientError(binary, "rollout", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
@@ -114,5 +212,38 @@ func runRolloutWatch(binary string, args []string, root rootOptions, stdout, std
 func printRolloutUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s rollout <command> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  start  Start provider rollout for a desired release")
 	fmt.Fprintln(w, "  watch  Watch provider rollout progress")
+}
+
+func splitRolloutArgs(args []string) ([]string, []string, error) {
+	valueFlags := map[string]bool{
+		"api-url":                true,
+		"config":                 true,
+		"context":                true,
+		"env":                    true,
+		"format":                 true,
+		"instance-warmup":        true,
+		"min-healthy-percentage": true,
+		"mode":                   true,
+		"operation":              true,
+		"provider":               true,
+		"provider-id":            true,
+		"region":                 true,
+		"release-id":             true,
+		"rollout-id":             true,
+		"service":                true,
+		"state":                  true,
+		"state-bucket":           true,
+		"trace-id":               true,
+	}
+	return splitArgs(args, valueFlags)
+}
+
+func rolloutReleaseHint(store objstore.ObjectStore, service string) string {
+	doc, err := state.NewClient(store).GetServiceControl(nilContext(), service)
+	if err != nil {
+		return ""
+	}
+	return doc.Control.DesiredRelease
 }

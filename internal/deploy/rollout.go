@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/s1liconcow/skiff/internal/events"
@@ -41,10 +42,15 @@ func (d Deployer) StartRollout(ctx context.Context, req StartRolloutRequest) (*p
 	if err := d.requireRolloutDeps(); err != nil {
 		return nil, err
 	}
+	releaseID, err := d.resolveRolloutReleaseID(ctx, req.Service, req.ReleaseID)
+	if err != nil {
+		return nil, err
+	}
+	req.ReleaseID = releaseID
 	rollout, err := d.Provider.StartRollout(ctx, provider.RolloutRequest{
 		Service:              req.Service,
 		Env:                  req.Env,
-		ReleaseID:            req.ReleaseID,
+		ReleaseID:            releaseID,
 		OperationID:          req.OperationID,
 		MinHealthyPercentage: req.MinHealthyPercentage,
 		InstanceWarmup:       req.InstanceWarmup,
@@ -59,6 +65,9 @@ func (d Deployer) StartRollout(ctx context.Context, req StartRolloutRequest) (*p
 		ObservedAt:  canonical.Time(d.now()),
 		Description: "ASG instance refresh rollout",
 	}); err != nil {
+		return nil, err
+	}
+	if err := d.setOperationStatus(ctx, req.Service, req.OperationID, schema.OperationRunning); err != nil {
 		return nil, err
 	}
 	_ = d.appendRolloutEvent(ctx, req.Service, req.OperationID, req.TraceID, req.Actor, "rollout.started", "ASG instance refresh started", schema.Fact{Type: "provider_id", Message: rollout.ProviderID})
@@ -207,6 +216,21 @@ func (d Deployer) markStableAfterRollout(ctx context.Context, req WatchRolloutRe
 	}
 	leaseHeld = false
 	return nil
+}
+
+func (d Deployer) resolveRolloutReleaseID(ctx context.Context, service, releaseID string) (string, error) {
+	if strings.TrimSpace(releaseID) != "" {
+		return strings.TrimSpace(releaseID), nil
+	}
+	stateClient := state.NewClient(d.Store, state.WithClock(clockFunc(d.now)))
+	current, err := stateClient.GetServiceControl(ctx, service)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(current.Control.DesiredRelease) == "" {
+		return "", fmt.Errorf("service %s has no desired release; pass --release-id", service)
+	}
+	return strings.TrimSpace(current.Control.DesiredRelease), nil
 }
 
 func (d Deployer) getOperationControl(ctx context.Context, service, operationID string) (schema.OperationControl, string, error) {
