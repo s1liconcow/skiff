@@ -481,87 +481,72 @@ func TestStatefulGroupPlanAndExplainReadOnlyJSON(t *testing.T) {
 	}
 }
 
-func TestStatefulGroupDeployJSONWritesObjectState(t *testing.T) {
+func TestStatefulGroupDeployJSONRunsInPlaceReleaseUpdate(t *testing.T) {
 	clearSkiffEnv(t)
 	root := t.TempDir()
 	specPath := filepath.Join("..", "..", "examples", "stateful", "jetstream", "skiff.yaml")
 	var stdout, stderr bytes.Buffer
 	code := Run("skiff", []string{
+		"stateful",
+		"apply",
+		specPath,
+		"--direct",
+		"--state", "file://" + root,
+		"--env", "prod",
+		"--provider", "fake",
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", "tr_stateful_apply_seed",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("stateful apply exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Run("skiff", []string{
 		"deploy",
 		specPath,
 		"--direct",
 		"--state", "file://" + root,
 		"--env", "prod",
-		"--provider", "aws",
-		"--region", "us-west-2",
+		"--provider", "fake",
+		"--region", "local",
+		"--release-id", "rel_stateful_new",
 		"--format", "json",
 		"--trace-id", "tr_stateful_deploy",
 	}, &stdout, &stderr)
 	if code != ExitSuccess {
-		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+		t.Fatalf("deploy exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
-	var got struct {
-		OK      bool   `json:"ok"`
-		TraceID string `json:"trace_id"`
-		Result  struct {
-			OK            bool   `json:"ok"`
-			Group         string `json:"group"`
-			Env           string `json:"env"`
-			OperationID   string `json:"operation_id"`
-			Risk          string `json:"risk"`
-			Reversibility string `json:"reversibility"`
-			GroupControl  struct {
-				Replicas  int `json:"replicas"`
-				Operation struct {
-					ID    string `json:"id"`
-					State string `json:"state"`
-				} `json:"operation"`
-			} `json:"group_control"`
-			MemberControls []struct {
-				Member  int    `json:"member"`
-				DNSName string `json:"dns_name"`
-				Phase   string `json:"phase"`
-			} `json:"member_controls"`
-			RecommendedActions []recommendedAction `json:"recommended_actions"`
-		} `json:"result"`
-	}
+	var got statefulOrderedSagaOutput
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("deploy output is not valid JSON: %v\n%s", err, stdout.String())
 	}
-	if !got.OK || got.TraceID != "tr_stateful_deploy" || !got.Result.OK || got.Result.Group != "orders-stream" || got.Result.OperationID == "" {
+	if !got.OK || got.TraceID != "tr_stateful_deploy" || got.Result.OperationKind != "stateful.release_update" || got.Result.Group != "orders-stream" || got.Result.ReleaseID != "rel_stateful_new" {
 		t.Fatalf("unexpected deploy envelope: %+v", got)
 	}
-	if got.Result.Risk != "medium" || got.Result.Reversibility != "compensatable" {
-		t.Fatalf("stateful deploy missing risk/reversibility: %+v", got.Result)
+	if !got.Result.InPlace || got.Result.ReplacesVM || got.Result.MovesVolume || got.Result.ChangesGeneration {
+		t.Fatalf("stateful deploy should be visibly in-place: %+v", got.Result)
 	}
-	if got.Result.GroupControl.Replicas != 3 || got.Result.GroupControl.Operation.ID != got.Result.OperationID || got.Result.GroupControl.Operation.State != "succeeded" {
-		t.Fatalf("stateful deploy missing group operation: %+v", got.Result.GroupControl)
-	}
-	if len(got.Result.MemberControls) != 3 || got.Result.MemberControls[0].DNSName == "" || got.Result.MemberControls[0].Phase != "ready" {
-		t.Fatalf("stateful deploy missing member controls: %+v", got.Result.MemberControls)
-	}
-	if len(got.Result.RecommendedActions) < 3 || !got.Result.RecommendedActions[2].Mutating || got.Result.RecommendedActions[2].Risk != schema.RiskHigh {
-		t.Fatalf("stateful deploy missing agent-safe recommendations: %+v", got.Result.RecommendedActions)
+	if len(got.Result.RecommendedActions) < 3 || got.Result.RecommendedActions[2].ID != "replace_member" || !got.Result.RecommendedActions[2].Mutating || got.Result.RecommendedActions[2].Risk != schema.RiskHigh {
+		t.Fatalf("stateful deploy missing separate high-risk replacement action: %+v", got.Result.RecommendedActions)
 	}
 	for _, key := range []string{
-		"stateful/orders-stream/control.json",
-		"stateful/orders-stream/members/0/control.json",
-		"services/orders-stream/operations/" + got.Result.OperationID + "/intent.json",
-		"services/orders-stream/operations/" + got.Result.OperationID + "/control.json",
+		"services/orders-stream/releases/rel_stateful_new/release.json",
+		"services/orders-stream/releases/rel_stateful_new/runtime-manifest.json",
+		"sagas/" + got.Result.SagaID + "/intent.json",
+		"sagas/" + got.Result.SagaID + "/control.json",
 	} {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(key))); err != nil {
 			t.Fatalf("stateful deploy did not write %s: %v", key, err)
 		}
 	}
-	audits, err := countFilesUnder(filepath.Join(root, "audit"))
-	if err != nil {
-		t.Fatalf("stateful deploy did not write audit objects: %v", err)
-	}
-	if audits < 2 {
-		t.Fatalf("audit count = %d, want at least 2", audits)
+	member := readJSONFile[schema.StatefulMemberControl](t, filepath.Join(root, "stateful", "orders-stream", "members", "0", "control.json"))
+	if member.ReleaseID != "rel_stateful_new" || member.Generation != 1 || member.Replacement != nil {
+		t.Fatalf("stateful deploy should update release in place without changing generation or starting replacement: %+v", member)
 	}
 }
 
@@ -791,6 +776,19 @@ func writeStateObject(t *testing.T, root, key string, value any) {
 	if err := os.WriteFile(path, append(body, '\n'), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func readJSONFile[T any](t *testing.T, path string) T {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var value T
+	if err := canonical.UnmarshalStrict(body, &value); err != nil {
+		t.Fatalf("decode %s: %v", path, err)
+	}
+	return value
 }
 
 func countFilesUnder(root string) (int, error) {

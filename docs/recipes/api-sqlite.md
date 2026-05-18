@@ -40,12 +40,30 @@ EBS volume, EBS attachment, Route53 record when a DNS zone is configured, IAM
 role, security group, launch template, target group, CloudWatch logs and
 metrics, an EBS snapshot policy, and a fencing policy.
 
-Apply only through StatefulGroup workflows so the durable control documents and
-member controls are written before provider changes continue:
+Apply the StatefulGroup object state first so the durable group and member
+controls exist before release updates target named members:
 
 ```bash
 skiff stateful apply examples/stacks/api-sqlite/skiff.yaml --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
 ```
+
+After the group exists, a normal deploy is an in-place release update. It keeps
+member `0`, the VM, the encrypted volume, DNS identity, and member generation in
+place while updating the signed release/runtime manifest keys and restarting the
+workload through the ordered update workflow:
+
+```bash
+skiff deploy examples/stacks/api-sqlite/skiff.yaml --release-id rel_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+```
+
+For operators who already have a published release, the explicit stateful form is:
+
+```bash
+skiff stateful update-release orders-api --release-id rel_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+```
+
+Do not use replacement terminology for this path: it does not detach or move the
+SQLite volume and it does not launch a new VM.
 
 Backups are snapshots of the member volume. Plan first, then create the
 snapshot with direct object-state access:
@@ -55,9 +73,9 @@ skiff stateful backup plan orders-api --members 0 --direct --state s3://skiff-st
 skiff stateful snapshot orders-api --member 0 --backup-id backup_01J... --reason "pre-maintenance sqlite snapshot" --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
 ```
 
-Replacement is high-risk because the SQLite volume must not have two writers.
-Use the explicit replacement saga, which fences the old member before moving the
-volume:
+Replacement is the separate high-risk path because the SQLite volume must not
+have two writers. Use the explicit replacement saga, which fences the old VM
+before moving the volume to a new VM generation:
 
 ```bash
 skiff stateful replace-member orders-api --member 0 --reason "member failed health" --approval-id approval_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json

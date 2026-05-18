@@ -11,13 +11,14 @@ multiRegion:
     name: api
     artifact:
       type: oci
-      ref: registry.example.com/orders-api@sha256:REPLACE_WITH_DIGEST
+      ref: registry.example.com/orders-rpc@sha256:REPLACE_WITH_DIGEST
     runtime:
       port: 8080
       env:
         SKIFF_STACK: orders
+        PORT: "8080"
       health:
-        path: /healthz
+        path: /readyz
     scale:
       min: 2
       max: 4

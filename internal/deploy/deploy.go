@@ -364,10 +364,10 @@ func (d Deployer) ensureServiceControl(ctx context.Context, client *state.Client
 }
 
 func (d Deployer) publishRelease(ctx context.Context, graph *ir.Graph, req Request, now time.Time) (*schema.RuntimeManifest, *schema.ReleaseManifest, error) {
-	if len(graph.Resources.RuntimeManifests) == 0 {
-		return nil, nil, fmt.Errorf("compiled graph has no runtime manifest")
+	compiled, err := releaseRuntimeSource(graph)
+	if err != nil {
+		return nil, nil, err
 	}
-	compiled := graph.Resources.RuntimeManifests[0]
 	runtimeManifest := schema.RuntimeManifest{
 		SchemaVersion: schema.Version,
 		Service:       graph.Service,
@@ -421,6 +421,41 @@ func (d Deployer) publishRelease(ctx context.Context, graph *ir.Graph, req Reque
 		return nil, nil, err
 	}
 	return &runtimeManifest, &signedManifest, nil
+}
+
+type runtimeSource struct {
+	Artifact    ir.Artifact
+	Command     []string
+	Env         map[string]string
+	HealthCheck ir.HealthCheck
+	Metrics     ir.AppMetrics
+}
+
+func releaseRuntimeSource(graph *ir.Graph) (runtimeSource, error) {
+	if graph == nil {
+		return runtimeSource{}, fmt.Errorf("graph is required")
+	}
+	if len(graph.Resources.RuntimeManifests) > 0 {
+		compiled := graph.Resources.RuntimeManifests[0]
+		return runtimeSource{
+			Artifact:    compiled.Artifact,
+			Command:     append([]string(nil), compiled.Command...),
+			Env:         cloneStringMap(compiled.Env),
+			HealthCheck: compiled.HealthCheck,
+			Metrics:     compiled.Metrics,
+		}, nil
+	}
+	if len(graph.Resources.StatefulRecipes) > 0 {
+		recipe := graph.Resources.StatefulRecipes[0]
+		return runtimeSource{
+			Artifact:    recipe.Artifact,
+			Command:     append([]string(nil), recipe.Command...),
+			Env:         cloneStringMap(recipe.Env),
+			HealthCheck: recipe.HealthCheck,
+			Metrics:     recipe.Metrics,
+		}, nil
+	}
+	return runtimeSource{}, fmt.Errorf("compiled graph has no runtime manifest or stateful recipe runtime")
 }
 
 func (d Deployer) now() time.Time {

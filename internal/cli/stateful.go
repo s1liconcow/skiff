@@ -83,6 +83,8 @@ func runStateful(binary string, args []string, root rootOptions, stdout, stderr 
 		return runStatefulLogs(binary, args[1:], root, stdout, stderr)
 	case "metrics":
 		return runStatefulMetrics(binary, args[1:], root, stdout, stderr)
+	case "update-release":
+		return runStatefulUpdateRelease(binary, args[1:], root, stdout, stderr)
 	case "replace-member":
 		return runStatefulReplaceMember(binary, args[1:], root, stdout, stderr)
 	case "snapshot":
@@ -405,6 +407,68 @@ func runStatefulSolve(binary string, args []string, root rootOptions, stdout, st
 	}
 	graph := agent.Solve(*diagnosis, agent.SolveOptions{Goal: *goal, Service: *group, TraceID: *flags.traceID, Binary: binary})
 	return writeStatefulSolveResult(binary, *flags.format, graph, stdout, stderr)
+}
+
+func runStatefulUpdateRelease(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" stateful update-release", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := addClientFlags(fs, root)
+	group := fs.String("group", "", "StatefulGroup name")
+	releaseID := fs.String("release-id", "", "release ID to run on existing named members")
+	operationID := fs.String("operation-id", "", "operation ID to use")
+	sagaID := fs.String("saga-id", "", "saga ID to use")
+	membersValue := fs.String("members", "", "comma-separated StatefulGroup member ordinals; defaults to object-state members")
+	maxUnavailable := fs.Int("max-unavailable", 1, "maximum unavailable StatefulGroup members during release update")
+	run := fs.Bool("run", true, "run the release update saga after creating it")
+
+	flagArgs, positionals, err := splitStatefulUpdateReleaseArgs(args)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful update-release", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
+		return writeStatefulCommandError(binary, "stateful update-release", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeStatefulCommandError(binary, "stateful update-release", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	if *group == "" && len(positionals) == 1 {
+		*group = positionals[0]
+	}
+	if *group == "" || *releaseID == "" {
+		return writeStatefulCommandError(binary, "stateful update-release", *flags.format, *flags.traceID, errors.New("StatefulGroup name and --release-id are required"), stdout, stderr)
+	}
+	_ = flags.noColor
+	_ = flags.yes
+
+	loaded, err := flags.load(binary, root, fs)
+	if err != nil {
+		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+	}
+	if loaded.Config.Mode != config.ModeDirect {
+		return writeStatefulCommandError(binary, "stateful update-release", *flags.format, *flags.traceID, errors.New("stateful update-release currently requires --direct mode"), stdout, stderr)
+	}
+	members, err := parseMemberOrdinals(*membersValue)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful update-release", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	req := templates.StatefulOrderedUpdateRequest{
+		SagaID:         *sagaID,
+		OperationID:    *operationID,
+		Group:          *group,
+		Env:            loaded.Config.Env,
+		ReleaseID:      *releaseID,
+		Members:        members,
+		MaxUnavailable: *maxUnavailable,
+		Actor:          schema.Actor{ID: "skiff-cli", Type: "user"},
+		TraceID:        *flags.traceID,
+	}
+	result, err := createAndMaybeRunStatefulOrdered(nilContext(), binary, loaded.Config, req, *run)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful update-release", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	return writeStatefulOrderedSagaResult(binary, "stateful update-release", *flags.format, *flags.traceID, *result, stdout, stderr)
 }
 
 func runStatefulLogs(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
@@ -1157,6 +1221,30 @@ func splitStatefulSolveArgs(args []string) ([]string, []string, error) {
 	return splitArgs(args, valueFlags)
 }
 
+func splitStatefulUpdateReleaseArgs(args []string) ([]string, []string, error) {
+	valueFlags := map[string]bool{
+		"api-url":         true,
+		"config":          true,
+		"context":         true,
+		"env":             true,
+		"format":          true,
+		"group":           true,
+		"max-unavailable": true,
+		"members":         true,
+		"mode":            true,
+		"operation-id":    true,
+		"provider":        true,
+		"region":          true,
+		"release-id":      true,
+		"run":             false,
+		"saga-id":         true,
+		"state":           true,
+		"state-bucket":    true,
+		"trace-id":        true,
+	}
+	return splitArgs(args, valueFlags)
+}
+
 func splitStatefulLogsArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
 		"api-url":      true,
@@ -1331,6 +1419,7 @@ func printStatefulUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  solve      Render an agent action graph for StatefulGroup recovery")
 	fmt.Fprintln(w, "  logs       Query StatefulGroup or member logs")
 	fmt.Fprintln(w, "  metrics    Query StatefulGroup or member metrics")
+	fmt.Fprintln(w, "  update-release  Update existing named members in place to a release")
 	fmt.Fprintln(w, "  replace-member  Replace one failed StatefulGroup member through a saga")
 	fmt.Fprintln(w, "  snapshot   Snapshot one StatefulGroup member volume")
 	fmt.Fprintln(w, "  backup     Render StatefulGroup backup saga plans")

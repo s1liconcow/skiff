@@ -130,7 +130,7 @@ func StatefulOrderedUpdate(req StatefulOrderedUpdateRequest) (saga.CreateRequest
 			TraceID:       req.TraceID,
 			Risk:          schema.RiskMedium,
 			Reversibility: schema.Compensatable,
-			Summary:       fmt.Sprintf("ordered update stateful group %s to release %s", req.Group, req.ReleaseID),
+			Summary:       fmt.Sprintf("ordered in-place release update for stateful group %s to release %s", req.Group, req.ReleaseID),
 			CreatedAt:     now,
 			Params:        params,
 		},

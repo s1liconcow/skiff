@@ -213,7 +213,7 @@ func TestSagaStartStatefulOrderedUpdateDirectJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get member: %v", err)
 	}
-	if member.Control.ReleaseID != "rel_new" || member.Control.Generation != 2 {
+	if member.Control.ReleaseID != "rel_new" || member.Control.Generation != 1 {
 		t.Fatalf("member was not updated by saga start: %+v", member.Control)
 	}
 }

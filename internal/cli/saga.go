@@ -87,26 +87,39 @@ type statefulBackupRestoreOutput struct {
 }
 
 type statefulOrderedSagaResult struct {
-	SagaID       string                     `json:"saga_id"`
-	OperationID  string                     `json:"operation_id,omitempty"`
-	Group        string                     `json:"group"`
-	Env          string                     `json:"env,omitempty"`
-	ReleaseID    string                     `json:"release_id"`
-	Members      []int                      `json:"members,omitempty"`
-	Status       schema.SagaStatus          `json:"status"`
-	NextAction   string                     `json:"next_action,omitempty"`
-	CurrentSteps []string                   `json:"current_steps,omitempty"`
-	Execution    *sagastate.ExecutionResult `json:"execution,omitempty"`
-	Inspect      *sagastate.InspectResult   `json:"inspect,omitempty"`
+	SagaID             string                     `json:"saga_id"`
+	OperationID        string                     `json:"operation_id,omitempty"`
+	OperationKind      string                     `json:"operation_kind,omitempty"`
+	Group              string                     `json:"group"`
+	Env                string                     `json:"env,omitempty"`
+	ReleaseID          string                     `json:"release_id"`
+	Members            []int                      `json:"members,omitempty"`
+	Status             schema.SagaStatus          `json:"status"`
+	Summary            string                     `json:"summary,omitempty"`
+	InPlace            bool                       `json:"in_place"`
+	ReplacesVM         bool                       `json:"replaces_vm"`
+	MovesVolume        bool                       `json:"moves_volume"`
+	ChangesGeneration  bool                       `json:"changes_generation"`
+	NextAction         string                     `json:"next_action,omitempty"`
+	CurrentSteps       []string                   `json:"current_steps,omitempty"`
+	Facts              []schema.Fact              `json:"facts,omitempty"`
+	RecommendedActions []recommendedAction        `json:"recommended_actions,omitempty"`
+	Execution          *sagastate.ExecutionResult `json:"execution,omitempty"`
+	Inspect            *sagastate.InspectResult   `json:"inspect,omitempty"`
 }
 
 type statefulReplacementSagaResult struct {
 	SagaID             string                     `json:"saga_id"`
 	OperationID        string                     `json:"operation_id,omitempty"`
+	OperationKind      string                     `json:"operation_kind,omitempty"`
 	Group              string                     `json:"group"`
 	Env                string                     `json:"env,omitempty"`
 	Member             int                        `json:"member"`
 	Status             schema.SagaStatus          `json:"status"`
+	Summary            string                     `json:"summary,omitempty"`
+	ReplacesVM         bool                       `json:"replaces_vm"`
+	MovesVolume        bool                       `json:"moves_volume"`
+	ChangesGeneration  bool                       `json:"changes_generation"`
 	NextAction         string                     `json:"next_action,omitempty"`
 	CurrentSteps       []string                   `json:"current_steps,omitempty"`
 	Facts              []schema.Fact              `json:"facts,omitempty"`
@@ -932,9 +945,13 @@ func writeCanarySagaResult(binary, command, format, traceID string, result canar
 func writeStatefulOrderedSagaResult(binary, command, format, traceID string, result statefulOrderedSagaResult, stdout, stderr io.Writer) int {
 	switch format {
 	case "human", "text":
-		fmt.Fprintf(stdout, "stateful ordered update saga %s status=%s\n", result.SagaID, result.Status)
+		fmt.Fprintf(stdout, "stateful release update saga %s status=%s\n", result.SagaID, result.Status)
 		fmt.Fprintf(stdout, "group: %s\n", result.Group)
 		fmt.Fprintf(stdout, "release: %s\n", result.ReleaseID)
+		fmt.Fprintln(stdout, "mode: in-place release update")
+		fmt.Fprintln(stdout, "same VM: true")
+		fmt.Fprintln(stdout, "same volume: true")
+		fmt.Fprintln(stdout, "member generation changes: false")
 		if result.OperationID != "" {
 			fmt.Fprintf(stdout, "operation: %s\n", result.OperationID)
 		}
@@ -958,6 +975,10 @@ func writeStatefulReplacementSagaResult(binary, command, format, traceID string,
 	case "human", "text":
 		fmt.Fprintf(stdout, "stateful replacement saga %s status=%s\n", result.SagaID, result.Status)
 		fmt.Fprintf(stdout, "member: %s/%d\n", result.Group, result.Member)
+		fmt.Fprintln(stdout, "mode: fenced VM replacement")
+		fmt.Fprintln(stdout, "new VM: true")
+		fmt.Fprintln(stdout, "moves volume: true, after fencing")
+		fmt.Fprintln(stdout, "member generation changes: true")
 		if result.OperationID != "" {
 			fmt.Fprintf(stdout, "operation: %s\n", result.OperationID)
 		}
@@ -1056,16 +1077,23 @@ func statefulOrderedResultFromInspect(inspect sagastate.InspectResult, execution
 	}
 	_ = json.Unmarshal(inspect.Intent.Params, &params)
 	result := statefulOrderedSagaResult{
-		SagaID:       inspect.SagaID,
-		OperationID:  params.OperationID,
-		Group:        firstNonEmptyString(params.Group, inspect.Target.Name),
-		Env:          params.Env,
-		ReleaseID:    params.ReleaseID,
-		Members:      append([]int(nil), params.Members...),
-		Status:       inspect.Status,
-		CurrentSteps: append([]string(nil), inspect.CurrentSteps...),
-		Execution:    execution,
-		Inspect:      &inspect,
+		SagaID:            inspect.SagaID,
+		OperationID:       params.OperationID,
+		OperationKind:     "stateful.release_update",
+		Group:             firstNonEmptyString(params.Group, inspect.Target.Name),
+		Env:               params.Env,
+		ReleaseID:         params.ReleaseID,
+		Members:           append([]int(nil), params.Members...),
+		Status:            inspect.Status,
+		Summary:           "Update the release on existing named members without replacing VMs or moving volumes.",
+		InPlace:           true,
+		ReplacesVM:        false,
+		MovesVolume:       false,
+		ChangesGeneration: false,
+		CurrentSteps:      append([]string(nil), inspect.CurrentSteps...),
+		Facts:             statefulReleaseUpdateFacts(params.Group, params.Members),
+		Execution:         execution,
+		Inspect:           &inspect,
 	}
 	switch inspect.Status {
 	case schema.SagaSucceeded:
@@ -1075,7 +1103,63 @@ func statefulOrderedResultFromInspect(inspect sagastate.InspectResult, execution
 	default:
 		result.NextAction = "resume"
 	}
+	result.RecommendedActions = statefulReleaseUpdateRecommendedActions(result)
 	return result
+}
+
+func statefulOrderedResultFromRequest(req templates.StatefulOrderedUpdateRequest, status schema.SagaStatus) statefulOrderedSagaResult {
+	req = templates.NormalizeStatefulOrderedUpdateRequest(req)
+	result := statefulOrderedSagaResult{
+		SagaID:            req.SagaID,
+		OperationID:       req.OperationID,
+		OperationKind:     "stateful.release_update",
+		Group:             req.Group,
+		Env:               req.Env,
+		ReleaseID:         req.ReleaseID,
+		Members:           append([]int(nil), req.Members...),
+		Status:            status,
+		Summary:           "Update the release on existing named members without replacing VMs or moving volumes.",
+		InPlace:           true,
+		ReplacesVM:        false,
+		MovesVolume:       false,
+		ChangesGeneration: false,
+		NextAction:        "create_saga",
+		CurrentSteps:      []string{"plan-ordered-members"},
+		Facts:             statefulReleaseUpdateFacts(req.Group, req.Members),
+	}
+	result.RecommendedActions = statefulReleaseUpdateRecommendedActions(result)
+	return result
+}
+
+func statefulReleaseUpdateFacts(group string, members []int) []schema.Fact {
+	facts := []schema.Fact{
+		{Type: "mode", Message: "in-place release update"},
+		{Type: "vm", Message: "same VM; this operation does not replace instances"},
+		{Type: "volume", Message: "same durable volume; this operation does not detach or move it"},
+		{Type: "generation", Message: "member generation is unchanged"},
+	}
+	if group != "" {
+		facts = append(facts, schema.Fact{Type: "stateful_group", Message: group})
+	}
+	if len(members) > 0 {
+		facts = append(facts, schema.Fact{Type: "members", Message: fmt.Sprint(members)})
+	}
+	return facts
+}
+
+func statefulReleaseUpdateRecommendedActions(result statefulOrderedSagaResult) []recommendedAction {
+	return []recommendedAction{
+		{ID: "inspect_stateful", Command: fmt.Sprintf("skiff stateful inspect %s --format json", result.Group), Mutating: false},
+		{ID: "inspect_saga", Command: fmt.Sprintf("skiff ops inspect %s --format json", result.SagaID), Mutating: false},
+		{
+			ID:            "replace_member",
+			Command:       fmt.Sprintf("skiff stateful replace-member %s --member <ordinal> --format json", result.Group),
+			Mutating:      true,
+			Safety:        "separate high-risk path; fences the old VM before moving the durable volume",
+			Reversibility: schema.Compensatable,
+			Risk:          schema.RiskHigh,
+		},
+	}
 }
 
 func statefulReplacementResultFromInspect(inspect sagastate.InspectResult, execution *sagastate.ExecutionResult) statefulReplacementSagaResult {
@@ -1087,16 +1171,24 @@ func statefulReplacementResultFromInspect(inspect sagastate.InspectResult, execu
 	}
 	_ = json.Unmarshal(inspect.Intent.Params, &params)
 	result := statefulReplacementSagaResult{
-		SagaID:       inspect.SagaID,
-		OperationID:  params.OperationID,
-		Group:        firstNonEmptyString(params.Group, inspect.Target.Name),
-		Env:          params.Env,
-		Member:       params.Member,
-		Status:       inspect.Status,
-		CurrentSteps: append([]string(nil), inspect.CurrentSteps...),
+		SagaID:            inspect.SagaID,
+		OperationID:       params.OperationID,
+		OperationKind:     "stateful.member_replacement",
+		Group:             firstNonEmptyString(params.Group, inspect.Target.Name),
+		Env:               params.Env,
+		Member:            params.Member,
+		Status:            inspect.Status,
+		Summary:           "Replace the VM that owns a named member after fencing, then move the durable volume.",
+		ReplacesVM:        true,
+		MovesVolume:       true,
+		ChangesGeneration: true,
+		CurrentSteps:      append([]string(nil), inspect.CurrentSteps...),
 		Facts: []schema.Fact{
 			{Type: "stateful_member", Message: fmt.Sprintf("%s/%d", firstNonEmptyString(params.Group, inspect.Target.Name), params.Member)},
 			{Type: "operation", Message: params.OperationID},
+			{Type: "vm", Message: "new VM after old writer is fenced"},
+			{Type: "volume", Message: "same durable volume is moved only after fencing"},
+			{Type: "generation", Message: "member generation changes"},
 		},
 		Execution: execution,
 		Inspect:   &inspect,

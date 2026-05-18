@@ -54,7 +54,7 @@ func TestOrderedUpdateExecutorAdvancesMembersSequentially(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get member %d: %v", member, err)
 		}
-		if doc.Control.ReleaseID != "rel_new" || doc.Control.Generation != 2 || doc.Control.Phase != state.StatefulMemberReady || doc.Control.Lease != nil {
+		if doc.Control.ReleaseID != "rel_new" || doc.Control.Generation != 1 || doc.Control.Phase != state.StatefulMemberReady || doc.Control.Lease != nil {
 			t.Fatalf("member %d was not updated safely: %+v", member, doc.Control)
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"sort"
 	"time"
 
 	"github.com/s1liconcow/skiff/internal/client"
@@ -20,6 +21,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/saga/templates"
 	"github.com/s1liconcow/skiff/internal/security/signing"
 	"github.com/s1liconcow/skiff/internal/spec"
+	"github.com/s1liconcow/skiff/internal/state/paths"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 )
 
@@ -95,22 +97,58 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 		return writeSpecError(binary, "SPEC_COMPILE_FAILED", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 	}
 	if doc.Kind == spec.KindStatefulGroup {
-		store, cloud, err := openStatefulStoreAndProvider(loaded.Config, !*dryRun && !*planOnly)
-		if err != nil {
-			return writeClientError(binary, "deploy", *flags.format, *flags.traceID, err, stdout, stderr)
-		}
-		result, err := (deploy.StatefulApplier{Store: store, Provider: cloud}).Apply(nilContext(), graph, deploy.StatefulRequest{
+		updateReq := templates.StatefulOrderedUpdateRequest{
 			Actor:       schema.Actor{ID: "skiff-cli", Type: "user"},
 			TraceID:     *flags.traceID,
 			OperationID: *operationID,
+			Group:       graph.Service,
+			Env:         graph.Env,
+			ReleaseID:   firstNonEmptyString(*releaseID, "rel_"+events.NewID(time.Now().UTC(), *flags.traceID+graph.Service+"stateful-release-update")),
+			Members:     statefulMembersFromGraph(graph),
+			Recipe:      statefulRecipeName(graph),
+		}
+		if *dryRun || *planOnly {
+			return writeStatefulOrderedSagaResult(binary, "deploy", *flags.format, *flags.traceID, statefulOrderedResultFromRequest(updateReq, schema.SagaPending), stdout, stderr)
+		}
+		store, err := client.OpenObjectStore(loaded.Config)
+		if err != nil {
+			return writeClientError(binary, "deploy", *flags.format, *flags.traceID, err, stdout, stderr)
+		}
+		members, err := orderedUpdateMembersFromControl(nilContext(), store, graph.Service)
+		if err != nil {
+			return writeStatefulCommandError(binary, "deploy", *flags.format, *flags.traceID, fmt.Errorf("stateful deploy updates the release on existing named members; run %s stateful apply %s --direct --state <state> first if this group has not been applied: %w", binary, *filePath, err), stdout, stderr)
+		}
+		updateReq.Members = members
+		signer, err := signerForDeploy(loaded.Config, *keyID, *signingSeed)
+		if err != nil {
+			return writeSpecError(binary, "DEPLOY_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
+		}
+		published, err := (deploy.Deployer{Store: store, Signer: signer}).PublishRelease(nilContext(), graph, deploy.Request{
+			Actor:       updateReq.Actor,
+			TraceID:     updateReq.TraceID,
+			ReleaseID:   updateReq.ReleaseID,
+			OperationID: updateReq.OperationID,
 			ApprovalID:  *approvalID,
-			DryRun:      *dryRun,
-			PlanOnly:    *planOnly,
 		})
 		if err != nil {
-			return writeStatefulCommandError(binary, "deploy", *flags.format, *flags.traceID, err, stdout, stderr)
+			return writeSpecError(binary, "DEPLOY_FAILED", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 		}
-		return writeStatefulApplyResult(binary, *flags.format, *flags.traceID, result, stdout, stderr)
+		releaseKey, err := paths.ReleaseManifest(graph.Service, published.ReleaseID)
+		if err != nil {
+			return writeSpecError(binary, "DEPLOY_FAILED", *flags.format, *flags.traceID, err, nil, stdout, stderr)
+		}
+		updateReq.OperationID = published.OperationID
+		updateReq.ReleaseID = published.ReleaseID
+		updateReq.TraceID = published.TraceID
+		updateReq.ReleaseManifestKey = releaseKey
+		if published.ReleaseManifest != nil {
+			updateReq.RuntimeManifestKey = published.ReleaseManifest.RuntimeManifestKey
+		}
+		result, err := createAndMaybeRunStatefulOrdered(nilContext(), binary, loaded.Config, updateReq, true)
+		if err != nil {
+			return writeClientError(binary, "deploy", *flags.format, *flags.traceID, err, stdout, stderr)
+		}
+		return writeStatefulOrderedSagaResult(binary, "deploy", *flags.format, *flags.traceID, *result, stdout, stderr)
 	}
 	if *shadow {
 		graph = shadowDeployGraph(graph)
@@ -286,6 +324,31 @@ func shadowDeployGraph(graph *ir.Graph) *ir.Graph {
 	copyGraph.Resources = graph.Resources
 	copyGraph.Resources.Listeners = nil
 	return &copyGraph
+}
+
+func statefulMembersFromGraph(graph *ir.Graph) []int {
+	if graph == nil {
+		return nil
+	}
+	members := make([]int, 0, len(graph.Resources.StatefulMembers))
+	seen := map[int]bool{}
+	for _, member := range graph.Resources.StatefulMembers {
+		if seen[member.Ordinal] {
+			continue
+		}
+		seen[member.Ordinal] = true
+		members = append(members, member.Ordinal)
+	}
+	sort.Ints(members)
+	return members
+}
+
+func statefulRecipeName(graph *ir.Graph) string {
+	if graph == nil || len(graph.Resources.StatefulRecipes) == 0 {
+		return ""
+	}
+	recipe := graph.Resources.StatefulRecipes[0]
+	return firstNonEmptyString(recipe.Name, recipe.Ref)
 }
 
 func signerForDeploy(cfg config.Config, keyID, seedValue string) (signing.Signer, error) {

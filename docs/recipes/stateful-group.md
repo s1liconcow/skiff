@@ -151,16 +151,31 @@ The platform owns fencing, volumes, stable identity, and control documents.
 Recipes decide how a database or other stateful workload recovers safely after
 the VM and volume mechanics are complete.
 
-## Ordered Update
+## Release Update Versus Replacement
 
-Ordered updates are explicit sagas, not hidden reconciliation. A member is
-drained, updated, health-checked, and recorded before the next member starts.
-The saga records step results and provider operation IDs so it can resume after
-an interruption.
+Stateful release updates and member replacements are different operator actions.
+
+`skiff deploy <StatefulGroup spec>` updates software in place on existing named
+members. It keeps the VM instance, durable volume, DNS identity, and member
+generation stable while writing new release/runtime manifest keys into member
+control documents.
+
+`skiff stateful replace-member <group> --member <n>` replaces the VM that owns a
+member. It must fence the old writer, detach the existing volume, launch a new
+VM, attach the volume, update DNS, and publish a new member generation.
+
+If an operation would update the release and replace the VM, model it as two
+explicit operations so the volume-moving risk remains visible.
+
+## Ordered Release Update
+
+Ordered release updates are explicit sagas, not hidden reconciliation. A member
+is drained, updated in place, health-checked, and recorded before the next member
+starts. The saga records step results so it can resume after an interruption.
+It does not detach volumes, launch replacement VMs, or change member generation.
 
 ```bash
-skiff saga start stateful.ordered_update ledger-stream \
-  --group ledger-stream \
+skiff stateful update-release ledger-stream \
   --release-id rel_2026_05_18_ledger \
   --members 0 \
   --max-unavailable 1 \

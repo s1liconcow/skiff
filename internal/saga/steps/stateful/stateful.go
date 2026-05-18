@@ -571,7 +571,7 @@ func (s OrderedMemberUpdate) ValidateParams(ctx context.Context, params json.Raw
 }
 
 func (s OrderedMemberUpdate) Plan(ctx context.Context, req steps.StepRequest) (*steps.StepPlan, error) {
-	return &steps.StepPlan{Summary: "update one stateful member release after durable generation fencing and health checks", Risk: schema.RiskMedium, Reversibility: schema.Compensatable}, nil
+	return &steps.StepPlan{Summary: "update one stateful member release in place; keep the same VM, volume, DNS identity, and member generation", Risk: schema.RiskMedium, Reversibility: schema.Compensatable}, nil
 }
 
 func (s OrderedMemberUpdate) Run(ctx context.Context, req steps.StepRequest) (*steps.StepResult, error) {
@@ -613,7 +613,6 @@ func (s OrderedMemberUpdate) Run(ctx context.Context, req steps.StepRequest) (*s
 	previous := doc.Control
 	handle, doc, err = client.UpdateStatefulMemberWithLeaseCAS(ctx, *handle, func(control *schema.StatefulMemberControl) error {
 		control.Phase = state.StatefulMemberUpdating
-		control.Generation++
 		control.ReleaseID = params.ReleaseID
 		control.ReleaseManifestKey = params.ReleaseManifestKey
 		control.RuntimeManifestKey = params.RuntimeManifestKey
@@ -652,7 +651,7 @@ func (s OrderedMemberUpdate) Run(ctx context.Context, req steps.StepRequest) (*s
 	if err := updateGroupMemberSummary(ctx, client, params.Group, doc.Control, params.OperationID, actor, req.TraceID); err != nil {
 		return nil, err
 	}
-	return succeeded("updated stateful member", orderedMemberResult(params, doc.Control, hooks, fmt.Sprintf("advanced generation from %d to %d", previous.Generation, doc.Control.Generation)))
+	return succeeded("updated stateful member release in place", orderedMemberResult(params, doc.Control, hooks, fmt.Sprintf("kept generation %d on the same member VM and durable volume", previous.Generation)))
 }
 
 func (s OrderedMemberUpdate) Resume(ctx context.Context, req steps.StepRequest) (*steps.StepResult, error) {
@@ -661,7 +660,7 @@ func (s OrderedMemberUpdate) Resume(ctx context.Context, req steps.StepRequest) 
 
 func (s OrderedMemberUpdate) Compensate(ctx context.Context, req steps.StepRequest, result schema.StepResult) (*steps.StepResult, error) {
 	params, _ := decodeOrderedParams(req.Node.Params, true)
-	return &steps.StepResult{Status: steps.StatusSucceeded, Summary: "stateful member update compensation requires explicit follow-up", Result: rawJSON(map[string]any{"group": params.Group, "member": params.Member, "release_id": params.ReleaseID, "summary": "previous durable generation is not automatically restored"})}, nil
+	return &steps.StepResult{Status: steps.StatusSucceeded, Summary: "stateful member release update compensation requires explicit follow-up", Result: rawJSON(map[string]any{"group": params.Group, "member": params.Member, "release_id": params.ReleaseID, "summary": "member generation was not changed; restore the previous release with another explicit release update if needed"})}, nil
 }
 
 func (s OrderedMemberUpdate) Doctor(ctx context.Context, req steps.StepRequest) ([]steps.Finding, error) {
@@ -943,6 +942,9 @@ func orderedMemberResult(params OrderedUpdateParams, control schema.StatefulMemb
 		"env":                  control.Env,
 		"member":               control.Member,
 		"generation":           control.Generation,
+		"replaces_vm":          false,
+		"moves_volume":         false,
+		"changes_generation":   false,
 		"release_id":           control.ReleaseID,
 		"release_manifest_key": control.ReleaseManifestKey,
 		"runtime_manifest_key": control.RuntimeManifestKey,
@@ -963,6 +965,9 @@ func replacementResultPayload(params ReplaceMemberParams, result *stateruntime.R
 		"facts": []schema.Fact{
 			{Type: "stateful_member", Message: fmt.Sprintf("%s/%d", params.Group, params.Member)},
 			{Type: "operation", Message: params.OperationID},
+			{Type: "vm", Message: "new VM is launched only after the old writer is fenced"},
+			{Type: "volume", Message: "same durable volume is detached from the old VM and attached to the replacement"},
+			{Type: "generation", Message: "member generation changes for replacement fencing"},
 		},
 		"recommended_actions": replacementRecommendedActions(params, failure),
 	}

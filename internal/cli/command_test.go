@@ -115,6 +115,7 @@ func TestCommandsSupportHelpFlags(t *testing.T) {
 		{"stateful", "solve"},
 		{"stateful", "logs"},
 		{"stateful", "metrics"},
+		{"stateful", "update-release"},
 		{"stateful", "replace-member"},
 		{"stateful", "snapshot"},
 		{"stateful", "backup"},
