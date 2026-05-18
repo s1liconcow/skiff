@@ -58,6 +58,8 @@ func NormalizeGraph(graph Graph) Graph {
 	out.Resources.ManagedDatabases = append([]ManagedDatabase(nil), graph.Resources.ManagedDatabases...)
 	out.Resources.DatabaseSecrets = append([]DatabaseSecret(nil), graph.Resources.DatabaseSecrets...)
 	out.Resources.DatabaseBindings = append([]DatabaseBinding(nil), graph.Resources.DatabaseBindings...)
+	out.Resources.ObjectStores = append([]ObjectStore(nil), graph.Resources.ObjectStores...)
+	out.Resources.ObjectStoreBindings = append([]ObjectStoreBinding(nil), graph.Resources.ObjectStoreBindings...)
 	out.Resources.GlobalTraffic = append([]GlobalTraffic(nil), graph.Resources.GlobalTraffic...)
 	out.Resources.InstanceTemplates = append([]InstanceTemplate(nil), graph.Resources.InstanceTemplates...)
 	out.Resources.AutoscalingGroups = append([]AutoscalingGroup(nil), graph.Resources.AutoscalingGroups...)
@@ -98,6 +100,12 @@ func NormalizeGraph(graph Graph) Graph {
 	})
 	sort.Slice(out.Resources.DatabaseBindings, func(i, j int) bool {
 		return out.Resources.DatabaseBindings[i].Meta.LogicalID < out.Resources.DatabaseBindings[j].Meta.LogicalID
+	})
+	sort.Slice(out.Resources.ObjectStores, func(i, j int) bool {
+		return out.Resources.ObjectStores[i].Meta.LogicalID < out.Resources.ObjectStores[j].Meta.LogicalID
+	})
+	sort.Slice(out.Resources.ObjectStoreBindings, func(i, j int) bool {
+		return out.Resources.ObjectStoreBindings[i].Meta.LogicalID < out.Resources.ObjectStoreBindings[j].Meta.LogicalID
 	})
 	sort.Slice(out.Resources.GlobalTraffic, func(i, j int) bool {
 		return out.Resources.GlobalTraffic[i].Meta.LogicalID < out.Resources.GlobalTraffic[j].Meta.LogicalID

@@ -738,6 +738,12 @@ func graphMetas(graph *ir.Graph) []ir.ResourceMeta {
 	for _, item := range graph.Resources.DatabaseBindings {
 		metas = append(metas, item.Meta)
 	}
+	for _, item := range graph.Resources.ObjectStores {
+		metas = append(metas, item.Meta)
+	}
+	for _, item := range graph.Resources.ObjectStoreBindings {
+		metas = append(metas, item.Meta)
+	}
 	for _, item := range graph.Resources.GlobalTraffic {
 		metas = append(metas, item.Meta)
 	}

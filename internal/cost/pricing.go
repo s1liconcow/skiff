@@ -240,8 +240,8 @@ func warmCapacityFromEvidence(signals ObservedSignals) int {
 
 func pricedLimitations(input Input) []string {
 	limits := []string{
-		"pricing estimates include EC2 instance compute and baseline EBS storage when present; they exclude load balancers, NAT, data transfer, CloudWatch usage, taxes, credits, Savings Plans, and private discounts",
-		"RI estimates are effective hourly equivalents for matching regional Standard RI terms; actual billing can differ with existing reservations, size flexibility, scope, and account discounts",
+		"pricing estimates include EC2 instance compute, RDS instance compute, and baseline EBS/RDS storage when present; they exclude load balancers, NAT, data transfer, CloudWatch usage, taxes, credits, Savings Plans, and private discounts",
+		"RI estimates are effective hourly equivalents for matching regional Standard RI terms; actual billing can differ with existing reservations, size flexibility, scope, engine, and account discounts",
 		"validate every change against service SLOs before mutating production capacity",
 	}
 	if input.Signals.CPUP95Percent == nil || input.Signals.MemoryP95Percent == nil {

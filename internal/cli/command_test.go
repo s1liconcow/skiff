@@ -57,6 +57,7 @@ func TestCommandsSupportHelpFlags(t *testing.T) {
 		{"init"},
 		{"init", "stack"},
 		{"init", "stack", "api-database"},
+		{"init", "stack", "api-sqlite"},
 		{"logs"},
 		{"metrics"},
 		{"object"},

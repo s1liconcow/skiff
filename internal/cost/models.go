@@ -107,6 +107,8 @@ const (
 
 	StorageKindEBSVolumeGBMonth   = "ebs_volume_gb_month"
 	StorageKindEBSSnapshotGBMonth = "ebs_snapshot_gb_month"
+	StorageKindRDSVolumeGBMonth   = "rds_volume_gb_month"
+	StorageKindRDSBackupGBMonth   = "rds_backup_gb_month"
 )
 
 type PricingOptions struct {
@@ -114,15 +116,16 @@ type PricingOptions struct {
 }
 
 type PricingCatalog struct {
-	SchemaVersion   string            `json:"schema_version,omitempty"`
-	Provider        string            `json:"provider"`
-	Region          string            `json:"region"`
-	Currency        string            `json:"currency"`
-	Source          string            `json:"source,omitempty"`
-	PublicationDate string            `json:"publication_date,omitempty"`
-	Version         string            `json:"version,omitempty"`
-	Items           []InstancePricing `json:"items"`
-	StorageRates    []StoragePricing  `json:"storage_rates,omitempty"`
+	SchemaVersion   string                    `json:"schema_version,omitempty"`
+	Provider        string                    `json:"provider"`
+	Region          string                    `json:"region"`
+	Currency        string                    `json:"currency"`
+	Source          string                    `json:"source,omitempty"`
+	PublicationDate string                    `json:"publication_date,omitempty"`
+	Version         string                    `json:"version,omitempty"`
+	Items           []InstancePricing         `json:"items"`
+	DatabaseItems   []DatabaseInstancePricing `json:"database_items,omitempty"`
+	StorageRates    []StoragePricing          `json:"storage_rates,omitempty"`
 }
 
 type InstancePricing struct {
@@ -143,12 +146,24 @@ type PricingRate struct {
 	TermHours          int     `json:"term_hours,omitempty"`
 }
 
+type DatabaseInstancePricing struct {
+	Engine           string        `json:"engine"`
+	Size             string        `json:"size,omitempty"`
+	InstanceClass    string        `json:"instance_class"`
+	DeploymentOption string        `json:"deployment_option,omitempty"`
+	VCPU             int           `json:"vcpu"`
+	MemoryGB         float64       `json:"memory_gb"`
+	Rates            []PricingRate `json:"rates"`
+}
+
 type StoragePricing struct {
-	Kind         string  `json:"kind"`
-	ResourceType string  `json:"resource_type,omitempty"`
-	Unit         string  `json:"unit"`
-	UnitPriceUSD float64 `json:"unit_price_usd"`
-	Summary      string  `json:"summary,omitempty"`
+	Kind             string  `json:"kind"`
+	Engine           string  `json:"engine,omitempty"`
+	ResourceType     string  `json:"resource_type,omitempty"`
+	DeploymentOption string  `json:"deployment_option,omitempty"`
+	Unit             string  `json:"unit"`
+	UnitPriceUSD     float64 `json:"unit_price_usd"`
+	Summary          string  `json:"summary,omitempty"`
 }
 
 type PricingScheme struct {

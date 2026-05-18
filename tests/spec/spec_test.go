@@ -190,8 +190,46 @@ stack:
 	if result.OK {
 		t.Fatal("Validate returned OK, want binding diagnostics")
 	}
-	assertDiagnostic(t, result.Diagnostics, "$.stack.bindings[0].to", "UNKNOWN_STACK_DATABASE")
+	assertDiagnostic(t, result.Diagnostics, "$.stack.bindings[0].to", "UNKNOWN_STACK_RESOURCE")
 	assertDiagnostic(t, result.Diagnostics, "$.stack.bindings[0].as", "INVALID_ENV_NAME")
+}
+
+func TestStackValidationAcceptsObjectStoreBinding(t *testing.T) {
+	doc, err := spec.Decode([]byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: Stack
+metadata:
+  name: orders
+  env: prod
+stack:
+  services:
+    - name: api
+      artifact:
+        type: oci
+        ref: registry.example.com/orders-api@sha256:abc123
+      runtime:
+        port: 8080
+        health:
+          path: /healthz
+  objectStores:
+    - name: data
+      uri: s3://orders-slatedb-prod/slatedb/orders
+      purpose: slatedb
+  bindings:
+    - from: api
+      to: data
+      as: SLATEDB_URI
+`), spec.DecodeOptions{})
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	result := spec.Validate(*doc)
+	if !result.OK {
+		t.Fatalf("Validate diagnostics = %+v, want OK", result.Diagnostics)
+	}
+	if !doc.Stack.ObjectStores[0].Encrypted || !doc.Stack.ObjectStores[0].Versioned || doc.Stack.ObjectStores[0].Access != "read-write" {
+		t.Fatalf("object store defaults missing: %+v", doc.Stack.ObjectStores[0])
+	}
 }
 
 func TestMultiRegionStackValidation(t *testing.T) {

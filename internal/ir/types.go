@@ -13,27 +13,29 @@ type Graph struct {
 }
 
 type Resources struct {
-	WorkloadIdentities []WorkloadIdentity `json:"workload_identities,omitempty"`
-	IAMRoles           []IAMRole          `json:"iam_roles,omitempty"`
-	SecurityGroups     []SecurityGroup    `json:"security_groups,omitempty"`
-	LogConfigs         []LogConfig        `json:"log_configs,omitempty"`
-	MetricConfigs      []MetricConfig     `json:"metric_configs,omitempty"`
-	TargetGroups       []TargetGroup      `json:"target_groups,omitempty"`
-	Listeners          []Listener         `json:"listeners,omitempty"`
-	ManagedDatabases   []ManagedDatabase  `json:"managed_databases,omitempty"`
-	DatabaseSecrets    []DatabaseSecret   `json:"database_secrets,omitempty"`
-	DatabaseBindings   []DatabaseBinding  `json:"database_bindings,omitempty"`
-	GlobalTraffic      []GlobalTraffic    `json:"global_traffic,omitempty"`
-	InstanceTemplates  []InstanceTemplate `json:"instance_templates,omitempty"`
-	AutoscalingGroups  []AutoscalingGroup `json:"autoscaling_groups,omitempty"`
-	RuntimeManifests   []RuntimeManifest  `json:"runtime_manifests,omitempty"`
-	StatefulGroups     []StatefulGroup    `json:"stateful_groups,omitempty"`
-	StatefulMembers    []StatefulMember   `json:"stateful_members,omitempty"`
-	StatefulVolumes    []StatefulVolume   `json:"stateful_volumes,omitempty"`
-	StatefulDNS        []StatefulDNS      `json:"stateful_dns,omitempty"`
-	StatefulRecipes    []StatefulRecipe   `json:"stateful_recipes,omitempty"`
-	SnapshotPolicies   []SnapshotPolicy   `json:"snapshot_policies,omitempty"`
-	UpdatePolicies     []UpdatePolicy     `json:"update_policies,omitempty"`
+	WorkloadIdentities  []WorkloadIdentity   `json:"workload_identities,omitempty"`
+	IAMRoles            []IAMRole            `json:"iam_roles,omitempty"`
+	SecurityGroups      []SecurityGroup      `json:"security_groups,omitempty"`
+	LogConfigs          []LogConfig          `json:"log_configs,omitempty"`
+	MetricConfigs       []MetricConfig       `json:"metric_configs,omitempty"`
+	TargetGroups        []TargetGroup        `json:"target_groups,omitempty"`
+	Listeners           []Listener           `json:"listeners,omitempty"`
+	ManagedDatabases    []ManagedDatabase    `json:"managed_databases,omitempty"`
+	DatabaseSecrets     []DatabaseSecret     `json:"database_secrets,omitempty"`
+	DatabaseBindings    []DatabaseBinding    `json:"database_bindings,omitempty"`
+	ObjectStores        []ObjectStore        `json:"object_stores,omitempty"`
+	ObjectStoreBindings []ObjectStoreBinding `json:"object_store_bindings,omitempty"`
+	GlobalTraffic       []GlobalTraffic      `json:"global_traffic,omitempty"`
+	InstanceTemplates   []InstanceTemplate   `json:"instance_templates,omitempty"`
+	AutoscalingGroups   []AutoscalingGroup   `json:"autoscaling_groups,omitempty"`
+	RuntimeManifests    []RuntimeManifest    `json:"runtime_manifests,omitempty"`
+	StatefulGroups      []StatefulGroup      `json:"stateful_groups,omitempty"`
+	StatefulMembers     []StatefulMember     `json:"stateful_members,omitempty"`
+	StatefulVolumes     []StatefulVolume     `json:"stateful_volumes,omitempty"`
+	StatefulDNS         []StatefulDNS        `json:"stateful_dns,omitempty"`
+	StatefulRecipes     []StatefulRecipe     `json:"stateful_recipes,omitempty"`
+	SnapshotPolicies    []SnapshotPolicy     `json:"snapshot_policies,omitempty"`
+	UpdatePolicies      []UpdatePolicy       `json:"update_policies,omitempty"`
 }
 
 type SourceRef struct {
@@ -159,6 +161,26 @@ type DatabaseBinding struct {
 	DatabaseRef string       `json:"database_ref"`
 	EnvName     string       `json:"env_name"`
 	SecretRef   string       `json:"secret_ref"`
+}
+
+type ObjectStore struct {
+	Meta      ResourceMeta `json:"meta"`
+	URI       string       `json:"uri"`
+	Bucket    string       `json:"bucket,omitempty"`
+	Prefix    string       `json:"prefix,omitempty"`
+	Purpose   string       `json:"purpose,omitempty"`
+	Access    string       `json:"access"`
+	Versioned bool         `json:"versioned"`
+	Encrypted bool         `json:"encrypted"`
+}
+
+type ObjectStoreBinding struct {
+	Meta           ResourceMeta `json:"meta"`
+	FromService    string       `json:"from_service"`
+	ObjectStoreRef string       `json:"object_store_ref"`
+	EnvName        string       `json:"env_name"`
+	URI            string       `json:"uri"`
+	Access         string       `json:"access"`
 }
 
 type GlobalTraffic struct {

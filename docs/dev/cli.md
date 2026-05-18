@@ -177,15 +177,16 @@ skiff gc apply --service payments-api --direct --state s3://skiff-state-prod --e
 warm-capacity, and log-volume recommendations from the spec plus supplied
 observed metrics. Confidence and evidence are included in JSON output. Add
 `--pricing-config <path>` to include On-Demand and RI infrastructure estimates,
-including low/medium/high utilization scenarios. Refresh the local pricing
-config with `skiff cost pricing update`. If the default `.skiff-pricing.json`
-file is missing, `cost explain` prints the refresh command and automatically
-detects that file on the next run.
+including EC2, RDS, baseline storage, and low/medium/high utilization
+scenarios. Refresh the local pricing config with `skiff cost pricing update`.
+If the default `.skiff-pricing.json` file is missing, `cost explain` prints the
+refresh command and automatically detects that file on the next run.
 
 ```bash
 skiff cost explain payments-api --file examples/service/http-hello/skiff.yaml --cpu-p95 18 --memory-p95 41 --warm-capacity 4 --format json
 skiff cost pricing update --region us-east-1 --out .skiff-pricing.json
 skiff cost explain payments-api --file examples/service/http-hello/skiff.yaml --region us-east-1 --pricing-scheme on-demand --pricing-scheme ri-3yr-standard-all-upfront --format json
+skiff cost explain --file examples/stacks/api-database/skiff.yaml --pricing-scheme on-demand
 skiff cost pricing update --region us-west-2 --out .skiff-pricing.json
 skiff cost explain --file examples/stateful/jetstream/skiff.yaml --pricing-scheme on-demand --pricing-scheme ri-3yr-standard-all-upfront
 ```

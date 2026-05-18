@@ -1,6 +1,8 @@
 package e2e_test
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -29,6 +31,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/provider/applecontainer"
 	fakeprovider "github.com/s1liconcow/skiff/internal/provider/fake"
 	"github.com/s1liconcow/skiff/internal/runner"
+	"github.com/s1liconcow/skiff/internal/security"
 	"github.com/s1liconcow/skiff/internal/security/signing"
 	"github.com/s1liconcow/skiff/internal/skiffd"
 	"github.com/s1liconcow/skiff/internal/state"
@@ -87,6 +90,14 @@ func TestAppleContextArtifactsRenderFilledConfigAndEnv(t *testing.T) {
 			t.Fatalf("generated env missing %q:\n%s", want, string(envBody))
 		}
 	}
+	for _, unwanted := range []string{
+		"export SKIFF_BIN=",
+		"export PATH=",
+	} {
+		if strings.Contains(string(envBody), unwanted) {
+			t.Fatalf("generated env should not override installed CLI path with %q:\n%s", unwanted, string(envBody))
+		}
+	}
 	if report.ConfigPath != artifacts.configPath || report.EnvPath != artifacts.envPath || report.APIContext != appleAPIContext {
 		t.Fatalf("report did not record context artifacts: %+v", report)
 	}
@@ -127,6 +138,7 @@ func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 	service := "caddy-web"
 	env := "prod"
 	stateURI := "s3://" + rustfs.bucket
+	caddyURL := fmt.Sprintf("http://127.0.0.1:%d", caddyPort)
 	traceID := "tr_apple_container_e2e"
 	firstOperationID := "op_apple_container_01"
 	secondOperationID := "op_apple_container_02"
@@ -138,6 +150,8 @@ func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 	verifier := verifierFor(t, signer)
 	actor := schema.Actor{ID: "e2e", Type: "agent"}
 	report := newE2EReport(t, "apple-container", service, env, traceID)
+	quickstart := writeAppleQuickstartArtifacts(t, report, service, env)
+	workloadRoot := filepath.Join(report.reportDir, report.RunID+"-workloads")
 	if persist {
 		report.CleanupStatus = "Apple containers will be left running for demo inspection"
 	} else {
@@ -180,7 +194,13 @@ func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 	report.addProviderID(rustfs.name)
 	report.addProviderID(rustfs.volume)
 	report.addProviderID(systemd.containerName)
-	contexts := writeAppleContextArtifacts(t, report, rustfs, stateURI, appleContextOptions{CaddyContainer: systemd.containerName})
+	contexts := writeAppleContextArtifacts(t, report, rustfs, stateURI, appleContextOptions{
+		CaddyContainer: systemd.containerName,
+		CaddyURL:       caddyURL,
+		CaddyImage:     firstImage,
+		WorkloadRoot:   workloadRoot,
+		Quickstart:     quickstart,
+	})
 	useAppleContext(t, contexts, appleDirectContext)
 
 	bootstrap := runBootstrap(t, ctx, store, verifier, statePath, service, env, stateURI, controlKey, traceID, objectEvents)
@@ -225,7 +245,16 @@ func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 	assertDirectOpsViaRustFS(t, report, stateURI, service, env, secondOperationID, traceID)
 
 	localSkiffd := startLocalAppleSkiffd(t, ctx, store, report, rustfs, stateURI, env, traceID, systemd.containerName, persist)
-	contexts = writeAppleContextArtifacts(t, report, rustfs, stateURI, appleContextOptions{APIURL: localSkiffd.url, CaddyContainer: systemd.containerName, SkiffdPID: report.SkiffdPID, SkiffdLogPath: report.SkiffdLogPath})
+	contexts = writeAppleContextArtifacts(t, report, rustfs, stateURI, appleContextOptions{
+		APIURL:         localSkiffd.url,
+		CaddyContainer: systemd.containerName,
+		CaddyURL:       caddyURL,
+		CaddyImage:     firstImage,
+		WorkloadRoot:   workloadRoot,
+		Quickstart:     quickstart,
+		SkiffdPID:      report.SkiffdPID,
+		SkiffdLogPath:  report.SkiffdLogPath,
+	})
 	useAppleContext(t, contexts, appleAPIContext)
 	assertSkiffdStatusViaAPI(t, report, localSkiffd.url, stateURI, service, env, nextReleaseID, secondOperationID, traceID)
 	createFakeCanaryResourceRecords(t, ctx, store, report, service, env)
@@ -359,8 +388,19 @@ type appleContextArtifacts struct {
 type appleContextOptions struct {
 	APIURL         string
 	CaddyContainer string
+	CaddyURL       string
+	CaddyImage     string
+	WorkloadRoot   string
+	Quickstart     appleQuickstartArtifacts
 	SkiffdPID      int
 	SkiffdLogPath  string
+}
+
+type appleQuickstartArtifacts struct {
+	Dir       string
+	GreenSpec string
+	RedSpec   string
+	BlueSpec  string
 }
 
 func writeAppleContextArtifacts(t *testing.T, report *e2eReport, rustfs rustFSHarness, stateURI string, opts appleContextOptions) appleContextArtifacts {
@@ -379,6 +419,7 @@ func writeAppleContextArtifacts(t *testing.T, report *e2eReport, rustfs rustFSHa
 	if err := os.WriteFile(envPath, []byte(appleContextEnv(configPath, rustfs, opts)), 0o600); err != nil {
 		t.Fatalf("write Apple context env: %v", err)
 	}
+	applyAppleContextEnv(t, configPath, rustfs, opts)
 	report.StateURI = stateURI
 	report.APIURL = opts.APIURL
 	report.ConfigPath = configPath
@@ -393,7 +434,15 @@ func writeAppleContextArtifacts(t *testing.T, report *e2eReport, rustfs rustFSHa
 		"source " + shellQuote(envPath),
 		"skiff config get-contexts",
 		"SKIFF_CONTEXT=" + appleDirectContext + " skiff status " + report.Service,
+		"SKIFF_CONTEXT=" + appleDirectContext + " skiff logs " + report.Service + " --limit 20",
 		"SKIFF_CONTEXT=" + appleDirectContext + " skiff ops events " + report.Service,
+	}
+	if opts.Quickstart.GreenSpec != "" {
+		report.RecommendedNextCommands = append(report.RecommendedNextCommands,
+			"skiff deploy \"$SKIFF_APPLE_GREEN_SPEC\" --canary --canary-stages 50,100 --canary-bake 0s --canary-metric request_count --canary-threshold 1",
+			"skiff deploy \"$SKIFF_APPLE_RED_SPEC\" --canary --canary-stages 50,100 --canary-bake 0s --canary-metric request_count --canary-threshold 1",
+			"skiff deploy \"$SKIFF_APPLE_BLUE_SPEC\" --canary --canary-stages 50,100 --canary-bake 0s --canary-metric request_count --canary-threshold 1",
+		)
 	}
 	if opts.APIURL != "" {
 		report.RecommendedNextCommands = append(report.RecommendedNextCommands,
@@ -403,6 +452,51 @@ func writeAppleContextArtifacts(t *testing.T, report *e2eReport, rustfs rustFSHa
 	}
 	report.fact("skiff_context", "wrote "+configPath+" and "+envPath)
 	return appleContextArtifacts{configPath: configPath, envPath: envPath}
+}
+
+func applyAppleContextEnv(t *testing.T, configPath string, rustfs rustFSHarness, opts appleContextOptions) {
+	t.Helper()
+	t.Setenv("AWS_ACCESS_KEY_ID", rustfs.accessKey)
+	t.Setenv("AWS_SECRET_ACCESS_KEY", rustfs.secretKey)
+	t.Setenv("AWS_REGION", "us-east-1")
+	t.Setenv("AWS_DEFAULT_REGION", "us-east-1")
+	t.Setenv("SKIFF_AWS_ENDPOINT", rustfs.endpoint)
+	t.Setenv("SKIFF_AWS_S3_PATH_STYLE", "true")
+	t.Setenv("SKIFF_CONFIG", configPath)
+	t.Setenv("SKIFF_CONTEXT", appleDirectContext)
+	if opts.CaddyContainer != "" {
+		t.Setenv("SKIFF_APPLE_CADDY_CONTAINER", opts.CaddyContainer)
+	}
+	if opts.CaddyURL != "" {
+		t.Setenv("SKIFF_APPLE_CADDY_URL", opts.CaddyURL)
+	}
+	if opts.CaddyImage != "" {
+		t.Setenv("SKIFF_APPLE_CADDY_IMAGE", opts.CaddyImage)
+	}
+	if opts.WorkloadRoot != "" {
+		t.Setenv("SKIFF_APPLE_WORKLOAD_ROOT", opts.WorkloadRoot)
+	}
+	if opts.Quickstart.Dir != "" {
+		t.Setenv("SKIFF_APPLE_QUICKSTART_DIR", opts.Quickstart.Dir)
+	}
+	if opts.Quickstart.GreenSpec != "" {
+		t.Setenv("SKIFF_APPLE_GREEN_SPEC", opts.Quickstart.GreenSpec)
+	}
+	if opts.Quickstart.RedSpec != "" {
+		t.Setenv("SKIFF_APPLE_RED_SPEC", opts.Quickstart.RedSpec)
+	}
+	if opts.Quickstart.BlueSpec != "" {
+		t.Setenv("SKIFF_APPLE_BLUE_SPEC", opts.Quickstart.BlueSpec)
+	}
+	if opts.APIURL != "" {
+		t.Setenv("SKIFF_APPLE_SKIFFD_URL", opts.APIURL)
+	}
+	if opts.SkiffdPID > 0 {
+		t.Setenv("SKIFF_APPLE_SKIFFD_PID", strconv.Itoa(opts.SkiffdPID))
+	}
+	if opts.SkiffdLogPath != "" {
+		t.Setenv("SKIFF_APPLE_SKIFFD_LOG", opts.SkiffdLogPath)
+	}
 }
 
 func useAppleContext(t *testing.T, artifacts appleContextArtifacts, contextName string) {
@@ -461,6 +555,27 @@ func appleContextEnv(configPath string, rustfs rustFSHarness, opts appleContextO
 	if opts.CaddyContainer != "" {
 		lines = append(lines, "export SKIFF_APPLE_CADDY_CONTAINER="+shellQuote(opts.CaddyContainer))
 	}
+	if opts.CaddyURL != "" {
+		lines = append(lines, "export SKIFF_APPLE_CADDY_URL="+shellQuote(opts.CaddyURL))
+	}
+	if opts.CaddyImage != "" {
+		lines = append(lines, "export SKIFF_APPLE_CADDY_IMAGE="+shellQuote(opts.CaddyImage))
+	}
+	if opts.WorkloadRoot != "" {
+		lines = append(lines, "export SKIFF_APPLE_WORKLOAD_ROOT="+shellQuote(opts.WorkloadRoot))
+	}
+	if opts.Quickstart.Dir != "" {
+		lines = append(lines, "export SKIFF_APPLE_QUICKSTART_DIR="+shellQuote(opts.Quickstart.Dir))
+	}
+	if opts.Quickstart.GreenSpec != "" {
+		lines = append(lines, "export SKIFF_APPLE_GREEN_SPEC="+shellQuote(opts.Quickstart.GreenSpec))
+	}
+	if opts.Quickstart.RedSpec != "" {
+		lines = append(lines, "export SKIFF_APPLE_RED_SPEC="+shellQuote(opts.Quickstart.RedSpec))
+	}
+	if opts.Quickstart.BlueSpec != "" {
+		lines = append(lines, "export SKIFF_APPLE_BLUE_SPEC="+shellQuote(opts.Quickstart.BlueSpec))
+	}
 	if opts.APIURL != "" {
 		lines = append(lines, "export SKIFF_APPLE_SKIFFD_URL="+shellQuote(opts.APIURL))
 	}
@@ -471,6 +586,122 @@ func appleContextEnv(configPath string, rustfs rustFSHarness, opts appleContextO
 		lines = append(lines, "export SKIFF_APPLE_SKIFFD_LOG="+shellQuote(opts.SkiffdLogPath))
 	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+func writeAppleQuickstartArtifacts(t *testing.T, report *e2eReport, service, env string) appleQuickstartArtifacts {
+	t.Helper()
+	dir := filepath.Join(report.reportDir, report.RunID+"-quickstart")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create Apple quickstart dir: %v", err)
+	}
+	green := writeAppleQuickstartRelease(t, dir, service, env, "green", true)
+	red := writeAppleQuickstartRelease(t, dir, service, env, "red", false)
+	blue := writeAppleQuickstartRelease(t, dir, service, env, "blue", true)
+	report.fact("apple_quickstart", "wrote GREEN, RED, and BLUE release specs under "+dir)
+	return appleQuickstartArtifacts{
+		Dir:       dir,
+		GreenSpec: green,
+		RedSpec:   red,
+		BlueSpec:  blue,
+	}
+}
+
+func writeAppleQuickstartRelease(t *testing.T, dir, service, env, color string, healthy bool) string {
+	t.Helper()
+	tarball := filepath.Join(dir, color+".tar.gz")
+	writeAppleSiteTarball(t, tarball, color, healthy)
+	body, err := os.ReadFile(tarball)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := security.DigestBytes(body)
+	spec := fmt.Sprintf(`apiVersion: skiff.dev/v1alpha1
+kind: Service
+metadata:
+  name: %s
+  env: %s
+artifact:
+  type: tarball
+  ref: %s
+  digest: %s
+runtime:
+  port: 80
+  command:
+    - ./index.html
+  health:
+    path: /healthz
+  logs:
+    enabled: true
+    format: text
+  metrics:
+    enabled: true
+    path: /metrics
+machine:
+  size: small
+scale:
+  min: 2
+  max: 2
+network:
+  ingress:
+    type: private
+`, strconv.Quote(service), strconv.Quote(env), strconv.Quote("file://"+tarball), strconv.Quote(digest))
+	specPath := filepath.Join(dir, color+".skiff.yaml")
+	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return specPath
+}
+
+func writeAppleSiteTarball(t *testing.T, path, color string, healthy bool) {
+	t.Helper()
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	gz := gzip.NewWriter(file)
+	defer gz.Close()
+	tw := tar.NewWriter(gz)
+	defer tw.Close()
+	writeTarEntry(t, tw, "index.html", 0o644, appleColorPage(color))
+	if healthy {
+		writeTarEntry(t, tw, "healthz", 0o644, "ok\n")
+	}
+}
+
+func writeTarEntry(t *testing.T, tw *tar.Writer, name string, mode int64, body string) {
+	t.Helper()
+	header := &tar.Header{
+		Name: name,
+		Mode: mode,
+		Size: int64(len(body)),
+	}
+	if err := tw.WriteHeader(header); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte(body)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func appleColorPage(color string) string {
+	upper := strings.ToUpper(color)
+	background := map[string]string{
+		"BLUE":  "#1d4ed8",
+		"GREEN": "#15803d",
+		"RED":   "#b91c1c",
+	}[upper]
+	if background == "" {
+		background = "#111827"
+	}
+	return fmt.Sprintf(`<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Skiff %s</title></head>
+<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:%s;color:white;font:700 18vw system-ui,sans-serif;letter-spacing:0">
+%s
+</body>
+</html>
+`, upper, background, upper)
 }
 
 func shellQuote(value string) string {
@@ -1320,13 +1551,9 @@ func startPersistentAppleSkiffd(t *testing.T, ctx context.Context, report *e2eRe
 		APIURL:         apiURL,
 		CaddyContainer: caddyContainer,
 	})
-	root := repoRootForTest(t)
-	binPath := filepath.Join(report.reportDir, report.RunID+"-skiffd")
-	build := exec.CommandContext(ctx, "go", "build", "-o", binPath, "./cmd/skiffd")
-	build.Dir = root
-	build.Env = os.Environ()
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build persistent skiffd: %v\n%s", err, strings.TrimSpace(string(output)))
+	binPath, err := exec.LookPath("skiffd")
+	if err != nil {
+		t.Fatalf("skiffd not found on PATH; install Skiff with scripts/install.sh: %v", err)
 	}
 
 	logPath := filepath.Join(report.reportDir, report.RunID+"-skiffd.log")
@@ -1334,7 +1561,7 @@ func startPersistentAppleSkiffd(t *testing.T, ctx context.Context, report *e2eRe
 	if err != nil {
 		t.Fatalf("open persistent skiffd log: %v", err)
 	}
-	cmd := exec.Command(binPath,
+	cmd := exec.CommandContext(ctx, binPath,
 		"serve",
 		"--addr", addr,
 		"--config", artifacts.configPath,
@@ -1342,7 +1569,6 @@ func startPersistentAppleSkiffd(t *testing.T, ctx context.Context, report *e2eRe
 		"--format", "json",
 		"--trace-id", traceID,
 	)
-	cmd.Dir = root
 	cmd.Env = os.Environ()
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile

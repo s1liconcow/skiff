@@ -214,9 +214,10 @@ type StatefulUpdate struct {
 }
 
 type Stack struct {
-	Services  []StackService  `json:"services,omitempty"`
-	Databases []StackDatabase `json:"databases,omitempty"`
-	Bindings  []StackBinding  `json:"bindings,omitempty"`
+	Services     []StackService     `json:"services,omitempty"`
+	Databases    []StackDatabase    `json:"databases,omitempty"`
+	ObjectStores []StackObjectStore `json:"objectStores,omitempty"`
+	Bindings     []StackBinding     `json:"bindings,omitempty"`
 }
 
 type StackService struct {
@@ -235,6 +236,16 @@ type StackDatabase struct {
 	Name string `json:"name"`
 	Ref  string `json:"ref,omitempty"`
 	ManagedDatabase
+}
+
+type StackObjectStore struct {
+	Name      string `json:"name"`
+	Ref       string `json:"ref,omitempty"`
+	URI       string `json:"uri,omitempty"`
+	Purpose   string `json:"purpose,omitempty"`
+	Access    string `json:"access,omitempty"`
+	Versioned bool   `json:"versioned,omitempty"`
+	Encrypted bool   `json:"encrypted,omitempty"`
 }
 
 type StackBinding struct {

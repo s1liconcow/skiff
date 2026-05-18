@@ -475,6 +475,14 @@ skiff deploy
 skiff status payments-api
 ```
 
+### API with local SQLite
+
+```bash
+skiff init stack api-sqlite payments
+skiff stateful plan payments/skiff.yaml --provider fake --region local
+skiff stateful apply payments/skiff.yaml --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2
+```
+
 ### From Kubernetes
 
 ```bash

@@ -52,6 +52,7 @@ type ServiceResources struct {
 	ListenerRules     []ListenerRule      `json:"listener_rules,omitempty"`
 	Databases         []DatabaseAWS       `json:"databases,omitempty"`
 	Secrets           []SecretAWS         `json:"secrets,omitempty"`
+	ObjectStores      []ObjectStoreAWS    `json:"object_stores,omitempty"`
 	LaunchTemplates   []LaunchTemplate    `json:"launch_templates,omitempty"`
 	AutoScalingGroups []AutoScalingGroup  `json:"auto_scaling_groups,omitempty"`
 	StatefulMembers   []StatefulMemberAWS `json:"stateful_members,omitempty"`
@@ -189,6 +190,20 @@ type SecretAWS struct {
 	Source      []ir.SourceRef    `json:"source,omitempty"`
 }
 
+type ObjectStoreAWS struct {
+	LogicalID         string            `json:"logical_id"`
+	Name              string            `json:"name"`
+	URI               string            `json:"uri"`
+	Bucket            string            `json:"bucket"`
+	Prefix            string            `json:"prefix,omitempty"`
+	Purpose           string            `json:"purpose,omitempty"`
+	Access            string            `json:"access"`
+	VersioningEnabled bool              `json:"versioning_enabled"`
+	EncryptionEnabled bool              `json:"encryption_enabled"`
+	Tags              map[string]string `json:"tags,omitempty"`
+	Source            []ir.SourceRef    `json:"source,omitempty"`
+}
+
 type LaunchTemplate struct {
 	LogicalID          string            `json:"logical_id"`
 	Name               string            `json:"name"`
@@ -258,7 +273,7 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 			LogicalID:        role.Meta.LogicalID,
 			Name:             name,
 			AssumeRolePolicy: ec2AssumeRolePolicy(),
-			InlinePolicy:     workloadPolicy(opts.StateBucket, graph.Service, controlKey, role.SecretRefs, managedSecretResources),
+			InlinePolicy:     workloadPolicy(opts.StateBucket, graph.Service, controlKey, role.SecretRefs, managedSecretResources, objectStorePolicyStatements(graph)),
 			Tags:             TagsMap(role.Meta, nil),
 			Source:           append([]ir.SourceRef(nil), role.Meta.Source...),
 		})
@@ -397,6 +412,29 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 			Source:      append([]ir.SourceRef(nil), secret.Meta.Source...),
 		})
 	}
+	for _, store := range graph.Resources.ObjectStores {
+		name := strings.TrimSpace(store.Bucket)
+		if name == "" {
+			var err error
+			name, err = NameForResource(graph.Service, graph.Env, store.Meta)
+			if err != nil {
+				return nil, err
+			}
+		}
+		out.ObjectStores = append(out.ObjectStores, ObjectStoreAWS{
+			LogicalID:         store.Meta.LogicalID,
+			Name:              name,
+			URI:               store.URI,
+			Bucket:            firstNonEmpty(store.Bucket, name),
+			Prefix:            store.Prefix,
+			Purpose:           store.Purpose,
+			Access:            firstNonEmpty(store.Access, "read-write"),
+			VersioningEnabled: store.Versioned,
+			EncryptionEnabled: store.Encrypted,
+			Tags:              TagsMap(store.Meta, nil),
+			Source:            append([]ir.SourceRef(nil), store.Meta.Source...),
+		})
+	}
 	for _, tmpl := range graph.Resources.InstanceTemplates {
 		name, err := NameForResource(graph.Service, graph.Env, tmpl.Meta)
 		if err != nil {
@@ -469,6 +507,9 @@ func (r ServiceResources) PlannedResources() []plannedAWSResource {
 	}
 	for _, item := range r.Secrets {
 		out = append(out, plannedAWSResource{Kind: ResourceKindSecret, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: "Secrets Manager secret reference for managed database credentials"})
+	}
+	for _, item := range r.ObjectStores {
+		out = append(out, plannedAWSResource{Kind: ResourceKindS3Bucket, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: "S3 bucket for workload object-store data"})
 	}
 	for _, item := range r.LaunchTemplates {
 		out = append(out, plannedAWSResource{Kind: ResourceKindLaunchTemplate, LogicalID: item.LogicalID, Name: item.Name, Tags: item.Tags, Summary: "EC2 launch template with skiff-runner user-data"})
@@ -578,7 +619,7 @@ func ec2AssumeRolePolicy() PolicyDocument {
 	}
 }
 
-func workloadPolicy(stateBucket, service, controlKey string, secrets []ir.SecretRef, managedSecretResources []string) PolicyDocument {
+func workloadPolicy(stateBucket, service, controlKey string, secrets []ir.SecretRef, managedSecretResources []string, objectStoreStatements []PolicyStatement) PolicyDocument {
 	statements := []PolicyStatement{}
 	if bucket := bucketNameFromURI(stateBucket); bucket != "" {
 		statements = append(statements, PolicyStatement{
@@ -606,7 +647,97 @@ func workloadPolicy(stateBucket, service, controlKey string, secrets []ir.Secret
 			Resource: parameterResources,
 		})
 	}
+	statements = append(statements, objectStoreStatements...)
 	return PolicyDocument{Version: "2012-10-17", Statement: statements}
+}
+
+func objectStorePolicyStatements(graph *ir.Graph) []PolicyStatement {
+	if graph == nil {
+		return nil
+	}
+	stores := make(map[string]ir.ObjectStore, len(graph.Resources.ObjectStores))
+	for _, store := range graph.Resources.ObjectStores {
+		stores[store.Meta.LogicalID] = store
+	}
+	readOnlyBuckets := map[string]struct{}{}
+	readOnlyObjects := map[string]struct{}{}
+	readWriteBuckets := map[string]struct{}{}
+	readWriteObjects := map[string]struct{}{}
+	for _, binding := range graph.Resources.ObjectStoreBindings {
+		if binding.FromService != "" && binding.FromService != graph.Service {
+			continue
+		}
+		store := stores[binding.ObjectStoreRef]
+		bucketARN, objectARN := objectStoreARNs(firstNonEmpty(binding.URI, store.URI))
+		if bucketARN == "" || objectARN == "" {
+			continue
+		}
+		if binding.Access == "read-only" || store.Access == "read-only" {
+			readOnlyBuckets[bucketARN] = struct{}{}
+			readOnlyObjects[objectARN] = struct{}{}
+			continue
+		}
+		readWriteBuckets[bucketARN] = struct{}{}
+		readWriteObjects[objectARN] = struct{}{}
+	}
+	var statements []PolicyStatement
+	if len(readOnlyBuckets)+len(readWriteBuckets) > 0 {
+		statements = append(statements, PolicyStatement{
+			Sid:      "ListBoundObjectStores",
+			Effect:   "Allow",
+			Action:   []string{"s3:GetBucketLocation", "s3:ListBucket"},
+			Resource: sortedMapKeys(mergeStringSets(readOnlyBuckets, readWriteBuckets)),
+		})
+	}
+	if len(readOnlyObjects) > 0 {
+		statements = append(statements, PolicyStatement{
+			Sid:      "ReadBoundObjectStores",
+			Effect:   "Allow",
+			Action:   []string{"s3:GetObject"},
+			Resource: sortedMapKeys(readOnlyObjects),
+		})
+	}
+	if len(readWriteObjects) > 0 {
+		statements = append(statements, PolicyStatement{
+			Sid:      "ReadWriteBoundObjectStores",
+			Effect:   "Allow",
+			Action:   []string{"s3:AbortMultipartUpload", "s3:DeleteObject", "s3:GetObject", "s3:ListMultipartUploadParts", "s3:PutObject"},
+			Resource: sortedMapKeys(readWriteObjects),
+		})
+	}
+	return statements
+}
+
+func objectStoreARNs(uri string) (string, string) {
+	parsed, err := url.Parse(strings.TrimSpace(uri))
+	if err != nil || parsed.Scheme != "s3" || parsed.Host == "" {
+		return "", ""
+	}
+	prefix := strings.Trim(strings.TrimPrefix(parsed.Path, "/"), "/")
+	bucketARN := fmt.Sprintf("arn:aws:s3:::%s", parsed.Host)
+	if prefix == "" {
+		return bucketARN, bucketARN + "/*"
+	}
+	return bucketARN, fmt.Sprintf("%s/%s/*", bucketARN, prefix)
+}
+
+func mergeStringSets(sets ...map[string]struct{}) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, set := range sets {
+		for value := range set {
+			out[value] = struct{}{}
+		}
+	}
+	return out
+}
+
+func sortedMapKeys(values map[string]struct{}) []string {
+	out := make([]string, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func managedSecretPolicyResources(graph *ir.Graph, opts LowerOptions) ([]string, error) {
@@ -810,6 +941,10 @@ func databaseInstanceClass(size string) string {
 	}
 }
 
+func DatabaseInstanceClassForSize(size string) string {
+	return databaseInstanceClass(size)
+}
+
 func bucketNameFromURI(value string) string {
 	parsed, err := url.Parse(strings.TrimSpace(value))
 	if err != nil || parsed.Scheme != "s3" {
@@ -839,6 +974,9 @@ func sortServiceResources(resources *ServiceResources) {
 	})
 	sort.Slice(resources.Secrets, func(i, j int) bool {
 		return resources.Secrets[i].LogicalID < resources.Secrets[j].LogicalID
+	})
+	sort.Slice(resources.ObjectStores, func(i, j int) bool {
+		return resources.ObjectStores[i].LogicalID < resources.ObjectStores[j].LogicalID
 	})
 	sort.Slice(resources.LaunchTemplates, func(i, j int) bool {
 		return resources.LaunchTemplates[i].LogicalID < resources.LaunchTemplates[j].LogicalID

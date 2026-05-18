@@ -37,11 +37,8 @@ func runInitStack(binary string, args []string, root rootOptions, stdout, stderr
 		return ExitSuccess
 	}
 	recipe := args[0]
-	if recipe != "api-database" {
-		return writeClientCommandError(binary, "init", root.Format, root.TraceID, fmt.Errorf("unsupported stack recipe %q; expected api-database", recipe), stdout, stderr)
-	}
 
-	fs := flag.NewFlagSet(binary+" init stack api-database", flag.ContinueOnError)
+	fs := flag.NewFlagSet(binary+" init stack "+recipe, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	format := fs.String("format", root.Format, "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
@@ -50,6 +47,7 @@ func runInitStack(binary string, args []string, root rootOptions, stdout, stderr
 	dir := fs.String("dir", "", "directory to create")
 	env := fs.String("env", firstNonEmptyCLI(root.Env, "prod"), "Skiff environment name")
 	artifact := fs.String("artifact", "", "OCI artifact reference for the API service")
+	objectStoreURI := fs.String("object-store-uri", "", "object store URI for api-slatedb")
 	overwrite := fs.Bool("overwrite", false, "overwrite existing generated files")
 
 	flagArgs, positionals, err := splitInitStackArgs(args[1:])
@@ -75,12 +73,35 @@ func runInitStack(binary string, args []string, root rootOptions, stdout, stderr
 		targetDir = name
 	}
 	if *artifact == "" {
-		*artifact = fmt.Sprintf("registry.example.com/%s-api@sha256:REPLACE_WITH_DIGEST", name)
+		*artifact = defaultStackArtifact(recipe, name)
 	}
-	files := map[string]string{
-		filepath.Join(targetDir, "skiff.yaml"):                                apiDatabaseSpecTemplate(name, *env, *artifact),
-		filepath.Join(targetDir, "main.go"):                                   apiDatabaseMainTemplate(name),
-		filepath.Join(targetDir, ".github", "workflows", "skiff-release.yml"): apiDatabaseCITemplate(name),
+	if recipe == "api-slatedb" && *objectStoreURI == "" {
+		*objectStoreURI = fmt.Sprintf("s3://%s-slatedb-%s/slatedb/%s", name, *env, name)
+	}
+	var files map[string]string
+	switch recipe {
+	case "api-database":
+		files = map[string]string{
+			filepath.Join(targetDir, "skiff.yaml"):                                apiDatabaseSpecTemplate(name, *env, *artifact),
+			filepath.Join(targetDir, "main.go"):                                   apiDatabaseMainTemplate(name),
+			filepath.Join(targetDir, ".github", "workflows", "skiff-release.yml"): apiDatabaseCITemplate(name),
+		}
+	case "api-slatedb":
+		files = map[string]string{
+			filepath.Join(targetDir, "skiff.yaml"):                                apiSlateDBSpecTemplate(name, *env, *artifact, *objectStoreURI),
+			filepath.Join(targetDir, "app.py"):                                    apiSlateDBAppTemplate(name),
+			filepath.Join(targetDir, "Dockerfile"):                                apiSlateDBDockerfileTemplate(name),
+			filepath.Join(targetDir, ".github", "workflows", "skiff-release.yml"): apiDatabaseCITemplate(name),
+		}
+	case "api-sqlite":
+		files = map[string]string{
+			filepath.Join(targetDir, "skiff.yaml"):                                apiSQLiteSpecTemplate(name, *env, *artifact),
+			filepath.Join(targetDir, "app.py"):                                    apiSQLiteAppTemplate(),
+			filepath.Join(targetDir, "Dockerfile"):                                apiSQLiteDockerfileTemplate(),
+			filepath.Join(targetDir, ".github", "workflows", "skiff-release.yml"): apiSQLiteCITemplate(name),
+		}
+	default:
+		return writeClientCommandError(binary, "init", *format, *traceID, fmt.Errorf("unsupported stack recipe %q; expected api-database, api-slatedb, or api-sqlite", recipe), stdout, stderr)
 	}
 	written := make([]string, 0, len(files))
 	for path, body := range files {
@@ -93,7 +114,7 @@ func runInitStack(binary string, args []string, root rootOptions, stdout, stderr
 
 	switch *format {
 	case "human", "text":
-		fmt.Fprintf(stdout, "created api-database stack %s in %s\n", name, targetDir)
+		fmt.Fprintf(stdout, "created %s stack %s in %s\n", recipe, name, targetDir)
 		for _, file := range written {
 			fmt.Fprintf(stdout, "- %s\n", file)
 		}
@@ -110,20 +131,24 @@ func runInitStack(binary string, args []string, root rootOptions, stdout, stderr
 }
 
 func printInitUsage(w io.Writer, binary string) {
-	fmt.Fprintf(w, "Usage: %s init stack api-database <name> [flags]\n\n", binary)
-	fmt.Fprintln(w, "Generates an API service plus managed database stack template, example app, and CI workflow.")
+	fmt.Fprintf(w, "Usage: %s init stack <recipe> <name> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Recipes:")
+	fmt.Fprintln(w, "  api-database  API service plus managed database template, example app, and CI workflow")
+	fmt.Fprintln(w, "  api-slatedb    API service plus object-store-backed SlateDB template, example app, and CI workflow")
+	fmt.Fprintln(w, "  api-sqlite    Single-member API server with local SQLite on a durable StatefulGroup volume")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Flags:")
-	fmt.Fprintln(w, "  --dir <path> --env <env> --artifact <oci-ref> --overwrite --format human|json|json-pretty --no-color --yes --trace-id <id>")
+	fmt.Fprintln(w, "  --dir <path> --env <env> --artifact <oci-ref> --object-store-uri <uri> --overwrite --format human|json|json-pretty --no-color --yes --trace-id <id>")
 }
 
 func splitInitStackArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
-		"artifact": true,
-		"dir":      true,
-		"env":      true,
-		"format":   true,
-		"trace-id": true,
+		"artifact":         true,
+		"dir":              true,
+		"env":              true,
+		"format":           true,
+		"object-store-uri": true,
+		"trace-id":         true,
 	}
 	return splitArgs(args, valueFlags)
 }
@@ -213,6 +238,175 @@ func main() {
 `, name)
 }
 
+func apiSlateDBSpecTemplate(name, env, artifact, objectStoreURI string) string {
+	return fmt.Sprintf(`apiVersion: skiff.dev/v1alpha1
+kind: Stack
+metadata:
+  name: %s
+  env: %s
+stack:
+  services:
+    - name: api
+      artifact:
+        type: oci
+        ref: %s
+      runtime:
+        command:
+          - python
+          - /app/app.py
+        port: 8080
+        env:
+          SKIFF_STACK: %s
+          SLATEDB_TABLE: %s
+          SLATEDB_CACHE_DIR: /var/cache/slatedb
+        health:
+          path: /healthz
+        metrics:
+          path: /metrics
+      scale:
+        min: 2
+        max: 4
+      network:
+        ingress:
+          type: internal-http
+  objectStores:
+    - name: data
+      uri: %s
+      purpose: slatedb
+      access: read-write
+      versioned: true
+      encrypted: true
+  bindings:
+    - from: api
+      to: data
+      as: SLATEDB_URI
+`, name, env, artifact, name, name, objectStoreURI)
+}
+
+func apiSlateDBAppTemplate(name string) string {
+	return fmt.Sprintf(`import asyncio
+import json
+import os
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from slatedb.uniffi import DbBuilder, ObjectStore
+
+slatedb_uri = os.environ.get("SLATEDB_URI", "memory:///")
+slatedb_table = os.environ.get("SLATEDB_TABLE", os.environ.get("SKIFF_STACK", "%s"))
+db_lock = threading.Lock()
+
+
+async def with_db(action):
+    store = ObjectStore.resolve(slatedb_uri)
+    db = await DbBuilder(slatedb_table, store).build()
+    try:
+        return await action(db)
+    finally:
+        await db.shutdown()
+
+
+async def health_check():
+    async def run(db):
+        await db.put(b"healthz", b"ok")
+        return await db.get(b"healthz")
+
+    return await with_db(run)
+
+
+async def record_request(path):
+    async def run(db):
+        counter_key = b"requests:count"
+        current = await db.get(counter_key)
+        count = int(current.decode("utf-8")) if current else 0
+        count += 1
+        request_key = f"requests:{time.time_ns()}".encode("utf-8")
+        await db.put(request_key, path.encode("utf-8"))
+        await db.put(counter_key, str(count).encode("utf-8"))
+        stored = await db.get(request_key)
+        return count, stored.decode("utf-8") if stored else ""
+
+    return await with_db(run)
+
+
+async def request_count():
+    async def run(db):
+        current = await db.get(b"requests:count")
+        return int(current.decode("utf-8")) if current else 0
+
+    return await with_db(run)
+
+
+def run_locked(coro):
+    with db_lock:
+        return asyncio.run(coro)
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        try:
+            if self.path == "/healthz":
+                value = run_locked(health_check())
+                if value != b"ok":
+                    self.respond(503, "text/plain", b"slatedb health check failed\n")
+                    return
+                self.respond(200, "text/plain", b"ok\n")
+                return
+            if self.path == "/metrics":
+                count = run_locked(request_count())
+                body = f"api_slatedb_requests_total {count}\n".encode("utf-8")
+                self.respond(200, "text/plain", body)
+                return
+            count, stored_path = run_locked(record_request(self.path))
+            body = json.dumps(
+                {
+                    "ok": True,
+                    "database": slatedb_table,
+                    "object_store": slatedb_uri,
+                    "requests": count,
+                    "stored_path": stored_path,
+                },
+                indent=2,
+            ).encode("utf-8")
+            self.respond(200, "application/json", body + b"\n")
+        except Exception as exc:
+            self.respond(500, "text/plain", f"slatedb error: {exc}\n".encode("utf-8"))
+
+    def log_message(self, format, *args):
+        return
+
+    def respond(self, status, content_type, body):
+        self.send_response(status)
+        self.send_header("content-type", content_type)
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "8080"))
+    ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
+`, name)
+}
+
+func apiSlateDBDockerfileTemplate(name string) string {
+	return fmt.Sprintf(`FROM python:3.13-slim
+
+RUN pip install --no-cache-dir slatedb
+
+WORKDIR /app
+COPY app.py /app/app.py
+
+ENV PORT=8080
+ENV SLATEDB_URI=memory:///
+ENV SLATEDB_TABLE=%s
+EXPOSE 8080
+
+CMD ["python", "/app/app.py"]
+`, name)
+}
+
 func apiDatabaseCITemplate(name string) string {
 	return fmt.Sprintf(`name: skiff-release
 
@@ -240,6 +434,192 @@ jobs:
             --check tests=passed \
             --format json
 `, name, name, name)
+}
+
+func defaultStackArtifact(recipe, name string) string {
+	switch recipe {
+	case "api-sqlite":
+		return fmt.Sprintf("registry.example.com/%s@sha256:REPLACE_WITH_DIGEST", apiSQLiteServiceName(name))
+	default:
+		return fmt.Sprintf("registry.example.com/%s-api@sha256:REPLACE_WITH_DIGEST", name)
+	}
+}
+
+func apiSQLiteSpecTemplate(name, env, artifact string) string {
+	serviceName := apiSQLiteServiceName(name)
+	return fmt.Sprintf(`apiVersion: skiff.dev/v1alpha1
+kind: StatefulGroup
+metadata:
+  name: %s
+  env: %s
+  labels:
+    app: %s
+    tier: api-sqlite
+stateful:
+  replicas: 1
+  members:
+    - ordinal: 0
+  volume:
+    size: 10Gi
+    type: gp3
+    mountPath: /var/lib/skiff/sqlite
+    encrypted: true
+  recipe:
+    name: sqlite-api-single
+    config:
+      artifact:
+        type: oci
+        ref: %s
+      runtime:
+        command:
+          - python
+          - /app/app.py
+        env:
+          SKIFF_STACK: %s
+          SQLITE_PATH: /var/lib/skiff/sqlite/app.db
+        ports:
+          http: 8080
+        health:
+          path: /healthz
+          port: 8080
+        metrics:
+          enabled: true
+          path: /metrics
+          port: 8080
+      sqlite:
+        path: /var/lib/skiff/sqlite/app.db
+        journaling: wal
+      snapshots:
+        enabled: true
+        interval: 30m
+        retention: 7d
+      recovery:
+        requireFencing: true
+        replaceMemberSaga: stateful.replace_member
+        maxUnavailableMembers: 1
+  update:
+    strategy: ordered
+`, serviceName, env, name, artifact, name)
+}
+
+func apiSQLiteAppTemplate() string {
+	return `import json
+import os
+import sqlite3
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+db_path = Path(os.environ.get("SQLITE_PATH", "/var/lib/skiff/sqlite/app.db"))
+db_path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def connect():
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS requests (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL, created_at INTEGER NOT NULL)"
+    )
+    return conn
+
+
+def request_count(conn):
+    return conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0]
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        with connect() as conn:
+            if self.path == "/healthz":
+                conn.execute("SELECT 1")
+                self.respond(200, "text/plain", b"ok\n")
+                return
+            if self.path == "/metrics":
+                body = f"api_sqlite_requests_total {request_count(conn)}\n".encode()
+                self.respond(200, "text/plain", body)
+                return
+            conn.execute(
+                "INSERT INTO requests (path, created_at) VALUES (?, ?)",
+                (self.path, int(time.time())),
+            )
+            conn.commit()
+            body = json.dumps(
+                {
+                    "ok": True,
+                    "database": str(db_path),
+                    "requests": request_count(conn),
+                },
+                indent=2,
+            ).encode()
+            self.respond(200, "application/json", body + b"\n")
+
+    def log_message(self, format, *args):
+        return
+
+    def respond(self, status, content_type, body):
+        self.send_response(status)
+        self.send_header("content-type", content_type)
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "8080"))
+    ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
+`
+}
+
+func apiSQLiteDockerfileTemplate() string {
+	return `FROM python:3.13-slim
+
+WORKDIR /app
+COPY app.py /app/app.py
+
+ENV PORT=8080
+ENV SQLITE_PATH=/var/lib/skiff/sqlite/app.db
+EXPOSE 8080
+
+CMD ["python", "/app/app.py"]
+`
+}
+
+func apiSQLiteCITemplate(name string) string {
+	serviceName := apiSQLiteServiceName(name)
+	return fmt.Sprintf(`name: skiff-release
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and publish immutable artifact
+        run: echo "publish registry.example.com/%s@sha256:${GITHUB_SHA}"
+      - name: Record Skiff release candidate
+        run: |
+          skiff release candidate create %s \
+            --env staging \
+            --candidate cand-${GITHUB_RUN_ID} \
+            --artifact registry.example.com/%s@sha256:${GITHUB_SHA} \
+            --git-repo ${GITHUB_REPOSITORY} \
+            --git-sha ${GITHUB_SHA} \
+            --ci-provider github-actions \
+            --ci-run-id ${GITHUB_RUN_ID} \
+            --check tests=passed \
+            --format json
+`, serviceName, serviceName, serviceName)
+}
+
+func apiSQLiteServiceName(name string) string {
+	name = strings.TrimSpace(name)
+	if strings.HasSuffix(name, "-api") {
+		return name
+	}
+	return name + "-api"
 }
 
 func sortStrings(values []string) {

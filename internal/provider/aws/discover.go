@@ -14,6 +14,7 @@ const (
 	ResourceKindLogGroup         = "log-group"
 	ResourceKindRDSInstance      = "rds-db-instance"
 	ResourceKindSecret           = "secretsmanager-secret"
+	ResourceKindS3Bucket         = "s3-bucket"
 )
 
 type Clients struct {

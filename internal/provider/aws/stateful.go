@@ -112,7 +112,7 @@ func lowerStatefulResources(out *ServiceResources, graph *ir.Graph, opts LowerOp
 		LogicalID:        roleLogicalID,
 		Name:             roleName,
 		AssumeRolePolicy: ec2AssumeRolePolicy(),
-		InlinePolicy:     workloadPolicy(opts.StateBucket, graph.Service, controlKey, nil, nil),
+		InlinePolicy:     workloadPolicy(opts.StateBucket, graph.Service, controlKey, nil, nil, nil),
 		Tags:             cloneTags(tags),
 		Source:           append([]ir.SourceRef(nil), group.Meta.Source...),
 	})

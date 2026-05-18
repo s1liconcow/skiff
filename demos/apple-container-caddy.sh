@@ -36,6 +36,23 @@ EOF
   exit 1
 fi
 
+missing_bins=()
+for bin in skiff skiffd; do
+  if ! command -v "$bin" >/dev/null 2>&1; then
+    missing_bins+=("$bin")
+  fi
+done
+if (( ${#missing_bins[@]} > 0 )); then
+  cat >&2 <<EOF
+Skiff binaries were not found on PATH: ${missing_bins[*]}
+
+Install Skiff first, then re-run this demo:
+  SKIFF_INSTALL_VERSION=v0.1.0 SKIFF_INSTALL_DIR="\$HOME/.local/bin" "$repo_root/scripts/install.sh"
+  export PATH="\$HOME/.local/bin:\$PATH"
+EOF
+  exit 1
+fi
+
 mkdir -p "$report_dir"
 export SKIFF_E2E_REPORT_DIR="$report_dir"
 make -C "$repo_root" e2e-apple-container

@@ -81,5 +81,70 @@ func FilterPricingCatalogSchemes(catalog PricingCatalog, schemes []PricingScheme
 			out.Items = append(out.Items, next)
 		}
 	}
+	out.DatabaseItems = make([]DatabaseInstancePricing, 0, len(catalog.DatabaseItems))
+	for _, item := range catalog.DatabaseItems {
+		next := item
+		next.Rates = nil
+		for _, rate := range item.Rates {
+			if _, ok := keep[rate.Scheme]; ok {
+				next.Rates = append(next.Rates, rate)
+			}
+		}
+		if len(next.Rates) > 0 {
+			out.DatabaseItems = append(out.DatabaseItems, next)
+		}
+	}
+	return out
+}
+
+func MergePricingCatalogs(catalogs ...PricingCatalog) PricingCatalog {
+	var out PricingCatalog
+	var sources []string
+	var versions []string
+	for _, catalog := range catalogs {
+		if strings.TrimSpace(catalog.Provider) == "" {
+			continue
+		}
+		if out.Provider == "" {
+			out.Provider = catalog.Provider
+			out.Region = catalog.Region
+			out.Currency = catalog.Currency
+			out.SchemaVersion = firstNonEmpty(catalog.SchemaVersion, PricingCatalogSchemaVersion)
+		}
+		if catalog.PublicationDate > out.PublicationDate {
+			out.PublicationDate = catalog.PublicationDate
+		}
+		if catalog.Source != "" {
+			sources = append(sources, catalog.Source)
+		}
+		if catalog.Version != "" {
+			versions = append(versions, catalog.Version)
+		}
+		out.Items = append(out.Items, catalog.Items...)
+		out.DatabaseItems = append(out.DatabaseItems, catalog.DatabaseItems...)
+		out.StorageRates = append(out.StorageRates, catalog.StorageRates...)
+	}
+	if out.Currency == "" {
+		out.Currency = "USD"
+	}
+	out.Source = strings.Join(uniqueStrings(sources), ", ")
+	out.Version = strings.Join(uniqueStrings(versions), ",")
+	return out
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
 	return out
 }

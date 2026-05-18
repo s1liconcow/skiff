@@ -255,6 +255,112 @@ func TestCostPricingUpdateWritesConfigUsedByExplain(t *testing.T) {
 	}
 }
 
+func TestCostExplainStackIncludesManagedDatabasePricing(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	specPath := filepath.Join(cwd, "..", "..", "examples", "stacks", "api-database", "skiff.yaml")
+	rawEC2PricingPath := writeAWSPricingFixture(t)
+	rawRDSPricingPath := writeAWSRDSPricingFixture(t)
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+
+	var stdout, stderr bytes.Buffer
+	code := cli.Run("skiff", []string{
+		"cost", "pricing", "update",
+		"--region", "us-east-1",
+		"--aws-pricing-file", rawEC2PricingPath,
+		"--aws-rds-pricing-file", rawRDSPricingPath,
+		"--out", ".skiff-pricing.json",
+		"--pricing-scheme", "on-demand",
+		"--format", "json",
+	}, &stdout, &stderr)
+	if code != cli.ExitSuccess {
+		t.Fatalf("update exit=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = cli.Run("skiff", []string{
+		"cost", "explain",
+		"--file", specPath,
+		"--pricing-scheme", "on-demand",
+		"--format", "json",
+		"--trace-id", "tr_stack_db_cost",
+	}, &stdout, &stderr)
+	if code != cli.ExitSuccess {
+		t.Fatalf("explain exit=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var got struct {
+		OK      bool        `json:"ok"`
+		TraceID string      `json:"trace_id"`
+		Result  cost.Result `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("decode stack cost explain: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_stack_db_cost" || got.Result.Infrastructure == nil {
+		t.Fatalf("unexpected envelope: %+v", got)
+	}
+	for _, id := range []string{"database.rds_instance.on_demand.managed-database.orders-db", "database.rds_storage.managed-database.orders-db", "database.rds_backups.managed-database.orders-db"} {
+		if !hasLineItem(got.Result.Infrastructure.LineItems, id) {
+			t.Fatalf("missing infrastructure line item %s in %+v", id, got.Result.Infrastructure.LineItems)
+		}
+	}
+	if len(got.Result.Infrastructure.Totals) == 0 || got.Result.Infrastructure.Totals[0].MonthlyUSD != 44.348 {
+		t.Fatalf("unexpected stack total: %+v", got.Result.Infrastructure.Totals)
+	}
+}
+
+func TestCostExplainStackWithEC2OnlyConfigSuggestsRDSRefresh(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	specPath := filepath.Join(cwd, "..", "..", "examples", "stacks", "api-database", "skiff.yaml")
+	rawEC2PricingPath := writeAWSPricingFixture(t)
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+
+	var stdout, stderr bytes.Buffer
+	code := cli.Run("skiff", []string{
+		"cost", "pricing", "update",
+		"--region", "us-east-1",
+		"--aws-pricing-file", rawEC2PricingPath,
+		"--out", ".skiff-pricing.json",
+		"--pricing-scheme", "on-demand",
+		"--format", "json",
+	}, &stdout, &stderr)
+	if code != cli.ExitSuccess {
+		t.Fatalf("update exit=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = cli.Run("skiff", []string{
+		"cost", "explain",
+		"--file", specPath,
+		"--pricing-scheme", "on-demand",
+		"--format", "json",
+	}, &stdout, &stderr)
+	if code != cli.ExitSuccess {
+		t.Fatalf("explain exit=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var got struct {
+		Result cost.Result `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("decode stack cost explain: %v\n%s", err, stdout.String())
+	}
+	if got.Result.PricingSetup == nil || got.Result.PricingSetup.Status != "incomplete_config" {
+		t.Fatalf("missing incomplete pricing setup guidance: %+v", got.Result.PricingSetup)
+	}
+	if !strings.Contains(got.Result.PricingSetup.UpdateCommand, "skiff cost pricing update --region us-east-1 --out .skiff-pricing.json") {
+		t.Fatalf("unexpected pricing setup command: %+v", got.Result.PricingSetup)
+	}
+}
+
 func TestCostExplainHuman(t *testing.T) {
 	specPath := writeServiceSpec(t, "medium", 12, 24)
 	var stdout, stderr bytes.Buffer
@@ -408,6 +514,15 @@ func writeAWSPricingFixture(t *testing.T) string {
 	return path
 }
 
+func writeAWSRDSPricingFixture(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "aws-rds-pricing.json")
+	if err := os.WriteFile(path, []byte(awsRDSPricingFixture), 0o600); err != nil {
+		t.Fatalf("write RDS pricing fixture: %v", err)
+	}
+	return path
+}
+
 func writeStatefulSpec(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "skiff.yaml")
@@ -552,6 +667,82 @@ const awsPricingFixture = `{
           "priceDimensions": {
             "SKU_MEDIUM.RI3ALL.HRS": {"unit": "Hrs", "pricePerUnit": {"USD": "0.0000000000"}},
             "SKU_MEDIUM.RI3ALL.QTY": {"unit": "Quantity", "pricePerUnit": {"USD": "411"}}
+          }
+        }
+      }
+    }
+  }
+}`
+
+const awsRDSPricingFixture = `{
+  "publicationDate": "2026-05-14T21:07:47Z",
+  "version": "20260514210747",
+  "products": {
+    "RDS_PG_SMALL": {
+      "productFamily": "Database Instance",
+      "attributes": {
+        "locationType": "AWS Region",
+        "instanceType": "db.t4g.micro",
+        "vcpu": "2",
+        "memory": "1 GiB",
+        "databaseEngine": "PostgreSQL",
+        "licenseModel": "No license required",
+        "deploymentOption": "Single-AZ"
+      }
+    },
+    "RDS_PG_GP3": {
+      "productFamily": "Database Storage",
+      "attributes": {
+        "locationType": "AWS Region",
+        "volumeType": "General Purpose-GP3",
+        "databaseEngine": "PostgreSQL",
+        "deploymentOption": "Single-AZ"
+      }
+    },
+    "RDS_PG_BACKUP": {
+      "productFamily": "Storage Snapshot",
+      "attributes": {
+        "locationType": "AWS Region",
+        "databaseEngine": "PostgreSQL",
+        "deploymentOption": "Single-AZ"
+      }
+    }
+  },
+  "terms": {
+    "OnDemand": {
+      "RDS_PG_SMALL": {
+        "RDS_PG_SMALL.OD": {
+          "priceDimensions": {
+            "RDS_PG_SMALL.OD.HRS": {"unit": "Hrs", "pricePerUnit": {"USD": "0.0160000000"}}
+          }
+        }
+      },
+      "RDS_PG_GP3": {
+        "RDS_PG_GP3.OD": {
+          "priceDimensions": {
+            "RDS_PG_GP3.OD.GBMO": {"unit": "GB-Mo", "description": "$0.115 per GB-month of provisioned GP3 storage running PostgreSQL", "pricePerUnit": {"USD": "0.1150000000"}}
+          }
+        }
+      },
+      "RDS_PG_BACKUP": {
+        "RDS_PG_BACKUP.OD": {
+          "priceDimensions": {
+            "RDS_PG_BACKUP.OD.GBMO": {"unit": "GB-Mo", "description": "$0.095 per additional GB-month of backup storage exceeding free allocation running PostgreSQL", "pricePerUnit": {"USD": "0.0950000000"}}
+          }
+        }
+      }
+    },
+    "Reserved": {
+      "RDS_PG_SMALL": {
+        "RDS_PG_SMALL.RI3ALL": {
+          "termAttributes": {
+            "LeaseContractLength": "3yr",
+            "OfferingClass": "standard",
+            "PurchaseOption": "All Upfront"
+          },
+          "priceDimensions": {
+            "RDS_PG_SMALL.RI3ALL.HRS": {"unit": "Hrs", "pricePerUnit": {"USD": "0.0000000000"}},
+            "RDS_PG_SMALL.RI3ALL.QTY": {"unit": "Quantity", "pricePerUnit": {"USD": "199"}}
           }
         }
       }

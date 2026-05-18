@@ -201,7 +201,7 @@ func (m *SDKServiceResourceManager) ApplyResource(ctx context.Context, desired D
 		return m.applyLaunchTemplate(ctx, desired)
 	case ResourceKindAutoScalingGroup:
 		return m.applyAutoScalingGroup(ctx, desired)
-	case ResourceKindRDSInstance, ResourceKindSecret:
+	case ResourceKindRDSInstance, ResourceKindSecret, ResourceKindS3Bucket:
 		return nil, provider.Unsupported(Name, "live apply "+desired.Kind)
 	default:
 		return nil, &provider.Error{
@@ -954,7 +954,7 @@ func (m *SDKServiceResourceManager) findDesired(ctx context.Context, desired Des
 			return sdkResourceRef{}, false, err
 		}
 		return m.findAutoScalingGroup(ctx, group.Name)
-	case ResourceKindRDSInstance, ResourceKindSecret:
+	case ResourceKindRDSInstance, ResourceKindSecret, ResourceKindS3Bucket:
 		return sdkResourceRef{}, false, provider.Unsupported(Name, "live apply "+desired.Kind)
 	default:
 		return sdkResourceRef{}, false, nil

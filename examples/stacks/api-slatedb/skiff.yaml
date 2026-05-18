@@ -1,0 +1,45 @@
+apiVersion: skiff.dev/v1alpha1
+kind: Stack
+metadata:
+  name: orders
+  env: prod
+  labels:
+    app: orders
+    tier: api-slatedb
+    region: us-west-2
+stack:
+  services:
+    - name: api
+      artifact:
+        type: oci
+        ref: registry.example.com/orders-api@sha256:REPLACE_WITH_DIGEST
+      runtime:
+        command:
+          - python
+          - /app/app.py
+        port: 8080
+        env:
+          SKIFF_STACK: orders
+          SLATEDB_TABLE: orders
+          SLATEDB_CACHE_DIR: /var/cache/slatedb
+        health:
+          path: /healthz
+        metrics:
+          path: /metrics
+      scale:
+        min: 2
+        max: 4
+      network:
+        ingress:
+          type: internal-http
+  objectStores:
+    - name: data
+      uri: s3://orders-slatedb-prod/slatedb/orders
+      purpose: slatedb
+      access: read-write
+      versioned: true
+      encrypted: true
+  bindings:
+    - from: api
+      to: data
+      as: SLATEDB_URI

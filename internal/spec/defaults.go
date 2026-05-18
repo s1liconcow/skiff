@@ -17,6 +17,9 @@ func ApplyDefaults(doc *Document) {
 			for i := range doc.Stack.Databases {
 				applyManagedDatabaseDefaults(&doc.Stack.Databases[i].ManagedDatabase)
 			}
+			for i := range doc.Stack.ObjectStores {
+				applyStackObjectStoreDefaults(&doc.Stack.ObjectStores[i])
+			}
 		}
 	case KindMultiRegionStack:
 		applyMultiRegionDefaults(doc.MultiRegion)
@@ -162,4 +165,15 @@ func applyManagedDatabaseDefaults(db *ManagedDatabase) {
 	if db.Network.SubnetGroupRef == "" {
 		db.Network.Private = true
 	}
+}
+
+func applyStackObjectStoreDefaults(store *StackObjectStore) {
+	if store == nil {
+		return
+	}
+	if store.Access == "" {
+		store.Access = "read-write"
+	}
+	store.Versioned = true
+	store.Encrypted = true
 }

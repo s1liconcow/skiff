@@ -114,6 +114,11 @@ func desiredServiceResources(resources *ServiceResources) ([]DesiredServiceResou
 			return nil, err
 		}
 	}
+	for _, item := range resources.ObjectStores {
+		if err := appendDesired(ResourceKindS3Bucket, item.LogicalID, item.Name, item.Tags, "S3 bucket for workload object-store data", item); err != nil {
+			return nil, err
+		}
+	}
 	for _, item := range resources.LaunchTemplates {
 		if err := appendDesired(ResourceKindLaunchTemplate, item.LogicalID, item.Name, item.Tags, "EC2 launch template with skiff-runner user-data", item); err != nil {
 			return nil, err

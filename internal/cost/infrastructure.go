@@ -27,6 +27,7 @@ func EstimateInfrastructure(graph *ir.Graph, catalog PricingCatalog, opts Pricin
 		return estimate
 	}
 	addComputeLineItems(&estimate, graph, catalog, opts)
+	addManagedDatabaseLineItems(&estimate, graph, catalog, opts)
 	addStatefulStorageLineItems(&estimate, graph, catalog)
 	addSupportLineItems(&estimate, graph)
 	estimate.Totals = infraTotals(estimate.LineItems, opts.MonthlyHours)
@@ -38,6 +39,23 @@ func EstimateInfrastructure(graph *ir.Graph, catalog PricingCatalog, opts Pricin
 		estimate.Notes = append(estimate.Notes, "usage-based resources are listed but excluded from totals unless Skiff has enough usage data to estimate them")
 	}
 	return estimate
+}
+
+func MissingManagedDatabasePricing(graph *ir.Graph, catalog PricingCatalog) bool {
+	if graph == nil || len(graph.Resources.ManagedDatabases) == 0 {
+		return false
+	}
+	for _, db := range graph.Resources.ManagedDatabases {
+		if _, ok := catalog.databaseItem(db.Engine, db.Size); !ok {
+			return true
+		}
+		if db.Storage.SizeGB > 0 {
+			if _, ok := catalog.databaseStorageRate(StorageKindRDSVolumeGBMonth, db.Engine, firstNonEmpty(db.Storage.Type, "gp3")); !ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func usageScenarios(graph *ir.Graph, catalog PricingCatalog, opts PricingOptions) []UsageScenario {
@@ -104,7 +122,7 @@ func scenarioTotals(machineSize string, replicas int, snapshotGB float64, graph 
 	for _, rate := range item.Rates {
 		effectiveHourly := effectiveHourly(rate)
 		computeMonthly := effectiveHourly * float64(replicas) * opts.MonthlyHours
-		monthly := computeMonthly + storageMonthly + snapshotMonthly
+		monthly := computeMonthly + fixedDatabaseInstanceMonthly(graph, catalog, rate.Scheme, opts.MonthlyHours) + storageMonthly + snapshotMonthly
 		total := InfraTotal{
 			PricingScheme: rate.Scheme,
 			MonthlyUSD:    roundMoney(monthly),
@@ -169,6 +187,115 @@ func addComputeLineItems(estimate *InfraEstimate, graph *ir.Graph, catalog Prici
 		}
 		estimate.LineItems = append(estimate.LineItems, line)
 	}
+}
+
+func addManagedDatabaseLineItems(estimate *InfraEstimate, graph *ir.Graph, catalog PricingCatalog, opts PricingOptions) {
+	if opts.MonthlyHours <= 0 {
+		opts.MonthlyHours = DefaultMonthlyHours
+	}
+	for _, db := range graph.Resources.ManagedDatabases {
+		item, ok := catalog.databaseItem(db.Engine, db.Size)
+		if !ok {
+			estimate.LineItems = append(estimate.LineItems, InfraLineItem{
+				ID:        "database.rds_instance." + resourceIDPart(db.Meta.LogicalID),
+				Category:  "database",
+				Kind:      "rds_instance",
+				Name:      firstNonEmpty(db.Meta.Name, db.Size),
+				Quantity:  1,
+				Unit:      "instances",
+				Estimated: false,
+				Summary:   fmt.Sprintf("managed database %s has no matching RDS instance pricing", firstNonEmpty(db.Meta.Name, db.Size)),
+			})
+		} else {
+			for _, rate := range item.Rates {
+				effectiveHourly := effectiveHourly(rate)
+				monthly := effectiveHourly * opts.MonthlyHours
+				line := InfraLineItem{
+					ID:              "database.rds_instance." + rate.Scheme + "." + resourceIDPart(db.Meta.LogicalID),
+					Category:        "database",
+					Kind:            "rds_instance",
+					Name:            item.InstanceClass,
+					PricingScheme:   rate.Scheme,
+					Quantity:        opts.MonthlyHours,
+					Unit:            "instance-hour",
+					UnitPriceUSD:    roundMoney(effectiveHourly),
+					MonthlyUSD:      roundMoney(monthly),
+					AnnualUSD:       roundMoney(effectiveHourly * 8760),
+					Estimated:       true,
+					IncludedInTotal: true,
+					Summary:         fmt.Sprintf("%s %s %s managed database", databaseEngineLabel(db.Engine), firstNonEmpty(item.DeploymentOption, "Single-AZ"), item.InstanceClass),
+				}
+				if rate.TermHours > 0 {
+					line.TermUSD = roundMoney(rate.HourlyUSD*float64(rate.TermHours) + rate.UpfrontUSD)
+				}
+				estimate.LineItems = append(estimate.LineItems, line)
+			}
+		}
+		addManagedDatabaseStorageLineItems(estimate, db, catalog)
+	}
+}
+
+func addManagedDatabaseStorageLineItems(estimate *InfraEstimate, db ir.ManagedDatabase, catalog PricingCatalog) {
+	sizeGB := db.Storage.SizeGB
+	if sizeGB <= 0 {
+		estimate.LineItems = append(estimate.LineItems, InfraLineItem{
+			ID:        "database.rds_storage." + resourceIDPart(db.Meta.LogicalID),
+			Category:  "database",
+			Kind:      "rds_storage",
+			Name:      firstNonEmpty(db.Meta.Name, db.Storage.Type),
+			Estimated: false,
+			Summary:   "managed database storage size is not set",
+		})
+		return
+	}
+	storageType := firstNonEmpty(db.Storage.Type, "gp3")
+	rate, ok := catalog.databaseStorageRate(StorageKindRDSVolumeGBMonth, db.Engine, storageType)
+	if !ok {
+		estimate.LineItems = append(estimate.LineItems, InfraLineItem{
+			ID:        "database.rds_storage." + resourceIDPart(db.Meta.LogicalID),
+			Category:  "database",
+			Kind:      "rds_storage",
+			Name:      storageType,
+			Quantity:  float64(sizeGB),
+			Unit:      "GB-month",
+			Estimated: false,
+			Summary:   fmt.Sprintf("%d GB-month of %s RDS storage; AWS RDS storage pricing was not available", sizeGB, storageType),
+		})
+	} else {
+		monthly := float64(sizeGB) * rate.UnitPriceUSD
+		estimate.LineItems = append(estimate.LineItems, InfraLineItem{
+			ID:              "database.rds_storage." + resourceIDPart(db.Meta.LogicalID),
+			Category:        "database",
+			Kind:            "rds_storage",
+			Name:            storageType,
+			Quantity:        float64(sizeGB),
+			Unit:            rate.Unit,
+			UnitPriceUSD:    roundMoney(rate.UnitPriceUSD),
+			MonthlyUSD:      roundMoney(monthly),
+			AnnualUSD:       roundMoney(monthly * 12),
+			Estimated:       true,
+			IncludedInTotal: true,
+			Summary:         fmt.Sprintf("%d GB-month of %s RDS storage for %s", sizeGB, storageType, databaseEngineLabel(db.Engine)),
+		})
+	}
+	if !db.Backups.Enabled {
+		return
+	}
+	backupRate, backupOK := catalog.databaseStorageRate(StorageKindRDSBackupGBMonth, db.Engine, "backup")
+	backupSummary := "automated backups are enabled; charged backup storage above the free allocation depends on retained backup volume"
+	if backupOK {
+		backupSummary = fmt.Sprintf("%s; additional charged backup storage rate is %s/%s", backupSummary, formatUSD(backupRate.UnitPriceUSD), backupRate.Unit)
+	}
+	estimate.LineItems = append(estimate.LineItems, InfraLineItem{
+		ID:        "database.rds_backups." + resourceIDPart(db.Meta.LogicalID),
+		Category:  "database",
+		Kind:      "rds_backup_storage",
+		Name:      firstNonEmpty(db.Meta.Name, db.Engine),
+		Quantity:  float64(db.Backups.RetentionDays),
+		Unit:      "retention-days",
+		Estimated: false,
+		Summary:   backupSummary,
+	})
 }
 
 func addStatefulStorageLineItems(estimate *InfraEstimate, graph *ir.Graph, catalog PricingCatalog) {
@@ -436,6 +563,37 @@ func fixedStorageMonthly(graph *ir.Graph, catalog PricingCatalog) float64 {
 		}
 		total += size * rate.UnitPriceUSD
 	}
+	for _, db := range graph.Resources.ManagedDatabases {
+		if db.Storage.SizeGB <= 0 {
+			continue
+		}
+		rate, ok := catalog.databaseStorageRate(StorageKindRDSVolumeGBMonth, db.Engine, firstNonEmpty(db.Storage.Type, "gp3"))
+		if !ok {
+			continue
+		}
+		total += float64(db.Storage.SizeGB) * rate.UnitPriceUSD
+	}
+	return total
+}
+
+func fixedDatabaseInstanceMonthly(graph *ir.Graph, catalog PricingCatalog, scheme string, monthlyHours float64) float64 {
+	if graph == nil {
+		return 0
+	}
+	total := 0.0
+	for _, db := range graph.Resources.ManagedDatabases {
+		item, ok := catalog.databaseItem(db.Engine, db.Size)
+		if !ok {
+			continue
+		}
+		for _, rate := range item.Rates {
+			if rate.Scheme != scheme {
+				continue
+			}
+			total += effectiveHourly(rate) * monthlyHours
+			break
+		}
+	}
 	return total
 }
 
@@ -554,6 +712,82 @@ func (catalog PricingCatalog) storageRate(kind, resourceType string) (StoragePri
 		}
 	}
 	return StoragePricing{}, false
+}
+
+func (catalog PricingCatalog) databaseItem(engine, size string) (DatabaseInstancePricing, bool) {
+	engine = normalizeDatabaseEngineID(engine)
+	size = strings.TrimSpace(size)
+	for _, item := range catalog.DatabaseItems {
+		if normalizeDatabaseEngineID(item.Engine) != engine {
+			continue
+		}
+		if item.Size == size || item.InstanceClass == size || (size == "" && item.Size == "small") {
+			return item, true
+		}
+	}
+	return DatabaseInstancePricing{}, false
+}
+
+func (catalog PricingCatalog) databaseStorageRate(kind, engine, resourceType string) (StoragePricing, bool) {
+	engine = normalizeDatabaseEngineID(engine)
+	resourceType = strings.TrimSpace(resourceType)
+	var fallback *StoragePricing
+	for i := range catalog.StorageRates {
+		rate := catalog.StorageRates[i]
+		if rate.Kind != kind {
+			continue
+		}
+		if resourceType != "" && rate.ResourceType != "" && rate.ResourceType != resourceType {
+			continue
+		}
+		rateEngine := normalizeDatabaseEngineID(rate.Engine)
+		if rateEngine == engine {
+			return rate, true
+		}
+		if rateEngine == "" && fallback == nil {
+			fallback = &catalog.StorageRates[i]
+		}
+	}
+	if fallback != nil {
+		return *fallback, true
+	}
+	return StoragePricing{}, false
+}
+
+func normalizeDatabaseEngineID(engine string) string {
+	switch strings.ToLower(strings.TrimSpace(engine)) {
+	case "postgres", "postgresql":
+		return "postgres"
+	case "mysql":
+		return "mysql"
+	case "mariadb":
+		return "mariadb"
+	default:
+		return strings.ToLower(strings.TrimSpace(engine))
+	}
+}
+
+func databaseEngineLabel(engine string) string {
+	switch normalizeDatabaseEngineID(engine) {
+	case "postgres":
+		return "PostgreSQL"
+	case "mysql":
+		return "MySQL"
+	case "mariadb":
+		return "MariaDB"
+	default:
+		return engine
+	}
+}
+
+func resourceIDPart(value string) string {
+	value = strings.Trim(strings.TrimSpace(value), ":/")
+	value = strings.ReplaceAll(value, ":", ".")
+	value = strings.ReplaceAll(value, "/", ".")
+	if value == "" {
+		return "database"
+	}
+	return value
 }
 
 func parseGiB(value string) float64 {

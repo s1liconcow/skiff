@@ -9,6 +9,7 @@ LDFLAGS := -X '$(MODULE)/internal/buildinfo.Version=$(VERSION)' -X '$(MODULE)/in
 INSTALL ?= install
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
+CORE_BINS := skiff skiffd skiff-runner skiff-worker
 
 .PHONY: build install test readiness e2e-local e2e-apple-container e2e-aws demo-local demo-test demo-apple-container demo-apple-context demo-apple-up demo-apple-down clean-apple-containers codex-apple-sandbox codex-apple-sandbox-playwright vet fmt lint generate smoke clean
 
@@ -17,11 +18,14 @@ build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/skiff ./cmd/skiff
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/skiffd ./cmd/skiffd
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/skiff-runner ./cmd/skiff-runner
+	$(GO) build -ldflags "$(LDFLAGS)" -o bin/skiff-worker ./cmd/skiff-worker
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/skiff-mtls-plugin ./cmd/skiff-mtls-plugin
 
 install: build
 	$(INSTALL) -d "$(DESTDIR)$(BINDIR)"
-	$(INSTALL) -m 0755 bin/skiff "$(DESTDIR)$(BINDIR)/skiff"
+	for bin in $(CORE_BINS); do \
+		$(INSTALL) -m 0755 "bin/$$bin" "$(DESTDIR)$(BINDIR)/$$bin"; \
+	done
 
 test:
 	$(GO_TEST_ENV) $(GO) test ./...
@@ -78,6 +82,7 @@ smoke: build
 	./bin/skiff version --format json >/dev/null
 	./bin/skiffd version --format json >/dev/null
 	./bin/skiff-runner version --format json >/dev/null
+	./bin/skiff-worker --help >/dev/null
 
 clean:
 	rm -rf bin

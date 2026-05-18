@@ -1,0 +1,52 @@
+apiVersion: skiff.dev/v1alpha1
+kind: StatefulGroup
+metadata:
+  name: orders-api
+  env: prod
+  labels:
+    app: orders
+    tier: api-sqlite
+stateful:
+  replicas: 1
+  members:
+    - ordinal: 0
+  volume:
+    size: 10Gi
+    type: gp3
+    mountPath: /var/lib/skiff/sqlite
+    encrypted: true
+  recipe:
+    name: sqlite-api-single
+    config:
+      artifact:
+        type: oci
+        ref: registry.example.com/orders-api@sha256:REPLACE_WITH_DIGEST
+      runtime:
+        command:
+          - python
+          - /app/app.py
+        env:
+          SKIFF_STACK: orders
+          SQLITE_PATH: /var/lib/skiff/sqlite/app.db
+        ports:
+          http: 8080
+        health:
+          path: /healthz
+          port: 8080
+        metrics:
+          enabled: true
+          path: /metrics
+          port: 8080
+      sqlite:
+        path: /var/lib/skiff/sqlite/app.db
+        journaling: wal
+      snapshots:
+        enabled: true
+        interval: 30m
+        retention: 7d
+      recovery:
+        requireFencing: true
+        replaceMemberSaga: stateful.replace_member
+        maxUnavailableMembers: 1
+  update:
+    strategy: ordered

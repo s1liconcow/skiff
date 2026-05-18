@@ -84,92 +84,154 @@ SKIFF_CONTEXT=local-aws-plan skiff config show
 
 ## Run Actual Local VMs On Apple Silicon
 
-The fake-provider context writes real Skiff state but does not start a workload
-process. To exercise the VM-local runner/workload path on an Apple silicon Mac,
-use the Apple Container demo:
+The fake-provider context writes real Skiff state but does not start a workload.
+On an Apple silicon Mac, use the Apple Container path to run a real local Caddy
+workload VM, RustFS for S3-compatible object state, and a local `skiffd`.
 
 ```bash
-container --version
-make demo-apple-context
+SKIFF_INSTALL_VERSION=v0.1.0 SKIFF_INSTALL_DIR="$HOME/.local/bin" scripts/install.sh
+export PATH="$HOME/.local/bin:$PATH"
+skiff version
+skiffd version
 ```
 
 Prerequisites:
 
 - Apple silicon Mac
+- Skiff installed with `scripts/install.sh`, with `skiff` and `skiffd` available on `PATH`
 - Apple Container installed and running, with the `container` CLI on `PATH`
 - Network access to pull the RustFS and Caddy OCI images
 
-The demo starts RustFS as an S3-compatible object store and Caddy as the
-workload in local Linux VMs. It publishes signed release/runtime manifests,
-boots the runner lifecycle, rolls Caddy to a second release, starts a local
-`skiffd` against the same object state, and runs a rolling canary saga.
+Check Apple Container:
 
-The helper creates temporary ports and bucket names, writes the resolved values
-under `.skiff-demo-reports/apple-container/`, and uses those contexts for its
-Skiff CLI checks. At the end of the run it prints the exact files:
+```bash
+container --version
+```
+
+Start the demo environment:
+
+```bash
+make demo-apple-context
+```
+
+The command prints the generated `.env` path. Source that exact file:
 
 ```bash
 source .skiff-demo-reports/apple-container/<run>.env
-skiff config get-contexts
-SKIFF_CONTEXT=local-apple-vms skiff status caddy-web
-SKIFF_CONTEXT=local-apple-skiffd skiff tui caddy-web --read-only
-make demo-apple-down
 ```
 
-The generated config has this shape, with the RustFS bucket and `skiffd` port
-already filled in:
+The sourced environment selects the direct Apple Container context and exports
+the generated quickstart release specs:
 
-```yaml
-apiVersion: skiff.dev/v1alpha1
-kind: SkiffConfig
-current-context: local-apple-vms
-contexts:
-  - name: local-apple-vms
-    context:
-      mode: direct
-      env: prod
-      provider: apple-container
-      region: local
-      state: "s3://<rustfs-bucket>"
-  - name: local-apple-skiffd-server
-    context:
-      mode: skiffd
-      env: prod
-      provider: apple-container
-      region: local
-      state: "s3://<rustfs-bucket>"
-  - name: local-apple-skiffd
-    context:
-      mode: api
-      env: prod
-      provider: apple-container
-      region: local
-      state: "s3://<rustfs-bucket>"
-      apiURL: "http://127.0.0.1:<skiffd-port>"
-```
+- `$SKIFF_APPLE_GREEN_SPEC`
+- `$SKIFF_APPLE_RED_SPEC`
+- `$SKIFF_APPLE_BLUE_SPEC`
+- `$SKIFF_APPLE_CADDY_URL`
 
-The generated `.env` file contains the RustFS endpoint details for the same
-run:
+Now walk the system one command at a time.
 
 ```bash
-export AWS_ACCESS_KEY_ID=skiffe2eaccess
-export AWS_SECRET_ACCESS_KEY=skiffe2esecret
-export AWS_REGION=us-east-1
-export AWS_DEFAULT_REGION=us-east-1
-export SKIFF_AWS_ENDPOINT="http://127.0.0.1:<rustfs-port>"
-export SKIFF_AWS_S3_PATH_STYLE=true
-export SKIFF_CONFIG=".skiff-demo-reports/apple-container/<run>.skiffconfig"
-export SKIFF_CONTEXT=local-apple-vms
-export SKIFF_APPLE_RUSTFS_CONTAINER="<rustfs-container>"
-export SKIFF_APPLE_RUSTFS_VOLUME="<rustfs-volume>"
-export SKIFF_APPLE_CADDY_CONTAINER="<caddy-container>"
-export SKIFF_APPLE_SKIFFD_URL="http://127.0.0.1:<skiffd-port>"
-export SKIFF_APPLE_SKIFFD_PID="<skiffd-pid>"
-export SKIFF_APPLE_SKIFFD_LOG=".skiff-demo-reports/apple-container/<run>-skiffd.log"
+skiff config get-contexts
 ```
 
-With that environment sourced, `skiff logs caddy-web` reads the recorded Caddy
-Apple Container logs instead of the fake-provider placeholder.
+```bash
+skiff status caddy-web
+```
+
+```bash
+skiff logs caddy-web --limit 20
+```
+
+```bash
+skiff ops events caddy-web --limit 20
+```
+
+Create a unique suffix for the releases you are about to publish:
+
+```bash
+export SKIFF_DEMO_RUN="$(date +%Y%m%d%H%M%S)"
+```
+
+Publish and canary the GREEN release. This writes signed release objects,
+updates service control through a saga, restarts the local Caddy VM, and passes
+`/healthz`.
+
+```bash
+skiff deploy "$SKIFF_APPLE_GREEN_SPEC" --canary --canary-stages 50,100 --canary-bake 0s --canary-metric request_count --canary-threshold 1 --release-id "rel_green_$SKIFF_DEMO_RUN" --operation-id "op_green_$SKIFF_DEMO_RUN"
+```
+
+```bash
+curl "$SKIFF_APPLE_CADDY_URL"
+```
+
+Expected result: the page says `GREEN`.
+
+Try the RED release. The RED artifact intentionally omits `/healthz`, so the
+canary fails target health and compensates back to the previous stable GREEN
+release.
+
+```bash
+skiff deploy "$SKIFF_APPLE_RED_SPEC" --canary --canary-stages 50,100 --canary-bake 0s --canary-metric request_count --canary-threshold 1 --release-id "rel_red_$SKIFF_DEMO_RUN" --operation-id "op_red_$SKIFF_DEMO_RUN"
+```
+
+Expected result: `canary saga ... status=failed` and `next: inspect_failure`.
+
+```bash
+curl "$SKIFF_APPLE_CADDY_URL"
+```
+
+Expected result: the page still says `GREEN`.
+
+Inspect what happened:
+
+```bash
+skiff status caddy-web
+```
+
+```bash
+skiff ops events caddy-web --limit 30
+```
+
+```bash
+skiff ops list --all --service caddy-web
+```
+
+Now publish and canary the BLUE release. This one has a healthy `/healthz`, so
+the canary succeeds and BLUE becomes stable.
+
+```bash
+skiff deploy "$SKIFF_APPLE_BLUE_SPEC" --canary --canary-stages 50,100 --canary-bake 0s --canary-metric request_count --canary-threshold 1 --release-id "rel_blue_$SKIFF_DEMO_RUN" --operation-id "op_blue_$SKIFF_DEMO_RUN"
+```
+
+```bash
+curl "$SKIFF_APPLE_CADDY_URL"
+```
+
+Expected result: the page says `BLUE`.
+
+Use direct mode for recovery-style inspection:
+
+```bash
+skiff status caddy-web --fresh
+```
+
+```bash
+skiff logs caddy-web --limit 20
+```
+
+```bash
+skiff ops events caddy-web --limit 30
+```
+
+Use the local `skiffd` API context for the normal facade:
+
+```bash
+SKIFF_CONTEXT=local-apple-skiffd skiff status caddy-web --fresh
+```
+
+```bash
+SKIFF_CONTEXT=local-apple-skiffd skiff tui caddy-web --read-only
+```
 
 `make demo-apple-context` is the persistent path. Use `make demo-apple-down` to
 stop the `skiffd` process, Caddy VM, RustFS VM, and RustFS volume recorded in

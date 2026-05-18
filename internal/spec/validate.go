@@ -3,6 +3,7 @@ package spec
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -394,14 +395,17 @@ func validateStack(diagnostics *[]Diagnostic, doc Document) {
 	if len(stack.Services) == 0 {
 		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.services", Code: "REQUIRED", Severity: SeverityError, Message: "stack specs must include at least one service"})
 	}
-	if len(stack.Databases) == 0 {
-		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.databases", Code: "REQUIRED", Severity: SeverityError, Message: "api-database stack specs must include at least one managed database"})
+	if len(stack.Databases) == 0 && len(stack.ObjectStores) == 0 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack", Code: "REQUIRED", Severity: SeverityError, Message: "stack specs must include at least one managed database or object store"})
 	}
 	if len(stack.Services) > 1 {
-		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.services", Code: "UNSUPPORTED_STACK_SHAPE", Severity: SeverityError, Message: "this Skiff version supports one service per API/database stack"})
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.services", Code: "UNSUPPORTED_STACK_SHAPE", Severity: SeverityError, Message: "this Skiff version supports one service per stack recipe"})
 	}
 	if len(stack.Databases) > 1 {
 		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.databases", Code: "UNSUPPORTED_STACK_SHAPE", Severity: SeverityError, Message: "this Skiff version supports one managed database per API/database stack"})
+	}
+	if len(stack.ObjectStores) > 1 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.objectStores", Code: "UNSUPPORTED_STACK_SHAPE", Severity: SeverityError, Message: "this Skiff version supports one object store per API/object-store stack"})
 	}
 	serviceNames := map[string]struct{}{}
 	for i, service := range stack.Services {
@@ -421,20 +425,63 @@ func validateStack(diagnostics *[]Diagnostic, doc Document) {
 		databaseNames[database.Name] = struct{}{}
 		validateManagedDatabase(diagnostics, database.ManagedDatabase, base)
 	}
+	objectStoreNames := map[string]struct{}{}
+	for i, store := range stack.ObjectStores {
+		base := fmt.Sprintf("$.stack.objectStores[%d]", i)
+		validateName(diagnostics, base+".name", store.Name, "stack object store name must be a DNS-style Skiff name")
+		if _, ok := databaseNames[store.Name]; ok {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".name", Code: "DUPLICATE_STACK_RESOURCE", Severity: SeverityError, Message: "object store names must not duplicate database names in the same stack"})
+		}
+		objectStoreNames[store.Name] = struct{}{}
+		validateStackObjectStore(diagnostics, store, base)
+	}
 	for i, binding := range stack.Bindings {
 		base := fmt.Sprintf("$.stack.bindings[%d]", i)
 		if _, ok := serviceNames[binding.From]; !ok {
 			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".from", Code: "UNKNOWN_STACK_SERVICE", Severity: SeverityError, Message: "binding.from must name a service in this stack"})
 		}
-		if _, ok := databaseNames[binding.To]; !ok {
-			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".to", Code: "UNKNOWN_STACK_DATABASE", Severity: SeverityError, Message: "binding.to must name a database in this stack"})
+		_, bindsDatabase := databaseNames[binding.To]
+		_, bindsObjectStore := objectStoreNames[binding.To]
+		if !bindsDatabase && !bindsObjectStore {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".to", Code: "UNKNOWN_STACK_RESOURCE", Severity: SeverityError, Message: "binding.to must name a database or object store in this stack"})
 		}
 		if !validEnvName(binding.As) {
 			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".as", Code: "INVALID_ENV_NAME", Severity: SeverityError, Message: "binding.as must be an environment variable name like DATABASE_URL"})
 		}
 	}
-	if len(stack.Bindings) == 0 && len(stack.Services) > 0 && len(stack.Databases) > 0 {
-		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.bindings", Code: "REQUIRED", Severity: SeverityError, Message: "api-database stack specs must bind the service to the database"})
+	if len(stack.Bindings) == 0 && len(stack.Services) > 0 && len(stack.Databases)+len(stack.ObjectStores) > 0 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.bindings", Code: "REQUIRED", Severity: SeverityError, Message: "stack specs must bind the service to its database or object store"})
+	}
+}
+
+func validateStackObjectStore(diagnostics *[]Diagnostic, store StackObjectStore, path string) {
+	if strings.TrimSpace(store.URI) == "" {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".uri", Code: "REQUIRED", Severity: SeverityError, Message: "object store uri is required"})
+	} else if !validObjectStoreURI(store.URI) {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".uri", Code: "INVALID_OBJECT_STORE_URI", Severity: SeverityError, Message: "object store uri must be an object-store URI such as s3://bucket/prefix"})
+	}
+	switch strings.ToLower(strings.TrimSpace(store.Access)) {
+	case "", "read-only", "read-write":
+	default:
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".access", Code: "UNSUPPORTED_OBJECT_STORE_ACCESS", Severity: SeverityError, Message: "object store access must be read-only or read-write"})
+	}
+	if store.Purpose != "" && len(store.Purpose) > 64 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".purpose", Code: "INVALID_OBJECT_STORE_PURPOSE", Severity: SeverityError, Message: "object store purpose must be 64 characters or fewer"})
+	}
+}
+
+func validObjectStoreURI(value string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Scheme == "" {
+		return false
+	}
+	switch parsed.Scheme {
+	case "s3", "gs", "azblob":
+		return strings.TrimSpace(parsed.Host) != ""
+	case "file":
+		return strings.HasPrefix(parsed.Path, "/")
+	default:
+		return false
 	}
 }
 

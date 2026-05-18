@@ -42,14 +42,23 @@ exits non-zero if any command fails.
 On Apple silicon with Apple Container available:
 
 ```bash
+SKIFF_INSTALL_VERSION=v0.1.0 SKIFF_INSTALL_DIR="$HOME/.local/bin" scripts/install.sh
+export PATH="$HOME/.local/bin:$PATH"
+skiff version
+skiffd version
+container --version
+```
+
+```bash
 make demo-apple-context
 ```
 
 This wraps the Apple Container e2e path in persistent mode. It starts RustFS,
 launches Caddy in a local Linux VM, verifies signed OCI release/runtime
-manifests, rolls to a second release, starts a local `skiffd` against the RustFS
-state, and runs a rolling canary saga. It is slower and pulls OCI images, but it
-shows the runner/workload path rather than only the fake provider.
+manifests, starts a local `skiffd` against the RustFS state, and writes
+GREEN/RED/BLUE quickstart specs you can deploy by hand. It is slower and pulls
+OCI images, but it shows the runner/workload path rather than only the fake
+provider.
 
 The run writes a filled-in context and environment file under
 `.skiff-demo-reports/apple-container/`, then uses those contexts for the CLI
@@ -59,6 +68,9 @@ checks:
 source .skiff-demo-reports/apple-container/<run>.env
 skiff config get-contexts
 SKIFF_CONTEXT=local-apple-vms skiff status caddy-web
+skiff deploy "$SKIFF_APPLE_GREEN_SPEC" --canary --canary-bake 0s --canary-metric request_count --canary-threshold 1
+skiff deploy "$SKIFF_APPLE_RED_SPEC" --canary --canary-bake 0s --canary-metric request_count --canary-threshold 1
+skiff deploy "$SKIFF_APPLE_BLUE_SPEC" --canary --canary-bake 0s --canary-metric request_count --canary-threshold 1
 SKIFF_CONTEXT=local-apple-skiffd skiff tui caddy-web --read-only
 ```
 

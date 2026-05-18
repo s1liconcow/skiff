@@ -136,6 +136,33 @@ func TestEstimateInfrastructureIncludesStatefulStorageAndSupport(t *testing.T) {
 	}
 }
 
+func TestEstimateInfrastructureIncludesManagedDatabase(t *testing.T) {
+	graph := &ir.Graph{
+		Service: "orders",
+		Env:     "prod",
+		Resources: ir.Resources{
+			ManagedDatabases: []ir.ManagedDatabase{
+				{
+					Meta:    ir.ResourceMeta{LogicalID: "managed-database:orders-db", Name: "skiff-prod-orders-db"},
+					Engine:  "postgres",
+					Size:    "small",
+					Storage: ir.DatabaseStorage{SizeGB: 20, Type: "gp3", Encrypted: true},
+					Backups: ir.DatabaseBackups{Enabled: true, RetentionDays: 7},
+				},
+			},
+		},
+	}
+	estimate := EstimateInfrastructure(graph, fakePricingCatalog(), PricingOptions{MonthlyHours: 730})
+	for _, id := range []string{"database.rds_instance.on_demand.managed-database.orders-db", "database.rds_storage.managed-database.orders-db", "database.rds_backups.managed-database.orders-db"} {
+		if !hasInfraLineItem(estimate.LineItems, id) {
+			t.Fatalf("missing line item %s in %+v", id, estimate.LineItems)
+		}
+	}
+	if len(estimate.Totals) == 0 || estimate.Totals[0].MonthlyUSD != 13.98 {
+		t.Fatalf("unexpected totals: %+v", estimate.Totals)
+	}
+}
+
 func assertRecommendation(t *testing.T, recs []Recommendation, id, confidence string) {
 	t.Helper()
 	rec := findRecommendation(recs, id)
@@ -199,6 +226,22 @@ func fakePricingCatalog() PricingCatalog {
 		StorageRates: []StoragePricing{
 			{Kind: StorageKindEBSVolumeGBMonth, ResourceType: "gp3", Unit: "GB-Mo", UnitPriceUSD: 0.08},
 			{Kind: StorageKindEBSSnapshotGBMonth, Unit: "GB-Mo", UnitPriceUSD: 0.05},
+			{Kind: StorageKindRDSVolumeGBMonth, Engine: "postgres", ResourceType: "gp3", Unit: "GB-Mo", UnitPriceUSD: 0.115},
+			{Kind: StorageKindRDSBackupGBMonth, Engine: "postgres", ResourceType: "backup", Unit: "GB-Mo", UnitPriceUSD: 0.095},
+		},
+		DatabaseItems: []DatabaseInstancePricing{
+			{
+				Engine:           "postgres",
+				Size:             "small",
+				InstanceClass:    "db.t4g.micro",
+				DeploymentOption: "Single-AZ",
+				VCPU:             2,
+				MemoryGB:         1,
+				Rates: []PricingRate{
+					{Scheme: PricingSchemeOnDemand, Summary: "On-Demand", Currency: "USD", HourlyUSD: 0.016, EffectiveHourlyUSD: 0.016},
+					{Scheme: PricingSchemeRI3yrStandardAllUpfront, Summary: "3yr Standard RI All Upfront", Currency: "USD", UpfrontUSD: 199, EffectiveHourlyUSD: 199.0 / 26280.0, TermHours: 26280},
+				},
+			},
 		},
 	}
 }

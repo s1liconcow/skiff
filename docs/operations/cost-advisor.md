@@ -22,7 +22,7 @@ skiff cost explain payments-api \
 ```
 
 AWS pricing estimates use a local pricing config file. Refresh it explicitly
-from public AWS EC2 Price List data:
+from public AWS EC2 and RDS Price List data:
 
 ```bash
 skiff cost pricing update \
@@ -45,10 +45,13 @@ skiff cost explain payments-api \
 ```
 
 `skiff cost pricing update` is the slow public-data refresh step. It fetches the
-regional Amazon EC2 bulk price list and writes a small Skiff pricing catalog.
-Use `--aws-pricing-file <path>` for offline tests or pinned comparisons.
-The estimate uses the AWS instance type produced by Skiff's provider lowering
-for the service machine size, for example `small` -> `t3.small`.
+regional Amazon EC2 and Amazon RDS bulk price lists and writes a small Skiff
+pricing catalog. Use `--aws-pricing-file <path>` and
+`--aws-rds-pricing-file <path>` for offline tests or pinned comparisons. The
+estimate uses the AWS instance type produced by Skiff's provider lowering for
+the service machine size, for example `small` -> `t3.small`, and the RDS
+instance class produced by database lowering, for example database `small` ->
+`db.t4g.micro`.
 Teams with negotiated rates can edit the pricing config or pass another
 `--pricing-config` file; `cost explain` consumes the local file as-is. The
 default `.skiff-pricing.json` path is local operator state and is ignored by
@@ -84,10 +87,11 @@ Those warnings are static and low-confidence until runtime metrics are supplied.
 
 Limitations:
 
-- AWS pricing estimates include EC2 instance compute and baseline EBS storage
-  when present. They exclude load balancer hourly/LCU charges, NAT, data
-  transfer, CloudWatch usage, taxes, credits, Savings Plans, and private
-  discounts.
+- AWS pricing estimates include EC2 instance compute, RDS instance compute, and
+  baseline EBS/RDS storage when present. They exclude load balancer hourly/LCU
+  charges, NAT, data transfer, CloudWatch usage, taxes, credits, Savings Plans,
+  and private discounts. RDS backup line items are listed, but charged backup
+  storage above the free allocation needs observed retained-backup volume.
 - RI estimates are effective hourly equivalents for matching Standard RI terms.
   Actual billing can differ with existing reservations, size flexibility, scope,
   and account discounts.

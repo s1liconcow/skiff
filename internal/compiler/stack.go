@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/s1liconcow/skiff/internal/ir"
@@ -9,18 +10,32 @@ import (
 )
 
 func compileStack(doc spec.Document, opts Options) (*ir.Graph, error) {
-	if doc.Stack == nil || len(doc.Stack.Services) != 1 || len(doc.Stack.Databases) != 1 {
-		return nil, fmt.Errorf("stack compiler supports one service and one managed database")
+	if doc.Stack == nil || len(doc.Stack.Services) != 1 || len(doc.Stack.Databases) > 1 || len(doc.Stack.ObjectStores) > 1 || len(doc.Stack.Databases)+len(doc.Stack.ObjectStores) == 0 {
+		return nil, fmt.Errorf("stack compiler supports one service plus one managed database or object store")
 	}
 
 	stackName := doc.Metadata.Name
 	env := doc.Metadata.Env
 	serviceSpec := doc.Stack.Services[0]
-	databaseSpec := doc.Stack.Databases[0]
 	serviceName := stackComponentName(stackName, serviceSpec.Name)
-	databaseName := stackComponentName(stackName, databaseSpec.Name)
 
-	bindings := bindingsForService(doc.Stack.Bindings, serviceSpec.Name, databaseSpec.Name, databaseName)
+	var databaseSpec spec.StackDatabase
+	databaseName := ""
+	var databaseBindings []compiledBinding
+	if len(doc.Stack.Databases) == 1 {
+		databaseSpec = doc.Stack.Databases[0]
+		databaseName = stackComponentName(stackName, databaseSpec.Name)
+		databaseBindings = bindingsForService(doc.Stack.Bindings, serviceSpec.Name, databaseSpec.Name, databaseName)
+	}
+	var objectStoreSpec spec.StackObjectStore
+	objectStoreName := ""
+	var objectStoreBindings []compiledObjectStoreBinding
+	if len(doc.Stack.ObjectStores) == 1 {
+		objectStoreSpec = doc.Stack.ObjectStores[0]
+		objectStoreName = stackComponentName(stackName, objectStoreSpec.Name)
+		objectStoreBindings = objectStoreBindingsForService(doc.Stack.Bindings, serviceSpec.Name, objectStoreSpec.Name, objectStoreSpec)
+	}
+
 	serviceDoc := spec.Document{
 		APIVersion: doc.APIVersion,
 		Kind:       spec.KindService,
@@ -37,51 +52,82 @@ func compileStack(doc spec.Document, opts Options) (*ir.Graph, error) {
 		Rollout:  serviceSpec.Rollout,
 		Secrets:  append([]spec.SecretRef(nil), serviceSpec.Secrets...),
 	}
-	for _, binding := range bindings {
+	for _, binding := range databaseBindings {
 		serviceDoc.Secrets = append(serviceDoc.Secrets, spec.SecretRef{Name: envSecretName(binding.EnvName), Ref: binding.SecretRef})
 		if serviceDoc.Runtime.Env == nil {
 			serviceDoc.Runtime.Env = map[string]string{}
 		}
 		serviceDoc.Runtime.Env[binding.EnvName] = binding.SecretRef
 	}
+	for _, binding := range objectStoreBindings {
+		if serviceDoc.Runtime.Env == nil {
+			serviceDoc.Runtime.Env = map[string]string{}
+		}
+		serviceDoc.Runtime.Env[binding.EnvName] = binding.URI
+	}
 
 	graph := compileService(serviceDoc, opts)
-	graph.Resources.SecurityGroups = append(graph.Resources.SecurityGroups, databaseSecurityGroup(env, serviceName, databaseName, databasePort(databaseSpec.Engine)))
-	addDatabaseEgress(graph, databaseName, databasePort(databaseSpec.Engine))
+	if len(doc.Stack.Databases) == 1 {
+		graph.Resources.SecurityGroups = append(graph.Resources.SecurityGroups, databaseSecurityGroup(env, serviceName, databaseName, databasePort(databaseSpec.Engine)))
+		addDatabaseEgress(graph, databaseName, databasePort(databaseSpec.Engine))
 
-	secretRef := ""
-	if len(bindings) > 0 {
-		secretRef = bindings[0].SecretRef
+		secretRef := ""
+		if len(databaseBindings) > 0 {
+			secretRef = databaseBindings[0].SecretRef
+		}
+		dbMeta := meta("managed-database:"+databaseName, ir.ResourceKindManagedDatabase, resourceName(env, databaseName, "db"), databaseTags(serviceName, env, databaseName), "$.stack.databases[0]")
+		graph.Resources.ManagedDatabases = []ir.ManagedDatabase{{
+			Meta:                dbMeta,
+			Engine:              normalizeDatabaseEngine(databaseSpec.Engine),
+			Version:             databaseSpec.Version,
+			Size:                databaseSpec.Size,
+			Port:                databasePort(databaseSpec.Engine),
+			Region:              firstNonEmpty(databaseSpec.Region, doc.Metadata.Labels["region"]),
+			Storage:             compileDatabaseStorage(databaseSpec.Storage),
+			Backups:             compileDatabaseBackups(databaseSpec.Backups),
+			Network:             compileDatabaseNetwork(databaseSpec.Network),
+			SecurityGroupRefs:   []string{"security-group:" + databaseName},
+			ConnectionSecretRef: secretRef,
+		}}
+		for _, binding := range databaseBindings {
+			graph.Resources.DatabaseSecrets = append(graph.Resources.DatabaseSecrets, ir.DatabaseSecret{
+				Meta:        meta("database-secret:"+databaseName+":"+envSecretName(binding.EnvName), ir.ResourceKindDatabaseSecret, resourceName(env, databaseName, envSecretName(binding.EnvName)+"-secret"), databaseTags(serviceName, env, databaseName), "$.stack.bindings"),
+				DatabaseRef: "managed-database:" + databaseName,
+				Name:        envSecretName(binding.EnvName),
+				Ref:         binding.SecretRef,
+				EnvName:     binding.EnvName,
+			})
+			graph.Resources.DatabaseBindings = append(graph.Resources.DatabaseBindings, ir.DatabaseBinding{
+				Meta:        meta("database-binding:"+serviceName+":"+databaseName+":"+binding.EnvName, ir.ResourceKindDatabaseBinding, resourceName(env, serviceName, strings.ToLower(binding.EnvName)+"-binding"), databaseTags(serviceName, env, databaseName), "$.stack.bindings"),
+				FromService: serviceName,
+				DatabaseRef: "managed-database:" + databaseName,
+				EnvName:     binding.EnvName,
+				SecretRef:   binding.SecretRef,
+			})
+		}
 	}
-	dbMeta := meta("managed-database:"+databaseName, ir.ResourceKindManagedDatabase, resourceName(env, databaseName, "db"), databaseTags(serviceName, env, databaseName), "$.stack.databases[0]")
-	graph.Resources.ManagedDatabases = []ir.ManagedDatabase{{
-		Meta:                dbMeta,
-		Engine:              normalizeDatabaseEngine(databaseSpec.Engine),
-		Version:             databaseSpec.Version,
-		Size:                databaseSpec.Size,
-		Port:                databasePort(databaseSpec.Engine),
-		Region:              firstNonEmpty(databaseSpec.Region, doc.Metadata.Labels["region"]),
-		Storage:             compileDatabaseStorage(databaseSpec.Storage),
-		Backups:             compileDatabaseBackups(databaseSpec.Backups),
-		Network:             compileDatabaseNetwork(databaseSpec.Network),
-		SecurityGroupRefs:   []string{"security-group:" + databaseName},
-		ConnectionSecretRef: secretRef,
-	}}
-	for _, binding := range bindings {
-		graph.Resources.DatabaseSecrets = append(graph.Resources.DatabaseSecrets, ir.DatabaseSecret{
-			Meta:        meta("database-secret:"+databaseName+":"+envSecretName(binding.EnvName), ir.ResourceKindDatabaseSecret, resourceName(env, databaseName, envSecretName(binding.EnvName)+"-secret"), databaseTags(serviceName, env, databaseName), "$.stack.bindings"),
-			DatabaseRef: "managed-database:" + databaseName,
-			Name:        envSecretName(binding.EnvName),
-			Ref:         binding.SecretRef,
-			EnvName:     binding.EnvName,
-		})
-		graph.Resources.DatabaseBindings = append(graph.Resources.DatabaseBindings, ir.DatabaseBinding{
-			Meta:        meta("database-binding:"+serviceName+":"+databaseName+":"+binding.EnvName, ir.ResourceKindDatabaseBinding, resourceName(env, serviceName, strings.ToLower(binding.EnvName)+"-binding"), databaseTags(serviceName, env, databaseName), "$.stack.bindings"),
-			FromService: serviceName,
-			DatabaseRef: "managed-database:" + databaseName,
-			EnvName:     binding.EnvName,
-			SecretRef:   binding.SecretRef,
-		})
+	if len(doc.Stack.ObjectStores) == 1 {
+		storeTags := objectStoreTags(serviceName, env, objectStoreName, objectStoreSpec.Purpose)
+		graph.Resources.ObjectStores = []ir.ObjectStore{{
+			Meta:      meta("object-store:"+objectStoreName, ir.ResourceKindObjectStore, resourceName(env, objectStoreName, "object-store"), storeTags, "$.stack.objectStores[0]"),
+			URI:       objectStoreSpec.URI,
+			Bucket:    objectStoreBucket(objectStoreSpec.URI),
+			Prefix:    objectStorePrefix(objectStoreSpec.URI),
+			Purpose:   objectStoreSpec.Purpose,
+			Access:    normalizeObjectStoreAccess(objectStoreSpec.Access),
+			Versioned: objectStoreSpec.Versioned,
+			Encrypted: objectStoreSpec.Encrypted,
+		}}
+		for _, binding := range objectStoreBindings {
+			graph.Resources.ObjectStoreBindings = append(graph.Resources.ObjectStoreBindings, ir.ObjectStoreBinding{
+				Meta:           meta("object-store-binding:"+serviceName+":"+objectStoreName+":"+binding.EnvName, ir.ResourceKindObjectStoreBinding, resourceName(env, serviceName, strings.ToLower(binding.EnvName)+"-binding"), storeTags, "$.stack.bindings"),
+				FromService:    serviceName,
+				ObjectStoreRef: "object-store:" + objectStoreName,
+				EnvName:        binding.EnvName,
+				URI:            binding.URI,
+				Access:         binding.Access,
+			})
+		}
 	}
 	return graph, nil
 }
@@ -89,6 +135,12 @@ func compileStack(doc spec.Document, opts Options) (*ir.Graph, error) {
 type compiledBinding struct {
 	EnvName   string
 	SecretRef string
+}
+
+type compiledObjectStoreBinding struct {
+	EnvName string
+	URI     string
+	Access  string
 }
 
 func bindingsForService(bindings []spec.StackBinding, serviceComponent, databaseComponent, databaseName string) []compiledBinding {
@@ -100,6 +152,21 @@ func bindingsForService(bindings []spec.StackBinding, serviceComponent, database
 		out = append(out, compiledBinding{
 			EnvName:   binding.As,
 			SecretRef: databaseConnectionSecretRef(databaseName),
+		})
+	}
+	return out
+}
+
+func objectStoreBindingsForService(bindings []spec.StackBinding, serviceComponent, objectStoreComponent string, store spec.StackObjectStore) []compiledObjectStoreBinding {
+	var out []compiledObjectStoreBinding
+	for _, binding := range bindings {
+		if binding.From != serviceComponent || binding.To != objectStoreComponent {
+			continue
+		}
+		out = append(out, compiledObjectStoreBinding{
+			EnvName: binding.As,
+			URI:     store.URI,
+			Access:  normalizeObjectStoreAccess(store.Access),
 		})
 	}
 	return out
@@ -172,6 +239,15 @@ func databaseTags(service, env, database string) map[string]string {
 	return tags
 }
 
+func objectStoreTags(service, env, store, purpose string) map[string]string {
+	tags := ir.RequiredTags(service, env)
+	tags[ir.TagObjectStore] = store
+	if purpose != "" {
+		tags[ir.TagObjectStorePurpose] = purpose
+	}
+	return tags
+}
+
 func compileDatabaseStorage(in spec.DatabaseStorage) ir.DatabaseStorage {
 	return ir.DatabaseStorage{SizeGB: in.SizeGB, Type: in.Type, Encrypted: in.Encrypted}
 }
@@ -204,6 +280,31 @@ func databasePort(engine string) int {
 	default:
 		return 5432
 	}
+}
+
+func normalizeObjectStoreAccess(access string) string {
+	switch strings.ToLower(strings.TrimSpace(access)) {
+	case "read-only":
+		return "read-only"
+	default:
+		return "read-write"
+	}
+}
+
+func objectStoreBucket(uri string) string {
+	parsed, err := url.Parse(strings.TrimSpace(uri))
+	if err != nil {
+		return ""
+	}
+	return parsed.Host
+}
+
+func objectStorePrefix(uri string) string {
+	parsed, err := url.Parse(strings.TrimSpace(uri))
+	if err != nil {
+		return ""
+	}
+	return strings.Trim(strings.TrimPrefix(parsed.Path, "/"), "/")
 }
 
 func firstNonEmpty(values ...string) string {

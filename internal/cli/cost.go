@@ -33,6 +33,7 @@ type costPricingUpdateOutput struct {
 	PublicationDate string   `json:"publication_date,omitempty"`
 	Version         string   `json:"version,omitempty"`
 	Items           int      `json:"items"`
+	DatabaseItems   int      `json:"database_items,omitempty"`
 	StorageRates    int      `json:"storage_rates"`
 	Schemes         []string `json:"schemes,omitempty"`
 }
@@ -164,8 +165,9 @@ func runCostExplain(binary string, args []string, root rootOptions, stdout, stde
 	filePath := fs.String("file", "", "Skiff YAML or JSON service spec file")
 	provider := fs.String("provider", root.Provider, "cloud provider for pricing")
 	region := fs.String("region", root.Region, "cloud region for pricing")
-	awsPricing := fs.Bool("aws-pricing", false, "fetch fresh AWS EC2 Price List data and include compute estimates")
+	awsPricing := fs.Bool("aws-pricing", false, "fetch fresh AWS EC2/RDS Price List data and include compute estimates")
 	awsPricingFile := fs.String("aws-pricing-file", "", "read AWS EC2 Price List JSON from this file instead of fetching fresh data")
+	awsRDSPricingFile := fs.String("aws-rds-pricing-file", "", "read AWS RDS Price List JSON from this file instead of fetching fresh data")
 	pricingConfig := fs.String("pricing-config", skiffcost.DefaultPricingConfigPath, "local pricing catalog config file")
 	monthlyHours := fs.Float64("monthly-hours", skiffcost.DefaultMonthlyHours, "hours per month for monthly cost estimates")
 	window := fs.String("window", "", "observation window for supplied metrics")
@@ -241,7 +243,7 @@ func runCostExplain(binary string, args []string, root rootOptions, stdout, stde
 	}
 	input.Signals = signals
 	result := skiffcost.Analyze(input)
-	pricingLoad, err := loadCostPricing(input, resolvedProvider, resolvedRegion, *pricingConfig, *awsPricingFile, pricingSchemes.Values(), *awsPricing)
+	pricingLoad, err := loadCostPricing(input, graph, resolvedProvider, resolvedRegion, *pricingConfig, *awsPricingFile, *awsRDSPricingFile, pricingSchemes.Values(), *awsPricing)
 	if err != nil {
 		return writeClientCommandError(binary, "cost explain", *format, *traceID, err, stdout, stderr)
 	}
@@ -252,6 +254,9 @@ func runCostExplain(binary string, args []string, root rootOptions, stdout, stde
 		}
 		infra := skiffcost.EstimateInfrastructure(graph, pricingLoad.Catalog, skiffcost.PricingOptions{MonthlyHours: *monthlyHours})
 		result.Infrastructure = &infra
+		if pricingLoad.ConfigPath != "" && skiffcost.MissingManagedDatabasePricing(graph, pricingLoad.Catalog) {
+			result.PricingSetup = incompletePricingSetup(binary, resolvedProvider, firstNonEmptyCLI(resolvedRegion, pricingLoad.Catalog.Region), pricingLoad.ConfigPath)
+		}
 	} else if pricingLoad.MissingConfig {
 		result.PricingSetup = missingPricingSetup(binary, resolvedProvider, resolvedRegion, pricingLoad.ConfigPath)
 	}
@@ -280,23 +285,24 @@ func runCostExplain(binary string, args []string, root rootOptions, stdout, stde
 
 func splitCostExplainArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
-		"cpu-p95":           true,
-		"aws-pricing-file":  true,
-		"file":              true,
-		"format":            true,
-		"log-mb-per-hour":   true,
-		"memory-p95":        true,
-		"monthly-hours":     true,
-		"pricing-config":    true,
-		"pricing-scheme":    true,
-		"provider":          true,
-		"region":            true,
-		"request-count":     true,
-		"request-rps":       true,
-		"trace-id":          true,
-		"unhealthy-targets": true,
-		"warm-capacity":     true,
-		"window":            true,
+		"cpu-p95":              true,
+		"aws-rds-pricing-file": true,
+		"aws-pricing-file":     true,
+		"file":                 true,
+		"format":               true,
+		"log-mb-per-hour":      true,
+		"memory-p95":           true,
+		"monthly-hours":        true,
+		"pricing-config":       true,
+		"pricing-scheme":       true,
+		"provider":             true,
+		"region":               true,
+		"request-count":        true,
+		"request-rps":          true,
+		"trace-id":             true,
+		"unhealthy-targets":    true,
+		"warm-capacity":        true,
+		"window":               true,
 	}
 	return splitArgs(args, valueFlags)
 }
@@ -335,7 +341,7 @@ type costPricingLoad struct {
 	ConfigPath    string
 }
 
-func loadCostPricing(input skiffcost.Input, provider, region, pricingConfigPath, awsPricingFile string, schemes []skiffcost.PricingScheme, liveFetch bool) (costPricingLoad, error) {
+func loadCostPricing(input skiffcost.Input, graph *ir.Graph, provider, region, pricingConfigPath, awsPricingFile, awsRDSPricingFile string, schemes []skiffcost.PricingScheme, liveFetch bool) (costPricingLoad, error) {
 	provider = strings.TrimSpace(provider)
 	if provider == "" {
 		provider = aws.Name
@@ -343,20 +349,36 @@ func loadCostPricing(input skiffcost.Input, provider, region, pricingConfigPath,
 	if provider != aws.Name {
 		return costPricingLoad{}, fmt.Errorf("pricing provider %q is not supported; expected aws", provider)
 	}
-	if strings.TrimSpace(awsPricingFile) != "" || liveFetch {
+	if strings.TrimSpace(awsPricingFile) != "" || strings.TrimSpace(awsRDSPricingFile) != "" || liveFetch {
 		if strings.TrimSpace(region) == "" {
 			return costPricingLoad{}, errors.New("--region is required when AWS pricing is requested")
 		}
-		catalog, err := aws.LoadEC2Pricing(nilContext(), aws.EC2PricingOptions{
-			Region:     region,
-			SourcePath: strings.TrimSpace(awsPricingFile),
-			Machines:   costPricingMachines(input.Shape),
-			Schemes:    schemesOrDefault(schemes),
-		})
-		if err != nil {
-			return costPricingLoad{}, err
+		var catalogs []skiffcost.PricingCatalog
+		if strings.TrimSpace(awsPricingFile) != "" || liveFetch {
+			catalog, err := aws.LoadEC2Pricing(nilContext(), aws.EC2PricingOptions{
+				Region:     region,
+				SourcePath: strings.TrimSpace(awsPricingFile),
+				Machines:   costPricingMachines(input.Shape),
+				Schemes:    schemesOrDefault(schemes),
+			})
+			if err != nil {
+				return costPricingLoad{}, err
+			}
+			catalogs = append(catalogs, catalog)
 		}
-		return costPricingLoad{Catalog: catalog, Loaded: true}, nil
+		if strings.TrimSpace(awsRDSPricingFile) != "" || liveFetch {
+			catalog, err := aws.LoadRDSPricing(nilContext(), aws.RDSPricingOptions{
+				Region:     region,
+				SourcePath: strings.TrimSpace(awsRDSPricingFile),
+				Databases:  costPricingDatabases(graph),
+				Schemes:    schemesOrDefault(schemes),
+			})
+			if err != nil {
+				return costPricingLoad{}, err
+			}
+			catalogs = append(catalogs, catalog)
+		}
+		return costPricingLoad{Catalog: skiffcost.MergePricingCatalogs(catalogs...), Loaded: true}, nil
 	}
 	pricingConfigPath = strings.TrimSpace(pricingConfigPath)
 	if pricingConfigPath == "" {
@@ -411,7 +433,41 @@ func missingPricingSetup(binary, provider, region, pricingConfigPath string) *sk
 			Mutating:      true,
 			Safety:        "local_file_only",
 			Reversibility: "reversible",
-			Summary:       "write a local pricing catalog from public AWS EC2 pricing data",
+			Summary:       "write a local pricing catalog from public AWS EC2 and RDS pricing data",
+		}},
+	}
+}
+
+func incompletePricingSetup(binary, provider, region, pricingConfigPath string) *skiffcost.PricingSetup {
+	if strings.TrimSpace(pricingConfigPath) == "" {
+		pricingConfigPath = skiffcost.DefaultPricingConfigPath
+	}
+	regionArg := strings.TrimSpace(region)
+	if regionArg == "" {
+		regionArg = "<aws-region>"
+	}
+	command := fmt.Sprintf("%s cost pricing update --region %s --out %s", shellArg(binary), shellArg(regionArg), shellArg(pricingConfigPath))
+	autoDetect := pricingConfigPath == skiffcost.DefaultPricingConfigPath
+	next := "rerun cost explain; Skiff will automatically load the refreshed .skiff-pricing.json from the current directory"
+	if !autoDetect {
+		next = fmt.Sprintf("rerun cost explain with --pricing-config %s", shellArg(pricingConfigPath))
+	}
+	return &skiffcost.PricingSetup{
+		Status:            "incomplete_config",
+		Summary:           fmt.Sprintf("pricing config %s does not include matching RDS rates for this stack", pricingConfigPath),
+		Provider:          provider,
+		Region:            strings.TrimSpace(region),
+		ConfigPath:        pricingConfigPath,
+		UpdateCommand:     command,
+		AutoDetectNextRun: autoDetect,
+		NextRunSummary:    next,
+		RecommendedActions: []skiffcost.PricingSetupAction{{
+			ID:            "refresh_pricing_config",
+			Command:       command,
+			Mutating:      true,
+			Safety:        "local_file_only",
+			Reversibility: "reversible",
+			Summary:       "refresh the local pricing catalog so it includes public AWS RDS rates",
 		}},
 	}
 }
@@ -438,6 +494,32 @@ func costPricingMachines(shape skiffcost.ServiceShape) []ir.Machine {
 		machines = append(machines, ir.Machine{Size: size, Arch: shape.MachineArch})
 	}
 	return machines
+}
+
+func costPricingDatabases(graph *ir.Graph) []aws.RDSDatabaseTarget {
+	targets := aws.DefaultCostDatabases()
+	if graph == nil {
+		return targets
+	}
+	seen := map[string]struct{}{}
+	for _, target := range targets {
+		seen[target.Engine+"|"+target.Size+"|"+target.InstanceClass] = struct{}{}
+	}
+	for _, db := range graph.Resources.ManagedDatabases {
+		size := strings.TrimSpace(db.Size)
+		if size == "" {
+			size = "small"
+		}
+		instanceClass := aws.DatabaseInstanceClassForSize(size)
+		target := aws.RDSDatabaseTarget{Engine: db.Engine, Size: size, InstanceClass: instanceClass, DeploymentOption: "Single-AZ"}
+		key := target.Engine + "|" + target.Size + "|" + target.InstanceClass
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		targets = append(targets, target)
+	}
+	return targets
 }
 
 func shellArg(value string) string {
@@ -476,16 +558,18 @@ func runCostPricingUpdate(binary string, args []string, root rootOptions, stdout
 	region := fs.String("region", root.Region, "AWS region to refresh")
 	outPath := fs.String("out", skiffcost.DefaultPricingConfigPath, "pricing config file to write")
 	awsPricingFile := fs.String("aws-pricing-file", "", "read AWS EC2 Price List JSON from this file instead of fetching fresh data")
+	awsRDSPricingFile := fs.String("aws-rds-pricing-file", "", "read AWS RDS Price List JSON from this file instead of fetching fresh data")
 	var pricingSchemes pricingSchemeFlags
 	fs.Var(&pricingSchemes, "pricing-scheme", "pricing scheme to include; repeatable")
 	valueFlags := map[string]bool{
-		"aws-pricing-file": true,
-		"format":           true,
-		"out":              true,
-		"pricing-scheme":   true,
-		"provider":         true,
-		"region":           true,
-		"trace-id":         true,
+		"aws-rds-pricing-file": true,
+		"aws-pricing-file":     true,
+		"format":               true,
+		"out":                  true,
+		"pricing-scheme":       true,
+		"provider":             true,
+		"region":               true,
+		"trace-id":             true,
 	}
 	flagArgs, positionals, err := splitArgs(args, valueFlags)
 	if err != nil {
@@ -506,7 +590,7 @@ func runCostPricingUpdate(binary string, args []string, root rootOptions, stdout
 	if strings.TrimSpace(*region) == "" {
 		return writeClientCommandError(binary, "cost pricing update", *format, *traceID, errors.New("--region is required"), stdout, stderr)
 	}
-	catalog, err := aws.LoadEC2Pricing(nilContext(), aws.EC2PricingOptions{
+	ec2Catalog, err := aws.LoadEC2Pricing(nilContext(), aws.EC2PricingOptions{
 		Region:     strings.TrimSpace(*region),
 		SourcePath: strings.TrimSpace(*awsPricingFile),
 		Machines:   aws.DefaultCostMachines(),
@@ -515,6 +599,21 @@ func runCostPricingUpdate(binary string, args []string, root rootOptions, stdout
 	if err != nil {
 		return writeClientCommandError(binary, "cost pricing update", *format, *traceID, err, stdout, stderr)
 	}
+	var catalogs []skiffcost.PricingCatalog
+	catalogs = append(catalogs, ec2Catalog)
+	if strings.TrimSpace(*awsRDSPricingFile) != "" || strings.TrimSpace(*awsPricingFile) == "" {
+		rdsCatalog, err := aws.LoadRDSPricing(nilContext(), aws.RDSPricingOptions{
+			Region:     strings.TrimSpace(*region),
+			SourcePath: strings.TrimSpace(*awsRDSPricingFile),
+			Databases:  aws.DefaultCostDatabases(),
+			Schemes:    pricingSchemes.ValuesOrDefault(),
+		})
+		if err != nil {
+			return writeClientCommandError(binary, "cost pricing update", *format, *traceID, err, stdout, stderr)
+		}
+		catalogs = append(catalogs, rdsCatalog)
+	}
+	catalog := skiffcost.MergePricingCatalogs(catalogs...)
 	if err := skiffcost.WritePricingCatalogFile(*outPath, catalog); err != nil {
 		return writeClientCommandError(binary, "cost pricing update", *format, *traceID, err, stdout, stderr)
 	}
@@ -528,13 +627,14 @@ func runCostPricingUpdate(binary string, args []string, root rootOptions, stdout
 		PublicationDate: catalog.PublicationDate,
 		Version:         catalog.Version,
 		Items:           len(catalog.Items),
+		DatabaseItems:   len(catalog.DatabaseItems),
 		StorageRates:    len(catalog.StorageRates),
 		Schemes:         skiffcost.PricingSchemeIDs(pricingSchemes.ValuesOrDefault()),
 	}
 	switch *format {
 	case "human", "text":
 		fmt.Fprintf(stdout, "wrote pricing config %s\n", *outPath)
-		fmt.Fprintf(stdout, "provider: %s\nregion: %s\npublished: %s\nitems: %d instance shapes, %d storage rates\n", catalog.Provider, catalog.Region, catalog.PublicationDate, len(catalog.Items), len(catalog.StorageRates))
+		fmt.Fprintf(stdout, "provider: %s\nregion: %s\npublished: %s\nitems: %d instance shapes, %d database classes, %d storage rates\n", catalog.Provider, catalog.Region, catalog.PublicationDate, len(catalog.Items), len(catalog.DatabaseItems), len(catalog.StorageRates))
 		fmt.Fprintln(stdout, "note: public AWS rates were written; edit this file or pass another --pricing-config for negotiated/private rates")
 		return ExitSuccess
 	case "json":
@@ -621,7 +721,7 @@ func printCostUsage(w io.Writer, binary string) {
 func printCostPricingUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s cost pricing <command> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Commands:")
-	fmt.Fprintln(w, "  update  Refresh a local pricing config file from public AWS EC2 Price List data")
+	fmt.Fprintln(w, "  update  Refresh a local pricing config file from public AWS EC2 and RDS Price List data")
 }
 
 func printPricingEstimate(w io.Writer, pricing skiffcost.PricingEstimate) {
@@ -645,7 +745,11 @@ func printPricingEstimate(w io.Writer, pricing skiffcost.PricingEstimate) {
 }
 
 func printPricingSetup(w io.Writer, setup skiffcost.PricingSetup) {
-	fmt.Fprintln(w, "pricing: not estimated")
+	if setup.Status == "missing_config" {
+		fmt.Fprintln(w, "pricing: not estimated")
+	} else {
+		fmt.Fprintln(w, "pricing: partially estimated")
+	}
 	if setup.Summary != "" {
 		fmt.Fprintf(w, "pricing setup: %s\n", setup.Summary)
 	}

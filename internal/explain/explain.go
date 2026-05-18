@@ -119,6 +119,16 @@ func AWS(resources *aws.ServiceResources) Result {
 			Source:         item.Source,
 		})
 	}
+	for _, item := range resources.ObjectStores {
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           aws.ResourceKindS3Bucket,
+			LogicalID:      item.LogicalID,
+			Name:           item.Name,
+			CloudPrimitive: "S3 bucket",
+			Why:            "stores workload object-store data for embedded object-backed databases without turning skiffd into a database",
+			Source:         item.Source,
+		})
+	}
 	for _, item := range resources.LaunchTemplates {
 		out.Resources = append(out.Resources, ResourceExplanation{
 			Kind:           aws.ResourceKindLaunchTemplate,

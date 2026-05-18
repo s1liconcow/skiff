@@ -28,6 +28,7 @@ var resourceNameLimits = map[string]int{
 	ResourceKindLogGroup:           512,
 	ResourceKindRDSInstance:        63,
 	ResourceKindSecret:             512,
+	ResourceKindS3Bucket:           63,
 	ResourceKindEC2Instance:        255,
 	ResourceKindEBSVolume:          255,
 	ResourceKindEBSAttachment:      255,
@@ -53,6 +54,7 @@ var resourceKindSuffixes = map[string]string{
 	ir.ResourceKindListener:         "listener",
 	ir.ResourceKindManagedDatabase:  "db",
 	ir.ResourceKindDatabaseSecret:   "secret",
+	ir.ResourceKindObjectStore:      "bucket",
 	ir.ResourceKindRuntimeManifest:  "runtime",
 	ResourceKindAutoScalingGroup:    "asg",
 	ResourceKindLaunchTemplate:      "lt",
@@ -61,6 +63,7 @@ var resourceKindSuffixes = map[string]string{
 	ResourceKindLogGroup:            "logs",
 	ResourceKindRDSInstance:         "db",
 	ResourceKindSecret:              "secret",
+	ResourceKindS3Bucket:            "bucket",
 	ResourceKindEC2Instance:         "member",
 	ResourceKindEBSVolume:           "volume",
 	ResourceKindEBSAttachment:       "volume-attachment",
@@ -185,6 +188,8 @@ func normalizeKind(kind string) string {
 		return ResourceKindRDSInstance
 	case ir.ResourceKindDatabaseSecret, ResourceKindSecret:
 		return ResourceKindSecret
+	case ir.ResourceKindObjectStore, ResourceKindS3Bucket:
+		return ResourceKindS3Bucket
 	default:
 		return kind
 	}

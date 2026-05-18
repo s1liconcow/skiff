@@ -45,7 +45,7 @@ turn the AWS smoke gate into a live primitive deployment.
 | direct mode | covered | covered | gated | Local uses `--direct`; Apple uses direct mode against RustFS for runner recovery checks and to start the canary saga. |
 | drift | covered | not_applicable | gated | Local runs drift against persisted fake-provider resource records. |
 | debug collect | covered | not_implemented | gated | Local direct mode collects a redacted bundle through the fake provider and writes durable audit/event records. AWS remains gated behind a live SSM client adapter. |
-| cost advisor | covered | fixture | gated | Local runs `skiff cost explain` with supplied metrics and AWS price-list fixtures. Live AWS pricing fetches remain gated by explicit `--aws-pricing`. |
+| cost advisor | covered | fixture | gated | Local runs `skiff cost explain` with supplied metrics and AWS EC2/RDS price-list fixtures. Live AWS pricing fetches remain gated by explicit `--aws-pricing`. |
 | provider conformance | covered | not_applicable | gated | CI runs `go test ./tests/conformance/provider`; local e2e documents the entry point. |
 | plugin conformance | covered | not_applicable | not_applicable | CI runs `go test ./tests/conformance/plugin`; local e2e runs `skiff plugin validate`. |
 | runner signed release | covered | covered | gated | Local runner fixture serves a signed release; Apple runs signed OCI releases in local Linux VMs. |
