@@ -10,6 +10,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/saga/steps/multiregion"
 	"github.com/s1liconcow/skiff/internal/saga/steps/secret"
 	"github.com/s1liconcow/skiff/internal/saga/steps/service"
+	statefulsteps "github.com/s1liconcow/skiff/internal/saga/steps/stateful"
 	sagatime "github.com/s1liconcow/skiff/internal/saga/steps/time"
 )
 
@@ -36,6 +37,7 @@ func New(opts Options) map[string]steps.Step {
 		service.MarkStable{Store: opts.Store, Provider: opts.Provider},
 		sagatime.Sleep{},
 	}
+	items = append(items, statefulsteps.New(opts.Store, nil)...)
 	if trafficProvider, ok := opts.Provider.(provider.TrafficOperations); ok {
 		items = append(items, service.TrafficShift{Shifter: trafficProvider})
 	}

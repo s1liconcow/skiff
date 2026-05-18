@@ -15,6 +15,7 @@ import (
 const (
 	StatefulMemberReady     = "ready"
 	StatefulMemberReplacing = "replacing"
+	StatefulMemberUpdating  = "updating"
 	StatefulMemberFailed    = "failed"
 )
 

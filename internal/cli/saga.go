@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/saga/steps/approval"
 	"github.com/s1liconcow/skiff/internal/saga/steps/builtin"
 	"github.com/s1liconcow/skiff/internal/saga/templates"
+	"github.com/s1liconcow/skiff/internal/state"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 )
 
@@ -57,6 +59,26 @@ type canarySagaResult struct {
 	Status       schema.SagaStatus          `json:"status"`
 	Stage        int                        `json:"stage,omitempty"`
 	Gate         string                     `json:"gate,omitempty"`
+	NextAction   string                     `json:"next_action,omitempty"`
+	CurrentSteps []string                   `json:"current_steps,omitempty"`
+	Execution    *sagastate.ExecutionResult `json:"execution,omitempty"`
+	Inspect      *sagastate.InspectResult   `json:"inspect,omitempty"`
+}
+
+type statefulOrderedSagaOutput struct {
+	OK      bool                      `json:"ok"`
+	TraceID string                    `json:"trace_id,omitempty"`
+	Result  statefulOrderedSagaResult `json:"result"`
+}
+
+type statefulOrderedSagaResult struct {
+	SagaID       string                     `json:"saga_id"`
+	OperationID  string                     `json:"operation_id,omitempty"`
+	Group        string                     `json:"group"`
+	Env          string                     `json:"env,omitempty"`
+	ReleaseID    string                     `json:"release_id"`
+	Members      []int                      `json:"members,omitempty"`
+	Status       schema.SagaStatus          `json:"status"`
 	NextAction   string                     `json:"next_action,omitempty"`
 	CurrentSteps []string                   `json:"current_steps,omitempty"`
 	Execution    *sagastate.ExecutionResult `json:"execution,omitempty"`
@@ -149,10 +171,13 @@ func runSagaStart(binary string, args []string, root rootOptions, stdout, stderr
 	fs.SetOutput(io.Discard)
 	flags := addClientFlags(fs, root)
 	service := fs.String("service", "", "service name")
+	group := fs.String("group", "", "StatefulGroup name")
 	releaseID := fs.String("release-id", "", "release ID to deploy")
 	operationID := fs.String("operation-id", "", "operation ID to use")
 	sagaID := fs.String("saga-id", "", "saga ID to use")
 	stagesValue := fs.String("stages", "5,25,100", "comma-separated canary stages by percent")
+	membersValue := fs.String("members", "", "comma-separated StatefulGroup member ordinals")
+	maxUnavailable := fs.Int("max-unavailable", 1, "maximum unavailable StatefulGroup members during ordered update")
 	bake := fs.String("bake", templates.DefaultCanaryBake, "canary bake duration")
 	metric := fs.String("metric", "", "metric gate name")
 	comparator := fs.String("comparator", "<=", "metric gate comparator")
@@ -170,7 +195,7 @@ func runSagaStart(binary string, args []string, root rootOptions, stdout, stderr
 		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, errors.New("saga kind is required"), stdout, stderr)
 	}
 	kind := positionals[0]
-	if kind != templates.CanaryDeployCommand && kind != templates.DeploymentCanaryKind {
+	if kind != templates.CanaryDeployCommand && kind != templates.DeploymentCanaryKind && kind != templates.StatefulOrderedUpdateKind {
 		return runSagaSkeleton(binary, "start", args, root, stdout, stderr)
 	}
 	if len(positionals) > 2 {
@@ -178,6 +203,41 @@ func runSagaStart(binary string, args []string, root rootOptions, stdout, stderr
 	}
 	if len(positionals) == 2 && *service == "" {
 		*service = positionals[1]
+	}
+	if kind == templates.StatefulOrderedUpdateKind {
+		if len(positionals) == 2 && *group == "" {
+			*group = positionals[1]
+		}
+		if *group == "" || *releaseID == "" {
+			return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, errors.New("--group and --release-id are required for stateful.ordered_update"), stdout, stderr)
+		}
+		loaded, err := flags.load(binary, root, fs)
+		if err != nil {
+			return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+		}
+		if loaded.Config.Mode != config.ModeDirect {
+			return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, errors.New("stateful ordered update saga start currently requires --direct mode"), stdout, stderr)
+		}
+		members, err := parseMemberOrdinals(*membersValue)
+		if err != nil {
+			return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
+		}
+		req := templates.StatefulOrderedUpdateRequest{
+			SagaID:         *sagaID,
+			OperationID:    *operationID,
+			Group:          *group,
+			Env:            loaded.Config.Env,
+			ReleaseID:      *releaseID,
+			Members:        members,
+			MaxUnavailable: *maxUnavailable,
+			Actor:          schema.Actor{ID: "skiff-cli", Type: "user"},
+			TraceID:        *flags.traceID,
+		}
+		result, err := createAndMaybeRunStatefulOrdered(nilContext(), binary, loaded.Config, req, *run)
+		if err != nil {
+			return writeClientError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
+		}
+		return writeStatefulOrderedSagaResult(binary, "saga start", *flags.format, *flags.traceID, *result, stdout, stderr)
 	}
 	if *service == "" || *releaseID == "" {
 		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, errors.New("--service and --release-id are required for canary-deploy"), stdout, stderr)
@@ -483,6 +543,68 @@ func createAndMaybeRunCanary(ctx context.Context, binary string, cfg config.Conf
 	return &result, nil
 }
 
+func createAndMaybeRunStatefulOrdered(ctx context.Context, binary string, cfg config.Config, req templates.StatefulOrderedUpdateRequest, run bool) (*statefulOrderedSagaResult, error) {
+	store, err := openSagaObjectStore(cfg)
+	if err != nil {
+		return nil, err
+	}
+	req = templates.NormalizeStatefulOrderedUpdateRequest(req)
+	if len(req.Members) == 0 {
+		members, err := orderedUpdateMembersFromControl(ctx, store, req.Group)
+		if err != nil {
+			return nil, err
+		}
+		req.Members = members
+	}
+	createReq, err := templates.StatefulOrderedUpdate(req)
+	if err != nil {
+		return nil, err
+	}
+	sagas := sagastate.NewStore(store)
+	if _, err := sagas.Create(ctx, createReq); err != nil {
+		return nil, err
+	}
+	var execution *sagastate.ExecutionResult
+	if run {
+		cloud, err := newSagaProvider(cfg, store)
+		if err != nil {
+			return nil, err
+		}
+		execution, err = (&sagastate.Executor{
+			Store: sagas,
+			Steps: builtin.New(builtin.Options{Store: store, Provider: cloud, Binary: binary}),
+			Owner: "skiff-cli",
+		}).Execute(ctx, req.SagaID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	inspect, err := sagas.Inspect(ctx, req.SagaID)
+	if err != nil {
+		return nil, err
+	}
+	result := statefulOrderedResultFromInspect(*inspect, execution)
+	return &result, nil
+}
+
+func orderedUpdateMembersFromControl(ctx context.Context, store objstore.ObjectStore, group string) ([]int, error) {
+	doc, err := state.NewClient(store).GetStatefulGroupControl(ctx, group)
+	if err != nil {
+		return nil, err
+	}
+	members := make([]int, 0, len(doc.Control.Members))
+	for _, member := range doc.Control.Members {
+		members = append(members, member.Member)
+	}
+	if len(members) == 0 {
+		for i := 0; i < doc.Control.Replicas; i++ {
+			members = append(members, i)
+		}
+	}
+	sort.Ints(members)
+	return members, nil
+}
+
 func writeCanarySagaResult(binary, command, format, traceID string, result canarySagaResult, stdout, stderr io.Writer) int {
 	switch format {
 	case "human", "text":
@@ -503,6 +625,30 @@ func writeCanarySagaResult(binary, command, format, traceID string, result canar
 		return ExitSuccess
 	case "json":
 		if err := json.NewEncoder(stdout).Encode(canarySagaOutput{OK: true, TraceID: traceID, Result: result}); err != nil {
+			fmt.Fprintf(stderr, "%s %s: %v\n", binary, command, err)
+			return ExitInternalError
+		}
+		return ExitSuccess
+	default:
+		return writeClientCommandError(binary, "saga", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
+	}
+}
+
+func writeStatefulOrderedSagaResult(binary, command, format, traceID string, result statefulOrderedSagaResult, stdout, stderr io.Writer) int {
+	switch format {
+	case "human", "text":
+		fmt.Fprintf(stdout, "stateful ordered update saga %s status=%s\n", result.SagaID, result.Status)
+		fmt.Fprintf(stdout, "group: %s\n", result.Group)
+		fmt.Fprintf(stdout, "release: %s\n", result.ReleaseID)
+		if result.OperationID != "" {
+			fmt.Fprintf(stdout, "operation: %s\n", result.OperationID)
+		}
+		if result.NextAction != "" {
+			fmt.Fprintf(stdout, "next: %s\n", result.NextAction)
+		}
+		return ExitSuccess
+	case "json":
+		if err := json.NewEncoder(stdout).Encode(statefulOrderedSagaOutput{OK: true, TraceID: traceID, Result: result}); err != nil {
 			fmt.Fprintf(stderr, "%s %s: %v\n", binary, command, err)
 			return ExitInternalError
 		}
@@ -552,6 +698,38 @@ func canaryResultFromInspect(inspect sagastate.InspectResult, execution *sagasta
 		if result.NextAction == "" {
 			result.NextAction = "resume"
 		}
+	}
+	return result
+}
+
+func statefulOrderedResultFromInspect(inspect sagastate.InspectResult, execution *sagastate.ExecutionResult) statefulOrderedSagaResult {
+	var params struct {
+		Group       string `json:"group"`
+		Env         string `json:"env"`
+		OperationID string `json:"operation_id"`
+		ReleaseID   string `json:"release_id"`
+		Members     []int  `json:"members"`
+	}
+	_ = json.Unmarshal(inspect.Intent.Params, &params)
+	result := statefulOrderedSagaResult{
+		SagaID:       inspect.SagaID,
+		OperationID:  params.OperationID,
+		Group:        firstNonEmptyString(params.Group, inspect.Target.Name),
+		Env:          params.Env,
+		ReleaseID:    params.ReleaseID,
+		Members:      append([]int(nil), params.Members...),
+		Status:       inspect.Status,
+		CurrentSteps: append([]string(nil), inspect.CurrentSteps...),
+		Execution:    execution,
+		Inspect:      &inspect,
+	}
+	switch inspect.Status {
+	case schema.SagaSucceeded:
+		result.NextAction = "complete"
+	case schema.SagaFailed:
+		result.NextAction = "inspect_failure"
+	default:
+		result.NextAction = "resume"
 	}
 	return result
 }
@@ -622,25 +800,28 @@ func splitSagaWatchArgs(args []string) ([]string, []string, error) {
 
 func splitSagaStartArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
-		"api-url":      true,
-		"bake":         true,
-		"comparator":   true,
-		"config":       true,
-		"env":          true,
-		"format":       true,
-		"metric":       true,
-		"mode":         true,
-		"operation-id": true,
-		"provider":     true,
-		"region":       true,
-		"release-id":   true,
-		"saga-id":      true,
-		"service":      true,
-		"stages":       true,
-		"state":        true,
-		"state-bucket": true,
-		"threshold":    true,
-		"trace-id":     true,
+		"api-url":         true,
+		"bake":            true,
+		"comparator":      true,
+		"config":          true,
+		"env":             true,
+		"format":          true,
+		"group":           true,
+		"max-unavailable": true,
+		"members":         true,
+		"metric":          true,
+		"mode":            true,
+		"operation-id":    true,
+		"provider":        true,
+		"region":          true,
+		"release-id":      true,
+		"saga-id":         true,
+		"service":         true,
+		"stages":          true,
+		"state":           true,
+		"state-bucket":    true,
+		"threshold":       true,
+		"trace-id":        true,
 	}
 	return splitArgs(args, valueFlags)
 }
@@ -704,6 +885,36 @@ func parseCanaryStages(value string) ([]templates.CanaryStage, error) {
 		return nil, errors.New("at least one canary stage is required")
 	}
 	return stages, nil
+}
+
+func parseMemberOrdinals(value string) ([]int, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	parts := strings.Split(value, ",")
+	members := make([]int, 0, len(parts))
+	seen := map[int]bool{}
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" {
+			continue
+		}
+		member, err := strconv.Atoi(item)
+		if err != nil {
+			return nil, fmt.Errorf("invalid member ordinal %q", item)
+		}
+		if member < 0 {
+			return nil, fmt.Errorf("member ordinal %d must be non-negative", member)
+		}
+		if seen[member] {
+			return nil, fmt.Errorf("duplicate member ordinal %d", member)
+		}
+		seen[member] = true
+		members = append(members, member)
+	}
+	sort.Ints(members)
+	return members, nil
 }
 
 func firstNonEmptyString(values ...string) string {

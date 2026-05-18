@@ -430,12 +430,15 @@ func memberSummaries(docs []state.StatefulMemberDocument) []schema.StatefulMembe
 	for _, doc := range docs {
 		control := doc.Control
 		out = append(out, schema.StatefulMemberSummary{
-			Member:     control.Member,
-			Generation: control.Generation,
-			InstanceID: control.InstanceID,
-			VolumeID:   control.VolumeID,
-			DNSName:    control.DNSName,
-			Phase:      control.Phase,
+			Member:             control.Member,
+			Generation:         control.Generation,
+			ReleaseID:          control.ReleaseID,
+			ReleaseManifestKey: control.ReleaseManifestKey,
+			RuntimeManifestKey: control.RuntimeManifestKey,
+			InstanceID:         control.InstanceID,
+			VolumeID:           control.VolumeID,
+			DNSName:            control.DNSName,
+			Phase:              control.Phase,
 		})
 	}
 	return out

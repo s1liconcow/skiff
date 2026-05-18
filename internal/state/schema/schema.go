@@ -97,12 +97,15 @@ type StatefulGroupControl struct {
 }
 
 type StatefulMemberSummary struct {
-	Member     int    `json:"member"`
-	Generation int64  `json:"generation"`
-	InstanceID string `json:"instance_id,omitempty"`
-	VolumeID   string `json:"volume_id,omitempty"`
-	DNSName    string `json:"dns_name,omitempty"`
-	Phase      string `json:"phase,omitempty"`
+	Member             int    `json:"member"`
+	Generation         int64  `json:"generation"`
+	ReleaseID          string `json:"release_id,omitempty"`
+	ReleaseManifestKey string `json:"release_manifest_key,omitempty"`
+	RuntimeManifestKey string `json:"runtime_manifest_key,omitempty"`
+	InstanceID         string `json:"instance_id,omitempty"`
+	VolumeID           string `json:"volume_id,omitempty"`
+	DNSName            string `json:"dns_name,omitempty"`
+	Phase              string `json:"phase,omitempty"`
 }
 
 type StatefulMemberControl struct {
@@ -115,6 +118,9 @@ type StatefulMemberControl struct {
 	VolumeID           string                 `json:"volume_id,omitempty"`
 	DNSName            string                 `json:"dns_name,omitempty"`
 	Generation         int64                  `json:"generation"`
+	ReleaseID          string                 `json:"release_id,omitempty"`
+	ReleaseManifestKey string                 `json:"release_manifest_key,omitempty"`
+	RuntimeManifestKey string                 `json:"runtime_manifest_key,omitempty"`
 	Phase              string                 `json:"phase"`
 	Lease              *Lease                 `json:"lease,omitempty"`
 	ProviderOperations []ProviderOperationRef `json:"provider_operations,omitempty"`

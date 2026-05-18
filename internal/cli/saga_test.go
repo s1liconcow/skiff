@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -144,6 +145,74 @@ func TestSagaSkeletonCommandsReturnJSON(t *testing.T) {
 	}
 	if !got.OK || got.TraceID != "tr_saga_skeleton" || got.Command != "cancel" || got.Saga != "saga_01JABC" || got.Implemented {
 		t.Fatalf("unexpected skeleton output: %+v", got)
+	}
+}
+
+func TestSagaStartStatefulOrderedUpdateDirectJSON(t *testing.T) {
+	clearSkiffEnv(t)
+	dir := t.TempDir()
+	store, err := file.New(dir)
+	if err != nil {
+		t.Fatalf("new file store: %v", err)
+	}
+	client := state.NewClient(store)
+	if _, err := client.CreateStatefulGroupControl(context.Background(), schema.StatefulGroupControl{
+		Group: "orders-stream",
+		Env:   "prod",
+		Members: []schema.StatefulMemberSummary{
+			{Member: 0, Generation: 1, InstanceID: "i-0", VolumeID: "vol-0", Phase: state.StatefulMemberReady},
+			{Member: 1, Generation: 1, InstanceID: "i-1", VolumeID: "vol-1", Phase: state.StatefulMemberReady},
+		},
+		Replicas:  2,
+		UpdatedBy: schema.Actor{ID: "seed", Type: "test"},
+	}); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := client.CreateStatefulMemberControl(context.Background(), schema.StatefulMemberControl{
+			Group:      "orders-stream",
+			Env:        "prod",
+			Member:     i,
+			InstanceID: "i-" + strconv.Itoa(i),
+			VolumeID:   "vol-" + strconv.Itoa(i),
+			Generation: 1,
+			Phase:      state.StatefulMemberReady,
+			UpdatedBy:  schema.Actor{ID: "seed", Type: "test"},
+		}); err != nil {
+			t.Fatalf("create member %d: %v", i, err)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"saga", "start", "stateful.ordered_update",
+		"--group", "orders-stream",
+		"--release-id", "rel_new",
+		"--members", "0,1",
+		"--direct",
+		"--state", "file://" + dir,
+		"--env", "prod",
+		"--provider", "fake",
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", "tr_stateful_ordered_cli",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	var got statefulOrderedSagaOutput
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("stateful ordered output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_stateful_ordered_cli" || got.Result.Status != schema.SagaSucceeded || got.Result.Group != "orders-stream" || got.Result.ReleaseID != "rel_new" {
+		t.Fatalf("unexpected stateful ordered output: %+v", got)
+	}
+	member, err := client.GetStatefulMemberControl(context.Background(), "orders-stream", 1)
+	if err != nil {
+		t.Fatalf("get member: %v", err)
+	}
+	if member.Control.ReleaseID != "rel_new" || member.Control.Generation != 2 {
+		t.Fatalf("member was not updated by saga start: %+v", member.Control)
 	}
 }
 
