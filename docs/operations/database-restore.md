@@ -52,9 +52,9 @@ Approve only after inspecting the saga and confirming the restored database is
 the desired target:
 
 ```bash
-skiff saga inspect saga_01J... --direct --state s3://skiff-state-prod --format json
-skiff saga approve saga_01J... --step approve-cutover --reason "restore checks passed" --direct --state s3://skiff-state-prod --format json
-skiff saga resume saga_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+skiff ops inspect saga_01J... --direct --state s3://skiff-state-prod --format json
+skiff ops approve saga_01J... --step approve-cutover --reason "restore checks passed" --direct --state s3://skiff-state-prod --format json
+skiff ops resume saga_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
 ```
 
 Failure before cutover leaves production unchanged. The restore step

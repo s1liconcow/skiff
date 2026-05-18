@@ -12,6 +12,7 @@ bin/
 
 # Local demo state and generated demo artifacts
 .skiffconfig
+.skiff-pricing.json
 .skiff-demo-state/
 .skiff-demo-reports/
 demos/out/

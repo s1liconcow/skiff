@@ -944,7 +944,7 @@ func inspectEventsAction(binary, service string) RecommendedAction {
 		Kind:     "command",
 		Service:  service,
 		Summary:  "inspect recent service events",
-		Command:  fmt.Sprintf("%s events --scope service --service %s --limit 20 --fresh --format json", binary, service),
+		Command:  fmt.Sprintf("%s ops events %s --limit 20 --fresh --format json", binary, service),
 		Mutating: false,
 	}
 }
@@ -1066,10 +1066,7 @@ func rolloutWatchAction(binary, service, operationID, rolloutProviderID string) 
 	if operationID == "" {
 		return RecommendedAction{}
 	}
-	command := fmt.Sprintf("%s rollout watch %s --operation %s --format json", binary, service, operationID)
-	if rolloutProviderID != "" {
-		command = fmt.Sprintf("%s rollout watch %s --operation %s --provider-id %s --format json", binary, service, operationID, rolloutProviderID)
-	}
+	command := fmt.Sprintf("%s ops watch %s --operation %s --format json", binary, service, operationID)
 	return RecommendedAction{
 		ID:       actionID(service, "watch_rollout"),
 		Kind:     "command",

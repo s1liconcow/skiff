@@ -72,7 +72,7 @@ Create the durable saga model used for canaries, rollbacks, database restores, k
 - Implement CAS updates for saga control.
 - Implement event append for saga events.
 - Add risk and reversibility fields to saga and step schemas.
-- Add `skiff saga inspect` read path with JSON output.
+- Add `skiff ops inspect` read path with JSON output.
 
 #### Likely Files
 - `internal/saga/types.go`
@@ -110,7 +110,7 @@ Reversibility Reversibility
 Risk examples: low, medium, high, critical. Reversibility examples: reversible, compensatable, partially_reversible, irreversible.
 
 #### Testing / Validation
-Unit test creating a saga from intent and graph. Test duplicate create failures. Test CAS control updates under contention. Test schema round-trips with golden examples. Test `skiff saga inspect --format json`.
+Unit test creating a saga from intent and graph. Test duplicate create failures. Test CAS control updates under contention. Test schema round-trips with golden examples. Test `skiff ops inspect --format json`.
 
 #### Gotchas
 Do not overload service operations and sagas into one schema. Service operations are simple; sagas coordinate graphs. Also avoid storing secrets in saga params; use secret references or opaque result references.
@@ -119,7 +119,7 @@ Do not overload service operations and sagas into one schema. Service operations
 - Saga intent and graph are immutable.
 - Saga control is CAS-updated.
 - Saga events are append-only.
-- `skiff saga inspect` shows risk, reversibility, current step, and state.
+- `skiff ops inspect` shows risk, reversibility, current step, and state.
 
 ---
 
@@ -152,7 +152,7 @@ Implement the core engine that executes saga graphs, resumes interrupted sagas, 
 - Implement retry policy handling with bounded backoff.
 - Implement compensation in reverse topological order.
 - Persist step results and cloud operation IDs before long waits.
-- Add `skiff saga start`, `skiff saga watch`, `skiff saga resume`, `skiff saga cancel`, and `skiff saga compensate` skeletons.
+- Add `skiff saga start`, `skiff ops watch`, `skiff ops resume`, `skiff saga cancel`, and `skiff saga compensate` skeletons.
 
 #### Likely Files
 - `internal/saga/executor.go`
@@ -247,8 +247,8 @@ Approval JSON should be agent-friendly:
   "step": "approval_before_cutover",
   "risk": "high",
   "facts": ["shadow service healthy", "backup exists"],
-  "approve_command": "skiff saga approve saga_... --step approval_before_cutover",
-  "reject_command": "skiff saga reject saga_... --step approval_before_cutover"
+  "approve_command": "skiff ops approve saga_... --step approval_before_cutover",
+  "reject_command": "skiff ops reject saga_... --step approval_before_cutover"
 }
 ```
 
@@ -507,7 +507,7 @@ Start and watch AWS Auto Scaling Group instance refreshes as Skiff rollout primi
 - Map AWS rollout statuses into Skiff statuses.
 - Append rollout events for started, checkpoint, healthy, failed, cancelled, and completed states.
 - Support configurable min healthy percentage and instance warmup.
-- Expose `skiff rollout watch`.
+- Expose `skiff ops watch`.
 
 #### Likely Files
 - `internal/provider/aws/rollout.go`
@@ -536,7 +536,7 @@ Rollout watch should combine provider status with target health when possible.
 Use mocked AWS responses for status transitions. Test resume behavior from an operation control with a stored refresh ID. Test timeout handling. Optional AWS test should start a refresh on a tiny ASG only in a gated environment.
 
 #### Gotchas
-Instance refresh can take longer than command execution. Do not rely on one CLI process staying alive. Operation state must allow `skiff ops resume` or `skiff rollout watch` from another process.
+Instance refresh can take longer than command execution. Do not rely on one CLI process staying alive. Operation state must allow `skiff ops resume` or `skiff ops watch` from another process.
 
 #### Acceptance Criteria
 - Skiff can start ASG instance refresh.
@@ -1225,7 +1225,7 @@ Watch modes:
 
 ```bash
 skiff ops watch op_01J...
-skiff saga watch saga_01J...
+skiff ops watch saga_01J...
 skiff status payments-api --watch
 ```
 

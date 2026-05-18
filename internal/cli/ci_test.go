@@ -22,7 +22,7 @@ func TestCIGenerateJSON(t *testing.T) {
 	if !got.OK || got.TraceID != "tr_ci" || got.Target != "github-actions" {
 		t.Fatalf("unexpected output: %+v", got)
 	}
-	for _, want := range []string{"skiff validate", "skiff contract test", "skiff release candidate create", "skiff deploy", "skiff promote"} {
+	for _, want := range []string{"skiff validate", "skiff contract test", "skiff release candidate create", "skiff deploy", "skiff release promote"} {
 		if !strings.Contains(got.Content, want) {
 			t.Fatalf("generated content missing %q:\n%s", want, got.Content)
 		}

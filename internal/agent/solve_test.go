@@ -36,7 +36,7 @@ func TestSolveFailedRolloutPlansDiagnosticsRollbackAndVerify(t *testing.T) {
 				ID:       "payments-api_watch_rollout",
 				Kind:     "command",
 				Service:  "payments-api",
-				Command:  "skiff rollout watch payments-api --operation op_123 --provider-id asg-123 --format json",
+				Command:  "skiff ops watch payments-api --operation op_123 --format json",
 				Mutating: true,
 				Risk:     schema.RiskLow,
 			},
@@ -100,7 +100,7 @@ func TestSolveMissingCapacityProducesReadOnlyPlan(t *testing.T) {
 				ID:       "payments-api_inspect_events",
 				Kind:     "command",
 				Service:  "payments-api",
-				Command:  "skiff events --scope service --service payments-api --limit 20 --fresh --format json",
+				Command:  "skiff ops events payments-api --limit 20 --fresh --format json",
 				Mutating: false,
 			},
 			{

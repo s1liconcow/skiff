@@ -5,8 +5,8 @@ Use this when a canary deploy fails a health, target-health, or metric gate.
 ## Triage
 
 ```bash
-skiff saga inspect <saga-id> --direct --state <state-uri> --format json --trace-id <trace-id>
-skiff events --scope saga --saga <saga-id> --direct --state <state-uri> --format json --trace-id <trace-id>
+skiff ops inspect <saga-id> --direct --state <state-uri> --format json --trace-id <trace-id>
+skiff ops events <saga-id> --direct --state <state-uri> --format json --trace-id <trace-id>
 skiff doctor <service> --direct --state <state-uri> --env <env> --provider aws --region <region> --fresh --format json --trace-id <trace-id>
 skiff logs <service> --direct --state <state-uri> --env <env> --provider aws --region <region> --since 20m --format json --trace-id <trace-id>
 skiff metrics <service> --direct --state <state-uri> --env <env> --provider aws --region <region> --since 20m --format json --trace-id <trace-id>
@@ -17,7 +17,7 @@ skiff metrics <service> --direct --state <state-uri> --env <env> --provider aws 
 If the canary saga is waiting or interrupted:
 
 ```bash
-skiff saga resume <saga-id> --direct --state <state-uri> --env <env> --provider aws --region <region> --format json --trace-id <trace-id>
+skiff ops resume <saga-id> --direct --state <state-uri> --env <env> --provider aws --region <region> --format json --trace-id <trace-id>
 ```
 
 If the canary release is bad and a stable release exists:

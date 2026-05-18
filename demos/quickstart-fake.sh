@@ -284,7 +284,7 @@ run_skiff status "$service"
 run_skiff logs "$service"
 run_skiff metrics "$service"
 run_skiff doctor "$service"
-run_skiff events --scope service --service "$service"
+run_skiff ops events "$service"
 run_skiff ops list --all --service "$service"
 
 if [[ "$render_tui" -eq 1 ]]; then

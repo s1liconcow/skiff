@@ -250,17 +250,17 @@ func (m Model) ActionForKey(value string) (Action, bool) {
 		return m.readAction("metrics", "Metrics", "m", fmt.Sprintf("skiff metrics %s --from -30m --format json --trace-id %s", service.Service, m.trace()), "Inspect service metrics"), true
 	case "e":
 		if m.focus == focusStateful && stateful.Group != "" {
-			return m.readAction("stateful_events", "Events", "e", fmt.Sprintf("skiff events --scope service --service %s --format json --trace-id %s", stateful.Group, m.trace()), "List recent StatefulGroup events"), true
+			return m.readAction("stateful_events", "Events", "e", fmt.Sprintf("skiff ops events %s --format json --trace-id %s", stateful.Group, m.trace()), "List recent StatefulGroup events"), true
 		}
 		if service.Service == "" {
 			return Action{}, false
 		}
-		return m.readAction("events", "Events", "e", fmt.Sprintf("skiff events --scope service --service %s --format json --trace-id %s", service.Service, m.trace()), "List recent service events"), true
+		return m.readAction("events", "Events", "e", fmt.Sprintf("skiff ops events %s --format json --trace-id %s", service.Service, m.trace()), "List recent service events"), true
 	case "x":
 		if saga.SagaID == "" {
 			return Action{}, false
 		}
-		return m.readAction("saga_inspect", "Saga", "x", fmt.Sprintf("skiff saga inspect %s --format json --trace-id %s", saga.SagaID, m.trace()), "Inspect selected saga graph"), true
+		return m.readAction("saga_inspect", "Saga", "x", fmt.Sprintf("skiff ops inspect %s --format json --trace-id %s", saga.SagaID, m.trace()), "Inspect selected saga graph"), true
 	case "b":
 		if service.Service == "" {
 			return Action{}, false
@@ -274,7 +274,7 @@ func (m Model) ActionForKey(value string) (Action, bool) {
 		if step == "" {
 			step = "<step>"
 		}
-		return m.mutatingAction("approve", "Approve", "a", fmt.Sprintf("skiff saga approve %s --step %s --format json --trace-id %s", saga.SagaID, step, m.trace()), "Approve selected waiting saga step", schema.RiskHigh, schema.Compensatable), true
+		return m.mutatingAction("approve", "Approve", "a", fmt.Sprintf("skiff ops approve %s --step %s --format json --trace-id %s", saga.SagaID, step, m.trace()), "Approve selected waiting saga step", schema.RiskHigh, schema.Compensatable), true
 	default:
 		return Action{}, false
 	}

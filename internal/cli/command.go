@@ -154,13 +154,39 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 	case "version":
 		return runVersion(binary, root.Args, root, stdout, stderr)
 	case "help", "-h", "--help":
-		printUsage(stdout, binary)
-		return ExitSuccess
+		return printHelp(stdout, binary, root.Args)
 	default:
 		fmt.Fprintf(stderr, "%s: unknown command %q\n", binary, root.Command)
 		printUsage(stderr, binary)
 		return ExitUserError
 	}
+}
+
+func parseCommandFlags(fs *flag.FlagSet, args []string, stdout io.Writer) (bool, error) {
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			printFlagSetUsage(stdout, fs)
+			return true, nil
+		}
+		return false, err
+	}
+	return false, nil
+}
+
+// ParseCommandFlags parses a FlagSet and converts -h/--help into stdout usage and success.
+func ParseCommandFlags(fs *flag.FlagSet, args []string, stdout io.Writer) (bool, error) {
+	return parseCommandFlags(fs, args, stdout)
+}
+
+func printFlagSetUsage(w io.Writer, fs *flag.FlagSet) {
+	previous := fs.Output()
+	fs.SetOutput(w)
+	fs.Usage()
+	fs.SetOutput(previous)
+}
+
+func isHelpArg(arg string) bool {
+	return arg == "help" || arg == "-h" || arg == "--help"
 }
 
 func runVersion(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
@@ -172,7 +198,9 @@ func runVersion(binary string, args []string, root rootOptions, stdout, stderr i
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
 
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeRootError(binary, *format, *traceID, err, stdout, stderr)
 	}
 	if fs.NArg() != 0 {
@@ -243,7 +271,73 @@ func runVersion(binary string, args []string, root rootOptions, stdout, stderr i
 	}
 }
 
+func printHelp(w io.Writer, binary string, args []string) int {
+	if len(args) == 0 {
+		printUsage(w, binary)
+		return ExitSuccess
+	}
+	switch args[0] {
+	case "all":
+		printAllUsage(w, binary)
+		return ExitSuccess
+	case "workflows":
+		printWorkflowsHelp(w, binary)
+		return ExitSuccess
+	case "adoption":
+		printAdoptionHelp(w, binary)
+		return ExitSuccess
+	case "dev":
+		printDevHelp(w, binary)
+		return ExitSuccess
+	case "flags":
+		printGlobalFlags(w, binary)
+		return ExitSuccess
+	case "help", "-h", "--help":
+		printUsage(w, binary)
+		return ExitSuccess
+	default:
+		fmt.Fprintf(w, "%s help: unknown topic %q\n\n", binary, args[0])
+		printUsage(w, binary)
+		return ExitUserError
+	}
+}
+
 func printUsage(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s <command> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  init       Create starter specs and recipes")
+	fmt.Fprintln(w, "  validate   Check a Skiff spec")
+	fmt.Fprintln(w, "  plan       Preview cloud primitives and changes")
+	fmt.Fprintln(w, "  explain    Explain provider cloud primitives for a spec")
+	fmt.Fprintln(w, "  deploy     Publish and deploy a service release")
+	fmt.Fprintln(w, "  release    Manage candidates, promotion, and release verification")
+	fmt.Fprintln(w, "  status     Show service status through direct or API mode")
+	fmt.Fprintln(w, "  logs       Query service logs through the cloud provider")
+	fmt.Fprintln(w, "  metrics    Query service metrics through the cloud provider")
+	fmt.Fprintln(w, "  doctor     Diagnose service health and recommend actions")
+	fmt.Fprintln(w, "  cost       Explain service shape and capacity recommendations")
+	fmt.Fprintln(w, "  rollback   Roll a service back to a stable release")
+	fmt.Fprintln(w, "  ops        Inspect, watch, approve, and resume operations")
+	fmt.Fprintln(w, "  config     Inspect and switch Skiff configuration contexts")
+	fmt.Fprintln(w, "  tui        Open the terminal operations dashboard")
+	if binary == "skiffd" {
+		fmt.Fprintln(w, "  serve      Start the stateless skiffd API server")
+	}
+	fmt.Fprintln(w, "  version    Print version, commit, and build date")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "More:")
+	fmt.Fprintf(w, "  %s help workflows   Backup, restore, rotation, failover, debug, GC, stateful\n", binary)
+	fmt.Fprintf(w, "  %s help adoption    Import, Terraform, CI, and release promotion\n", binary)
+	fmt.Fprintf(w, "  %s help dev         Developer and low-level recovery helpers\n", binary)
+	fmt.Fprintf(w, "  %s help all         Full command list\n", binary)
+	fmt.Fprintf(w, "  %s help flags       Global flags\n", binary)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Global flags:")
+	fmt.Fprintln(w, "  --config <path> --context <name> --env <env> --provider <provider> --region <region>")
+	fmt.Fprintln(w, "  --state <uri> --api --direct --format human|json|json-pretty --no-color --yes --trace-id <id>")
+}
+
+func printAllUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s <command> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  adopt      Record externally managed resources in object state")
@@ -270,12 +364,12 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  logs       Query service logs through the cloud provider")
 	fmt.Fprintln(w, "  metrics    Query service metrics through the cloud provider")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
-	fmt.Fprintln(w, "  ops        Inspect, resume, and watch operations")
+	fmt.Fprintln(w, "  ops        Inspect, watch, approve, and resume operations")
 	fmt.Fprintln(w, "  plan       Dry-run provider resource changes for a spec")
 	fmt.Fprintln(w, "  plugin     Inspect, validate, and run trusted Skiff plugins")
 	fmt.Fprintln(w, "  policy     Explain generated state security policies")
 	fmt.Fprintln(w, "  promote    Validate and record release promotion intent")
-	fmt.Fprintln(w, "  release    Verify release manifests")
+	fmt.Fprintln(w, "  release    Manage candidates, promotion, and release verification")
 	fmt.Fprintln(w, "  rotate     Run secret and credential rotation sagas")
 	fmt.Fprintln(w, "  rollback   Roll a service back to a stable release")
 	fmt.Fprintln(w, "  rollout    Watch rollout progress")
@@ -295,6 +389,64 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "Global flags:")
 	fmt.Fprintln(w, "  --config <path> --context <name> --env <env> --provider <provider> --region <region>")
 	fmt.Fprintln(w, "  --state <uri> --api --direct --format human|json|json-pretty --no-color --yes --trace-id <id>")
+}
+
+func printWorkflowsHelp(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s <workflow-command> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Workflow commands:")
+	fmt.Fprintln(w, "  database   Run managed database backup and restore sagas")
+	fmt.Fprintln(w, "  rotate     Run secret, key, and certificate rotation sagas")
+	fmt.Fprintln(w, "  failover   Run a regional failover saga")
+	fmt.Fprintln(w, "  cutover    Create a weighted traffic cutover saga")
+	fmt.Fprintln(w, "  debug      Collect bundles and create audited debug sessions")
+	fmt.Fprintln(w, "  drift      Detect provider drift from Skiff resource records")
+	fmt.Fprintln(w, "  gc         Plan and apply conservative cleanup actions")
+	fmt.Fprintln(w, "  stateful   Plan, apply, and inspect StatefulGroups")
+	fmt.Fprintln(w, "  ops        Inspect, watch, approve, reject, and resume operations")
+}
+
+func printAdoptionHelp(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s <adoption-command> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Adoption and release commands:")
+	fmt.Fprintln(w, "  import kube                 Convert Kubernetes manifests into Skiff specs")
+	fmt.Fprintln(w, "  terraform generate          Generate Terraform modules for Skiff specs")
+	fmt.Fprintln(w, "  adopt terraform             Record externally managed resources in object state")
+	fmt.Fprintln(w, "  ci generate                 Generate CI/CD templates")
+	fmt.Fprintln(w, "  contract test               Run CI contract checks")
+	fmt.Fprintln(w, "  release candidate create    Record immutable release candidate evidence")
+	fmt.Fprintln(w, "  release promote             Validate and record release promotion intent")
+}
+
+func printDevHelp(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s <dev-command> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Developer and low-level helpers:")
+	fmt.Fprintln(w, "  compile    Compile a Skiff spec to provider-neutral IR")
+	fmt.Fprintln(w, "  completion Generate shell completions")
+	fmt.Fprintln(w, "  authz      Explain authorization and approval decisions")
+	fmt.Fprintln(w, "  policy     Explain generated state security policies")
+	fmt.Fprintln(w, "  plugin     Inspect, validate, and run trusted Skiff plugins")
+	fmt.Fprintln(w, "  object     Verify signed immutable objects")
+	fmt.Fprintln(w, "  state      Inspect object-state paths")
+	fmt.Fprintln(w, "  events     List local service, operation, or saga events")
+	fmt.Fprintln(w, "  saga       Inspect and operate directly on saga object state")
+	fmt.Fprintln(w, "  solve      Build an agent action graph for service recovery")
+}
+
+func printGlobalFlags(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s [global flags] <command> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Global flags:")
+	fmt.Fprintln(w, "  --config <path>      Path to Skiff config file")
+	fmt.Fprintln(w, "  --context <name>     Skiff config context")
+	fmt.Fprintln(w, "  --env <env>          Skiff environment")
+	fmt.Fprintln(w, "  --provider <name>    Cloud provider")
+	fmt.Fprintln(w, "  --region <region>    Cloud provider region")
+	fmt.Fprintln(w, "  --state <uri>        Object-state bucket URI")
+	fmt.Fprintln(w, "  --api                Use skiffd API mode")
+	fmt.Fprintln(w, "  --direct             Use direct object-state mode")
+	fmt.Fprintln(w, "  --format <format>    human, json, or json-pretty")
+	fmt.Fprintln(w, "  --no-color           Disable ANSI color output")
+	fmt.Fprintln(w, "  --yes                Assume yes for confirmations")
+	fmt.Fprintln(w, "  --trace-id <id>      Include a trace ID in machine-readable output")
 }
 
 type configShowOutput struct {
@@ -497,7 +649,9 @@ func runConfigShow(binary string, args []string, root rootOptions, stdout, stder
 	direct := fs.Bool("direct", root.directSet, "use direct object-state mode")
 	apiMode := fs.Bool("api", root.apiSet, "use skiffd API mode")
 
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
 	}
 	if fs.NArg() != 0 {
@@ -588,14 +742,16 @@ func runConfigGetContexts(binary string, args []string, root rootOptions, stdout
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	configPath := fs.String("config", root.ConfigPath, "path to Skiff config file")
 	contextName := fs.String("context", root.Context, "Skiff config context name")
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
 	}
 	if fs.NArg() != 0 {
 		return writeConfigError(binary, *format, *traceID, fmt.Errorf("unexpected argument %q", fs.Arg(0)), nil, stdout, stderr)
 	}
 	_ = noColor
-	path := config.ResolveConfigPath(*configPath, nil)
+	path, effective := config.ResolveConfigSelection(*configPath, *contextName, nil)
 	if path == "" {
 		path = config.DefaultConfigFilename
 	}
@@ -603,7 +759,6 @@ func runConfigGetContexts(binary string, args []string, root rootOptions, stdout
 	if err != nil {
 		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
 	}
-	effective := config.ResolveContext(*contextName, nil)
 	if effective == "" {
 		effective = file.Current()
 	}
@@ -658,14 +813,16 @@ func runConfigCurrentContext(binary string, args []string, root rootOptions, std
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	configPath := fs.String("config", root.ConfigPath, "path to Skiff config file")
 	contextName := fs.String("context", root.Context, "Skiff config context name")
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
 	}
 	if fs.NArg() != 0 {
 		return writeConfigError(binary, *format, *traceID, fmt.Errorf("unexpected argument %q", fs.Arg(0)), nil, stdout, stderr)
 	}
 	_ = noColor
-	path := config.ResolveConfigPath(*configPath, nil)
+	path, effective := config.ResolveConfigSelection(*configPath, *contextName, nil)
 	if path == "" {
 		path = config.DefaultConfigFilename
 	}
@@ -673,7 +830,6 @@ func runConfigCurrentContext(binary string, args []string, root rootOptions, std
 	if err != nil {
 		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
 	}
-	effective := config.ResolveContext(*contextName, nil)
 	if effective == "" {
 		effective = file.Current()
 	}
@@ -711,14 +867,16 @@ func runConfigUseContext(binary string, args []string, root rootOptions, stdout,
 	if err != nil {
 		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeConfigError(binary, *format, *traceID, err, nil, stdout, stderr)
 	}
 	if len(positionals) != 1 {
 		return writeConfigError(binary, *format, *traceID, errors.New("context name is required"), nil, stdout, stderr)
 	}
 	_ = noColor
-	path := config.ResolveConfigPath(*configPath, nil)
+	path, _ := config.ResolveConfigSelection(*configPath, "", nil)
 	if path == "" {
 		path = config.DefaultConfigFilename
 	}
@@ -836,7 +994,9 @@ func runBootstrapAWS(binary string, args []string, stdout, stderr io.Writer) int
 	runnerRole := fs.String("runner-role", "", "IAM role name for runners")
 	skiffdRole := fs.String("skiffd-role", "", "IAM role name for skiffd")
 
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
 	}
 	if fs.NArg() != 0 {
@@ -980,7 +1140,9 @@ func runPolicyExplain(binary string, args []string, stdout, stderr io.Writer) in
 	stateBucket := fs.String("state-bucket", "", "S3 state bucket URI or name")
 	kmsAlias := fs.String("kms-alias", "alias/skiff-state", "KMS alias used by IAM role policies")
 
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writePolicyError(binary, *format, *traceID, err, stdout, stderr)
 	}
 	if fs.NArg() != 0 {
@@ -1086,7 +1248,9 @@ func runEvents(binary string, args []string, root rootOptions, stdout, stderr io
 	watch := fs.Bool("watch", false, "watch event stream until interrupted")
 	afterID := fs.String("after", "", "resume after event ID")
 
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeEventsError(binary, *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if fs.NArg() != 0 {
@@ -1278,7 +1442,7 @@ func writeEventsError(binary, format, traceID string, err error, stdout, stderr 
 			RecommendedActions: []recommendedAction{
 				{
 					ID:       "list_service_events",
-					Command:  binary + " events --scope service --service <service> --state-dir <dir> --format json",
+					Command:  binary + " ops events <service> --state-dir <dir> --format json",
 					Mutating: false,
 				},
 			},
@@ -1316,7 +1480,9 @@ func runCompile(binary string, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return writeCompileError(binary, "SPEC_COMPILE_INVALID", *format, *traceID, err, nil, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeCompileError(binary, "SPEC_COMPILE_INVALID", *format, *traceID, err, nil, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -1441,7 +1607,9 @@ func runValidate(binary string, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return writeSpecError(binary, "SPEC_VALIDATE_INVALID", *format, *traceID, err, nil, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeSpecError(binary, "SPEC_VALIDATE_INVALID", *format, *traceID, err, nil, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -1600,6 +1768,8 @@ func runRelease(binary string, args []string, root rootOptions, stdout, stderr i
 	switch args[0] {
 	case "candidate":
 		return runReleaseCandidate(binary, args[1:], root, stdout, stderr)
+	case "promote":
+		return runPromoteCommand(binary, "release promote", args[1:], root, stdout, stderr)
 	case "verify":
 		return runReleaseVerify(binary, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
@@ -1632,7 +1802,9 @@ func runReleaseVerify(binary string, args []string, stdout, stderr io.Writer) in
 	if err != nil {
 		return writeVerifyError(binary, "RELEASE_VERIFY_INVALID", *format, *traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeVerifyError(binary, "RELEASE_VERIFY_INVALID", *format, *traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -1728,7 +1900,9 @@ func runObjectVerify(binary string, args []string, stdout, stderr io.Writer) int
 	if err != nil {
 		return writeVerifyError(binary, "OBJECT_VERIFY_INVALID", *format, *traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeVerifyError(binary, "OBJECT_VERIFY_INVALID", *format, *traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -1827,7 +2001,9 @@ func runStatePath(binary string, args []string, stdout, stderr io.Writer) int {
 	day := fs.String("day", "", "UTC audit day yyyy-mm-dd")
 	observation := fs.String("observation", "", "observation ID")
 
-	if err := fs.Parse(args[1:]); err != nil {
+	if handled, err := parseCommandFlags(fs, args[1:], stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeStateError(binary, *format, *traceID, err, stdout, stderr)
 	}
 	if fs.NArg() != 0 {
@@ -2221,6 +2397,7 @@ func printReleaseUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s release <command> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  candidate  Create or inspect release candidate evidence")
+	fmt.Fprintln(w, "  promote    Validate and record release promotion intent")
 	fmt.Fprintln(w, "  verify     Verify a signed release manifest")
 }
 

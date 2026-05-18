@@ -105,7 +105,7 @@ func (m Manager) Promote(ctx context.Context, req PromotionRequest) (*PromotionR
 		NextCommands: []string{
 			fmt.Sprintf("skiff deploy <spec> --release-id %s --format json --trace-id %s", firstNonEmpty(candidate.ReleaseID, "<release-id>"), req.TraceID),
 			fmt.Sprintf("skiff status %s --format json --trace-id %s", req.Service, req.TraceID),
-			fmt.Sprintf("skiff events --scope operation --service %s --operation %s --format json --trace-id %s", req.Service, req.OperationID, req.TraceID),
+			fmt.Sprintf("skiff ops events %s --service %s --format json --trace-id %s", req.OperationID, req.Service, req.TraceID),
 		},
 	}
 	result.Requirements = m.evaluatePromotionRequirements(ctx, req, candidate, now)

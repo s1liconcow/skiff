@@ -130,7 +130,10 @@ func parseGCFlags(binary, command string, args []string, root rootOptions, stdou
 		code := writeClientCommandError(binary, command, defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 		return gcFlagSet{}, nil, nil, &code
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		code := ExitSuccess
+		return gcFlagSet{}, nil, nil, &code
+	} else if err != nil {
 		code := writeClientCommandError(binary, command, *flags.format, *flags.traceID, err, stdout, stderr)
 		return gcFlagSet{}, nil, nil, &code
 	}

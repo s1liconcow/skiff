@@ -26,8 +26,7 @@ func Load(opts LoadOptions) (Loaded, error) {
 		env = environ()
 	}
 
-	configPath := ResolveConfigPath(opts.ConfigPath, env)
-	contextName := ResolveContext(opts.Context, env)
+	configPath, contextName := ResolveConfigSelection(opts.ConfigPath, opts.Context, env)
 
 	loaded := Defaults(opts.ModeDefault)
 	if configPath != "" {

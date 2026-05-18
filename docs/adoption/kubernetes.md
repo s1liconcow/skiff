@@ -100,8 +100,8 @@ Expected successful output includes a saga ID, current traffic percentage, and
 next action. Diagnose cutover with:
 
 ```bash
-skiff saga inspect saga_01J... --direct --state s3://skiff-state-prod --format json
-skiff events --scope saga --saga saga_01J... --direct --state s3://skiff-state-prod --format json
+skiff ops inspect saga_01J... --direct --state s3://skiff-state-prod --format json
+skiff ops events saga_01J... --direct --state s3://skiff-state-prod --format json
 skiff doctor payments-api --direct --state s3://skiff-state-prod --fresh --format json
 ```
 

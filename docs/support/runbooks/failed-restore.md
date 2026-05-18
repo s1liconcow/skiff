@@ -5,8 +5,8 @@ Use this when a managed database restore saga fails before or after cutover.
 ## Triage
 
 ```bash
-skiff saga inspect <saga-id> --direct --state <state-uri> --format json --trace-id <trace-id>
-skiff events --scope saga --saga <saga-id> --direct --state <state-uri> --format json --trace-id <trace-id>
+skiff ops inspect <saga-id> --direct --state <state-uri> --format json --trace-id <trace-id>
+skiff ops events <saga-id> --direct --state <state-uri> --format json --trace-id <trace-id>
 skiff doctor <service> --direct --state <state-uri> --env <env> --provider aws --region <region> --fresh --format json --trace-id <trace-id>
 ```
 
@@ -16,7 +16,7 @@ If the failure happened before the secret pointer changed, production should
 still point at the original database. Resume after fixing the provider issue:
 
 ```bash
-skiff saga resume <saga-id> --direct --state <state-uri> --env <env> --provider aws --region <region> --format json --trace-id <trace-id>
+skiff ops resume <saga-id> --direct --state <state-uri> --env <env> --provider aws --region <region> --format json --trace-id <trace-id>
 ```
 
 ## After Cutover

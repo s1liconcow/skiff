@@ -38,8 +38,8 @@ IDs, target groups, listener rules, log groups, and metrics.
 ## Diagnose Failure
 
 ```bash
-skiff saga inspect saga_01J... --direct --state s3://skiff-state-prod --format json
-skiff events --scope saga --saga saga_01J... --direct --state s3://skiff-state-prod --format json
+skiff ops inspect saga_01J... --direct --state s3://skiff-state-prod --format json
+skiff ops events saga_01J... --direct --state s3://skiff-state-prod --format json
 skiff doctor http-hello --direct --state s3://skiff-state-prod --fresh --format json
 ```
 

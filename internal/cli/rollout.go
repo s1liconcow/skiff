@@ -32,6 +32,9 @@ func runRollout(binary string, args []string, root rootOptions, stdout, stderr i
 	switch args[0] {
 	case "watch":
 		return runRolloutWatch(binary, args[1:], root, stdout, stderr)
+	case "help", "-h", "--help":
+		printRolloutUsage(stdout, binary)
+		return ExitSuccess
 	default:
 		return writeSpecError(binary, "ROLLOUT_INVALID", root.Format, root.TraceID, fmt.Errorf("unknown rollout command %q", args[0]), nil, stdout, stderr)
 	}
@@ -46,7 +49,9 @@ func runRolloutWatch(binary string, args []string, root rootOptions, stdout, std
 	rolloutID := fs.String("rollout-id", "", "Skiff rollout ID")
 	providerID := fs.String("provider-id", "", "provider rollout ID")
 
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeSpecError(binary, "ROLLOUT_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 	}
 	if fs.NArg() > 1 {
@@ -104,4 +109,10 @@ func runRolloutWatch(binary string, args []string, root rootOptions, stdout, std
 	default:
 		return writeSpecError(binary, "ROLLOUT_INVALID", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), nil, stdout, stderr)
 	}
+}
+
+func printRolloutUsage(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s rollout <command> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  watch  Watch provider rollout progress")
 }

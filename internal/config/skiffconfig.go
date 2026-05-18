@@ -82,29 +82,52 @@ type ContextSummary struct {
 }
 
 func ResolveConfigPath(explicit string, env map[string]string) string {
-	if strings.TrimSpace(explicit) != "" {
-		return explicit
-	}
-	if env == nil {
-		env = environ()
-	}
-	if value := strings.TrimSpace(env[EnvConfigPath]); value != "" {
-		return value
-	}
-	if _, err := os.Stat(DefaultConfigFilename); err == nil {
-		return DefaultConfigFilename
-	}
-	return ""
+	path, _ := ResolveConfigSelection(explicit, "", env)
+	return path
 }
 
 func ResolveContext(explicit string, env map[string]string) string {
-	if strings.TrimSpace(explicit) != "" {
-		return explicit
-	}
+	_, context := ResolveConfigSelection("", explicit, env)
+	return context
+}
+
+func ResolveConfigSelection(explicitPath, explicitContext string, env map[string]string) (string, string) {
 	if env == nil {
 		env = environ()
 	}
-	return strings.TrimSpace(env[EnvContext])
+
+	path := strings.TrimSpace(explicitPath)
+	contextFromPath := ""
+	if path != "" {
+		path, contextFromPath = splitConfigPathContext(path)
+	} else if value := strings.TrimSpace(env[EnvConfigPath]); value != "" {
+		path, contextFromPath = splitConfigPathContext(value)
+	} else if _, err := os.Stat(DefaultConfigFilename); err == nil {
+		path = DefaultConfigFilename
+	}
+
+	context := strings.TrimSpace(explicitContext)
+	if context == "" {
+		context = strings.TrimSpace(env[EnvContext])
+	}
+	if context == "" {
+		context = contextFromPath
+	}
+	return path, context
+}
+
+func splitConfigPathContext(value string) (string, string) {
+	value = strings.TrimSpace(value)
+	path, context, ok := strings.Cut(value, "#")
+	if !ok {
+		return value, ""
+	}
+	path = strings.TrimSpace(path)
+	context = strings.TrimSpace(context)
+	if path == "" || context == "" {
+		return value, ""
+	}
+	return path, context
 }
 
 func LoadSkiffConfigFile(path string) (*SkiffConfigFile, error) {

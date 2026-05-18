@@ -82,7 +82,9 @@ func runDebugSession(binary, command string, args []string, root rootOptions, mo
 	if err != nil {
 		return writeClientCommandError(binary, "debug "+command, root.Format, root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "debug "+command, *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -201,7 +203,9 @@ func runDebugCollect(binary string, args []string, root rootOptions, stdout, std
 	if err != nil {
 		return writeClientCommandError(binary, "debug collect", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "debug collect", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {

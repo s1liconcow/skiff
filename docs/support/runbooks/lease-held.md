@@ -7,7 +7,7 @@ Use this when a mutating command returns `LEASE_HELD`.
 ```bash
 skiff status <service> --direct --state <state-uri> --env <env> --provider aws --region <region> --fresh --format json --trace-id <trace-id>
 skiff ops inspect <op-id> --service <service> --direct --state <state-uri> --format json --trace-id <trace-id>
-skiff events --scope service --service <service> --direct --state <state-uri> --format json --trace-id <trace-id>
+skiff ops events <service> --direct --state <state-uri> --format json --trace-id <trace-id>
 ```
 
 ## Decision

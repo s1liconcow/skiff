@@ -56,7 +56,9 @@ func runInitStack(binary string, args []string, root rootOptions, stdout, stderr
 	if err != nil {
 		return writeClientCommandError(binary, "init", *format, *traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "init", *format, *traceID, err, stdout, stderr)
 	}
 	if len(positionals) != 1 {

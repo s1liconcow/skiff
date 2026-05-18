@@ -101,6 +101,68 @@ contexts:
 	}
 }
 
+func TestLoadSkiffConfigContextFromConfigPathFragment(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".skiffconfig")
+	if err := os.WriteFile(path, []byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: SkiffConfig
+current-context: local
+contexts:
+  - name: local
+    context:
+      mode: direct
+      env: prod
+      provider: fake
+      region: local
+      state: file:///tmp/skiff-state
+  - name: prod
+    context:
+      mode: direct
+      env: prod
+      provider: aws
+      region: us-west-2
+      state: s3://skiff-state-prod
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Load(LoadOptions{
+		ConfigPath: path + "#prod",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(loaded); err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ConfigPath != path || loaded.Context != "prod" {
+		t.Fatalf("context/path = %q/%q, want prod/%s", loaded.Context, loaded.ConfigPath, path)
+	}
+	if loaded.Config.Provider != "aws" || loaded.Config.StateBucket != "s3://skiff-state-prod" {
+		t.Fatalf("unexpected selected config: %+v", loaded.Config)
+	}
+
+	loaded, err = Load(LoadOptions{
+		Env: map[string]string{
+			"SKIFF_CONFIG":  path + "#prod",
+			"SKIFF_CONTEXT": "local",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(loaded); err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ConfigPath != path || loaded.Context != "local" {
+		t.Fatalf("context/path = %q/%q, want local/%s", loaded.Context, loaded.ConfigPath, path)
+	}
+	if loaded.Config.Provider != "fake" || loaded.Config.StateBucket != "file:///tmp/skiff-state" {
+		t.Fatalf("explicit context should override config fragment: %+v", loaded.Config)
+	}
+}
+
 func TestSkiffConfigUseContextRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".skiffconfig")

@@ -393,7 +393,7 @@ func writeAppleContextArtifacts(t *testing.T, report *e2eReport, rustfs rustFSHa
 		"source " + shellQuote(envPath),
 		"skiff config get-contexts",
 		"SKIFF_CONTEXT=" + appleDirectContext + " skiff status " + report.Service,
-		"SKIFF_CONTEXT=" + appleDirectContext + " skiff events --scope service --service " + report.Service,
+		"SKIFF_CONTEXT=" + appleDirectContext + " skiff ops events " + report.Service,
 	}
 	if opts.APIURL != "" {
 		report.RecommendedNextCommands = append(report.RecommendedNextCommands,

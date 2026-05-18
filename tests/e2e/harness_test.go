@@ -57,7 +57,7 @@ func newE2EReport(t *testing.T, mode, service, env, traceID string) *e2eReport {
 		reportDir: e2eReportDir(t),
 		RecommendedNextCommands: []string{
 			"skiff status " + service + " --direct --format json --trace-id " + traceID,
-			"skiff events --scope service --service " + service + " --direct --format json --trace-id " + traceID,
+			"skiff ops events " + service + " --direct --format json --trace-id " + traceID,
 		},
 	}
 }

@@ -41,7 +41,9 @@ func runPlan(binary string, args []string, root rootOptions, stdout, stderr io.W
 	if err != nil {
 		return writeSpecError(binary, "PLAN_INVALID", *format, *traceID, err, nil, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeSpecError(binary, "PLAN_INVALID", *format, *traceID, err, nil, stdout, stderr)
 	}
 	if len(positionals) > 1 {

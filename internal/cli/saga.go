@@ -178,7 +178,9 @@ func runSagaWatch(binary string, args []string, root rootOptions, stdout, stderr
 	if err != nil {
 		return writeClientCommandError(binary, "saga", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -235,7 +237,9 @@ func runSagaStart(binary string, args []string, root rootOptions, stdout, stderr
 	if err != nil {
 		return writeClientCommandError(binary, "saga", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) == 0 {
@@ -334,7 +338,9 @@ func runSagaResume(binary string, args []string, root rootOptions, stdout, stder
 	if err != nil {
 		return writeClientCommandError(binary, "saga", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -394,7 +400,9 @@ func runSagaApproval(binary, command string, args []string, root rootOptions, st
 	if err != nil {
 		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -464,7 +472,9 @@ func runSagaSkeleton(binary, command string, args []string, root rootOptions, st
 	if err != nil {
 		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -508,7 +518,9 @@ func runSagaInspect(binary string, args []string, root rootOptions, stdout, stde
 	if err != nil {
 		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -1013,7 +1025,7 @@ func mergeStatefulReplacementStepPayload(result *statefulReplacementSagaResult, 
 func statefulReplacementRecommendedActions(result statefulReplacementSagaResult) []recommendedAction {
 	actions := []recommendedAction{
 		{ID: "inspect_stateful_member", Command: fmt.Sprintf("skiff stateful inspect %s --format json", result.Group), Mutating: false},
-		{ID: "inspect_saga", Command: fmt.Sprintf("skiff saga inspect %s --format json", result.SagaID), Mutating: false},
+		{ID: "inspect_saga", Command: fmt.Sprintf("skiff ops inspect %s --format json", result.SagaID), Mutating: false},
 	}
 	if result.Status != schema.SagaSucceeded {
 		actions = append(actions, recommendedAction{

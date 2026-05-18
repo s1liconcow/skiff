@@ -241,7 +241,7 @@ func sagaResumeScenario(t *testing.T) readiness.Scenario {
 		Facts:       []readiness.Fact{{Type: "saga_resume", Source: "worker", Message: "worker resumed pending saga graph and completed typed step"}},
 		ObjectPaths: []string{controlKey},
 		SagaIDs:     []string{"saga_readiness_resume"},
-		Commands:    []readiness.RecommendedAction{{ID: "resume_saga", Command: "skiff saga resume saga_readiness_resume --direct --state <state> --format json", Mutating: true, Safety: "continues typed saga graph", Risk: string(schema.RiskLow)}},
+		Commands:    []readiness.RecommendedAction{{ID: "resume_saga", Command: "skiff ops resume saga_readiness_resume --direct --state <state> --format json", Mutating: true, Safety: "continues typed saga graph", Risk: string(schema.RiskLow)}},
 	}
 }
 

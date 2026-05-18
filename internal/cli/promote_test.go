@@ -58,7 +58,7 @@ func TestPromoteMarkdownRendersPlan(t *testing.T) {
 	root := seedPromotionCLIState(t, "staging", "rel_cli")
 	var stdout, stderr bytes.Buffer
 	code := Run("skiff", []string{
-		"promote", "payments-api",
+		"release", "promote", "payments-api",
 		"--direct",
 		"--state", "file://" + root,
 		"--env", "staging",
@@ -86,7 +86,7 @@ func TestPromoteJSONReportsMissingApproval(t *testing.T) {
 	root := seedPromotionCLIState(t, "staging", "rel_cli")
 	var stdout, stderr bytes.Buffer
 	code := Run("skiff", []string{
-		"promote", "payments-api",
+		"release", "promote", "payments-api",
 		"--direct",
 		"--state", "file://" + root,
 		"--env", "staging",

@@ -118,6 +118,21 @@ func InputFromGraph(graph *ir.Graph) Input {
 		shape.MinReplicas = asg.Min
 		shape.MaxReplicas = asg.Max
 	}
+	if len(graph.Resources.StatefulGroups) > 0 {
+		group := graph.Resources.StatefulGroups[0]
+		shape.MachineSize = "small"
+		shape.MachineArch = "x86_64"
+		shape.MinReplicas = group.Replicas
+		shape.MaxReplicas = group.Replicas
+		if shape.MinReplicas == 0 {
+			shape.MinReplicas = len(graph.Resources.StatefulMembers)
+			shape.MaxReplicas = shape.MinReplicas
+		}
+		if recipe := firstStatefulRecipe(graph); recipe != nil {
+			shape.MetricsEnabled = recipe.Metrics.Enabled
+		}
+		shape.LogsEnabled = true
+	}
 	if len(graph.Resources.LogConfigs) > 0 {
 		shape.LogsEnabled = graph.Resources.LogConfigs[0].Enabled
 	}
@@ -125,6 +140,13 @@ func InputFromGraph(graph *ir.Graph) Input {
 		shape.MetricsEnabled = graph.Resources.MetricConfigs[0].Enabled
 	}
 	return Input{Shape: normalizeShape(shape)}
+}
+
+func firstStatefulRecipe(graph *ir.Graph) *ir.StatefulRecipe {
+	if graph == nil || len(graph.Resources.StatefulRecipes) == 0 {
+		return nil
+	}
+	return &graph.Resources.StatefulRecipes[0]
 }
 
 func KnownShapes() []ShapeInfo {

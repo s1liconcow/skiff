@@ -8,7 +8,7 @@ Root-level flags can appear before initial client commands:
 
 ```bash
 skiff --direct --state file:///var/lib/skiff-state --env prod --provider aws --region us-west-2 status --format json
-skiff --api --api-url http://127.0.0.1:8585 events --format json --limit 20
+skiff --api --api-url http://127.0.0.1:8585 ops events --format json --limit 20
 ```
 
 Supported global flags:
@@ -27,9 +27,30 @@ Supported global flags:
 --trace-id
 ```
 
-`--direct` reads durable object state directly. `--api` calls `skiffd` through the API client. Both modes use the same client command surface for `status` and config-backed `events`.
+`--direct` reads durable object state directly. `--api` calls `skiffd` through the API client. Both modes use the same client command surface for `status` and config-backed `ops events`.
 
 JSON mode is non-interactive and emits valid JSON only on stdout. Human-mode diagnostics go to stderr.
+
+## Help Layout
+
+The default root help intentionally shows the everyday operator surface:
+
+```text
+init, validate, plan, explain, deploy, release, status, logs, metrics, doctor,
+cost, rollback, ops, config, tui, version
+```
+
+Less common workflows are still first-class, but they live behind topic help:
+
+```bash
+skiff help workflows
+skiff help adoption
+skiff help dev
+skiff help all
+```
+
+Use `skiff help all` when you need low-level recovery helpers such as `state`,
+`object`, `authz`, `policy`, `plugin`, `events`, or direct `saga` commands.
 
 ## Exit codes
 
@@ -128,7 +149,7 @@ skiff database restore orders-db --to 2026-05-17T02:00:00Z --mode new-db-cutover
 ```
 
 `skiff database restore --dry-run --format json` returns the saga plan without
-writing object state. Use `skiff saga approve <saga> --step approve-cutover`
+writing object state. Use `skiff ops approve <saga> --step approve-cutover`
 only after the restored database and any shadow service test look correct.
 
 ## Drift And GC
@@ -154,10 +175,19 @@ skiff gc apply --service payments-api --direct --state s3://skiff-state-prod --e
 
 `skiff cost explain` is read-only. It explains service shape, replica,
 warm-capacity, and log-volume recommendations from the spec plus supplied
-observed metrics. Confidence and evidence are included in JSON output.
+observed metrics. Confidence and evidence are included in JSON output. Add
+`--pricing-config <path>` to include On-Demand and RI infrastructure estimates,
+including low/medium/high utilization scenarios. Refresh the local pricing
+config with `skiff cost pricing update`. If the default `.skiff-pricing.json`
+file is missing, `cost explain` prints the refresh command and automatically
+detects that file on the next run.
 
 ```bash
 skiff cost explain payments-api --file examples/service/http-hello/skiff.yaml --cpu-p95 18 --memory-p95 41 --warm-capacity 4 --format json
+skiff cost pricing update --region us-east-1 --out .skiff-pricing.json
+skiff cost explain payments-api --file examples/service/http-hello/skiff.yaml --region us-east-1 --pricing-scheme on-demand --pricing-scheme ri-3yr-standard-all-upfront --format json
+skiff cost pricing update --region us-west-2 --out .skiff-pricing.json
+skiff cost explain --file examples/stateful/jetstream/skiff.yaml --pricing-scheme on-demand --pricing-scheme ri-3yr-standard-all-upfront
 ```
 
 Completion scripts are generated with:
@@ -217,16 +247,18 @@ skiff release candidate create --direct --state s3://skiff-state-staging --env s
 Promotion is plan-first and evidence-gated. It validates the candidate, required checks, optional stable duration, and production approval context, then records a `release.promote` operation intent/control plus events and audit records when requirements pass.
 
 ```bash
-skiff promote payments-api --direct --state s3://skiff-state-staging --env staging --provider aws --region us-west-2 --from staging --to prod --candidate cand_01J... --min-stable-duration 30m --approval-id approval_01J... --format markdown
-skiff promote payments-api --direct --state s3://skiff-state-staging --env staging --provider aws --region us-west-2 --from staging --to prod --candidate cand_01J... --approval-id approval_01J... --format json
+skiff release promote payments-api --direct --state s3://skiff-state-staging --env staging --provider aws --region us-west-2 --from staging --to prod --candidate cand_01J... --min-stable-duration 30m --approval-id approval_01J... --format markdown
+skiff release promote payments-api --direct --state s3://skiff-state-staging --env staging --provider aws --region us-west-2 --from staging --to prod --candidate cand_01J... --approval-id approval_01J... --format json
 ```
 
-## Rollout
+## Operation Watch
 
-`skiff rollout watch` resumes from the provider rollout ID stored in operation control and emits stable rollout status values such as `starting`, `rolling_out`, `succeeded`, `failed`, `cancelled`, and `rolling_back`.
+`skiff ops watch` follows service or operation events. Use the operation ID
+printed by deploy, rollback, promote, or a saga-backed workflow when you need a
+focused stream.
 
 ```bash
-skiff rollout watch payments-api --operation op_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+skiff ops watch payments-api --operation op_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
 ```
 
 ## Regional Failover

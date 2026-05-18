@@ -60,7 +60,9 @@ func runTerraformGenerate(binary string, args []string, root rootOptions, stdout
 	if err != nil {
 		return writeClientCommandError(binary, "terraform generate", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "terraform generate", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {

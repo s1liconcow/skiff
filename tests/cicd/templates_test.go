@@ -27,7 +27,7 @@ func TestGeneratedTemplatesContainRequiredFlow(t *testing.T) {
 				"skiff plan",
 				"skiff release candidate create",
 				"skiff deploy",
-				"skiff promote",
+				"skiff release promote",
 				"--artifact-digest",
 				"$IMAGE_REPO@$IMAGE_DIGEST",
 				"--direct",
@@ -60,7 +60,7 @@ func TestDocsMentionGeneratedCommands(t *testing.T) {
 		"skiff plan",
 		"skiff release candidate create",
 		"skiff deploy",
-		"skiff promote",
+		"skiff release promote",
 	} {
 		if !strings.Contains(doc, want) {
 			t.Fatalf("docs missing %q", want)

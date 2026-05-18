@@ -562,7 +562,7 @@ func TestSagaApproveJSONMutatesWaitingApproval(t *testing.T) {
 				StepID: "approval-before-cutover",
 				Kind:   approval.KindManual,
 				Status: "waiting",
-				Result: json.RawMessage(`{"state":"waiting_for_approval","step":"approval-before-cutover","risk":"high","facts":["shadow service healthy"],"approve_command":"skiff saga approve saga_approval_cli --step approval-before-cutover --format json","reject_command":"skiff saga reject saga_approval_cli --step approval-before-cutover --format json"}`),
+				Result: json.RawMessage(`{"state":"waiting_for_approval","step":"approval-before-cutover","risk":"high","facts":["shadow service healthy"],"approve_command":"skiff ops approve saga_approval_cli --step approval-before-cutover --format json","reject_command":"skiff ops reject saga_approval_cli --step approval-before-cutover --format json"}`),
 			}},
 			UpdatedAt: "2026-05-17T01:15:00Z",
 			TraceID:   "tr_approval_cli",

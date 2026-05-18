@@ -78,9 +78,9 @@ func (d Deployer) Rollback(ctx context.Context, req RollbackRequest) (*RollbackR
 		Target:      req.TargetRelease,
 		NextCommands: []string{
 			fmt.Sprintf("skiff status %s --format json --trace-id %s", req.Service, req.TraceID),
-			fmt.Sprintf("skiff rollout watch %s --operation %s --format json --trace-id %s", req.Service, req.OperationID, req.TraceID),
-			fmt.Sprintf("skiff events --scope operation --service %s --operation %s --format json --trace-id %s", req.Service, req.OperationID, req.TraceID),
-			fmt.Sprintf("skiff saga inspect %s --format json --trace-id %s", req.SagaID, req.TraceID),
+			fmt.Sprintf("skiff ops watch %s --operation %s --format json --trace-id %s", req.Service, req.OperationID, req.TraceID),
+			fmt.Sprintf("skiff ops events %s --service %s --format json --trace-id %s", req.OperationID, req.Service, req.TraceID),
+			fmt.Sprintf("skiff ops inspect %s --format json --trace-id %s", req.SagaID, req.TraceID),
 		},
 	}
 

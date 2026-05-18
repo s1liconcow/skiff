@@ -49,7 +49,9 @@ func runCutover(binary string, args []string, root rootOptions, stdout, stderr i
 	if err != nil {
 		return writeClientCommandError(binary, "cutover", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "cutover", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -146,8 +148,8 @@ func cutoverResultFromRequest(req templates.TrafficCutoverRequest, status schema
 		Risk:          riskForCutover(req.Percent),
 		Reversibility: schema.Compensatable,
 		NextCommands: []string{
-			fmt.Sprintf("skiff saga inspect %s --direct --format json --trace-id %s", req.SagaID, req.TraceID),
-			fmt.Sprintf("skiff saga approve %s --step approve-cutover --direct --format json --trace-id %s", req.SagaID, req.TraceID),
+			fmt.Sprintf("skiff ops inspect %s --direct --format json --trace-id %s", req.SagaID, req.TraceID),
+			fmt.Sprintf("skiff ops approve %s --step approve-cutover --direct --format json --trace-id %s", req.SagaID, req.TraceID),
 		},
 	}
 }

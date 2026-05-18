@@ -45,7 +45,9 @@ func runAdoptTerraform(binary string, args []string, root rootOptions, stdout, s
 	if err != nil {
 		return writeClientCommandError(binary, "adopt terraform", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "adopt terraform", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) != 1 {

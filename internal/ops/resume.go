@@ -189,11 +189,11 @@ func appendTakeover(ctx context.Context, log *events.Log, service, operationID, 
 func nextCommands(service, operationID, traceID, sagaID string) []string {
 	commands := []string{
 		fmt.Sprintf("skiff ops inspect %s --service %s --format json --trace-id %s", operationID, service, traceID),
-		fmt.Sprintf("skiff ops watch %s --service %s --format json --trace-id %s", operationID, service, traceID),
+		fmt.Sprintf("skiff ops watch %s --operation %s --format json --trace-id %s", service, operationID, traceID),
 		fmt.Sprintf("skiff status %s --format json --trace-id %s", service, traceID),
 	}
 	if sagaID != "" {
-		commands = append(commands, fmt.Sprintf("skiff saga inspect %s --format json --trace-id %s", sagaID, traceID))
+		commands = append(commands, fmt.Sprintf("skiff ops inspect %s --format json --trace-id %s", sagaID, traceID))
 	}
 	return commands
 }

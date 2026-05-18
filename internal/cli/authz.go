@@ -52,7 +52,9 @@ func runAuthzExplain(binary string, args []string, root rootOptions, stdout, std
 	targetName := fs.String("target", "", "target name")
 	dryRun := fs.Bool("dry-run", false, "explain as a dry-run request")
 	planOnly := fs.Bool("plan-only", false, "explain as a plan-only request")
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "authz explain", *format, *traceID, err, stdout, stderr)
 	}
 	if fs.NArg() != 0 {

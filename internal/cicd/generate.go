@@ -33,7 +33,7 @@ var requiredCommands = []string{
 	"skiff plan",
 	"skiff release candidate create",
 	"skiff deploy",
-	"skiff promote",
+	"skiff release promote",
 }
 
 //go:embed templates/*.tmpl

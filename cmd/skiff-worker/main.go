@@ -75,7 +75,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	leaseDuration := fs.Duration("lease-duration", 30*time.Second, "control lease duration")
 	workerID := fs.String("worker-id", defaultWorkerID(), "worker identity for leases and audit")
 
-	if err := fs.Parse(args); err != nil {
+	if handled, err := cli.ParseCommandFlags(fs, args, stdout); handled {
+		return cli.ExitSuccess
+	} else if err != nil {
 		return writeWorkerError(*format, *traceID, err, stdout, stderr)
 	}
 	if fs.NArg() != 0 {

@@ -288,8 +288,8 @@ func waitingState(sagaID, stepID string, risk schema.Risk, facts []string, summa
 		Risk:           risk,
 		Facts:          append([]string(nil), facts...),
 		Summary:        summary,
-		ApproveCommand: fmt.Sprintf("%s saga approve %s --step %s --format json", binary, sagaID, stepID),
-		RejectCommand:  fmt.Sprintf("%s saga reject %s --step %s --format json", binary, sagaID, stepID),
+		ApproveCommand: fmt.Sprintf("%s ops approve %s --step %s --format json", binary, sagaID, stepID),
+		RejectCommand:  fmt.Sprintf("%s ops reject %s --step %s --format json", binary, sagaID, stepID),
 	}
 }
 

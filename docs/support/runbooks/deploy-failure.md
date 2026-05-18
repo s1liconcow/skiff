@@ -7,7 +7,7 @@ error.
 
 ```bash
 skiff doctor <service> --direct --state <state-uri> --env <env> --provider aws --region <region> --fresh --format json --trace-id <trace-id>
-skiff events --scope operation --service <service> --operation <op-id> --direct --state <state-uri> --format json --trace-id <trace-id>
+skiff ops events <op-id> --service <service> --direct --state <state-uri> --format json --trace-id <trace-id>
 skiff ops inspect <op-id> --service <service> --direct --state <state-uri> --format json --trace-id <trace-id>
 ```
 

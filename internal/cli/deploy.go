@@ -58,7 +58,9 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 	if err != nil {
 		return writeSpecError(binary, "DEPLOY_INVALID", defaultString(root.Format, "human"), root.TraceID, err, nil, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeSpecError(binary, "DEPLOY_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 	}
 	if len(positionals) > 1 {

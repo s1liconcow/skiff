@@ -54,7 +54,9 @@ func runRollback(binary string, args []string, root rootOptions, stdout, stderr 
 	if err != nil {
 		return writeClientCommandError(binary, "rollback", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "rollback", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {

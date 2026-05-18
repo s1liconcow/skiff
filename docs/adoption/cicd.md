@@ -27,7 +27,7 @@ The generated templates default to direct mode for mutating commands:
 ```bash
 skiff release candidate create ... --direct --state "$SKIFF_STATE" --format json
 skiff deploy skiff.staging.json --direct --state "$SKIFF_STATE" --format json
-skiff promote "$SKIFF_SERVICE" --direct --state "$SKIFF_STATE" --format json
+skiff release promote "$SKIFF_SERVICE" --direct --state "$SKIFF_STATE" --format json
 ```
 
 Direct mode keeps recovery possible when `skiffd` is unavailable. The templates
@@ -61,7 +61,7 @@ CI metadata.
 through a recorded operation. The generated templates render `skiff.staging.json`
 with the immutable image digest before deploying.
 
-`skiff promote` validates the release candidate and protected-environment
+`skiff release promote` validates the release candidate and protected-environment
 approval context before recording the production promotion operation.
 
 ## OIDC And IAM Placeholders

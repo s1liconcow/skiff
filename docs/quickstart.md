@@ -265,7 +265,7 @@ and doctor returns structured findings for the synthetic fake-provider path.
 If diagnosis fails, recover through direct mode first:
 
 ```bash
-skiff events --scope service --service http-hello
+skiff ops events http-hello
 skiff ops list --all --service http-hello
 ```
 

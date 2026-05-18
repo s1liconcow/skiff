@@ -595,7 +595,7 @@ Implement immutable event creation for operations, sagas, service changes, and a
 - Write events with create-if-absent only.
 - Add optional hash-chain fields for operation/saga events.
 - Implement event listing by prefix and bounded recent-event reads.
-- Add `skiff events` command for local debugging.
+- Add `skiff ops events` command for local debugging.
 - Ensure event writes are best-effort for diagnostics but mandatory for operation state transitions where auditability is required.
 
 #### Likely Files
@@ -627,7 +627,7 @@ Do not let event listing become the only way to derive current state. It is okay
 
 #### Acceptance Criteria
 - Events are written immutably with create-if-absent.
-- `skiff events` can list service and saga events.
+- `skiff ops events` can list service and saga events.
 - Audit events include actor, trace ID, action, and target.
 - Duplicate event IDs fail safely.
 
@@ -814,7 +814,7 @@ Build the `skiff` CLI foundation with direct mode, API mode, structured output, 
 #### Subtasks
 - Implement root command with global flags: `--config`, `--env`, `--provider`, `--region`, `--state`, `--api`, `--direct`, `--format`, `--no-color`, `--yes`, `--trace-id`.
 - Create client interfaces for Skiff operations that can be backed by direct object/provider calls or `skiffd` API calls.
-- Implement `skiff version`, `skiff status`, `skiff events`, and `skiff config show` using the shared client interface.
+- Implement `skiff version`, `skiff status`, `skiff ops events`, and `skiff config show` using the shared client interface.
 - Define JSON error envelope and exit codes.
 - Add shell completion generation.
 - Ensure all commands are non-interactive when `--yes` or `--format json` is used.

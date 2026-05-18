@@ -68,11 +68,11 @@ func e2eCoverageMatrix() []capabilityCoverage {
 			Command:      "make e2e-local",
 		},
 		{
-			Capability:   "rollout watch",
+			Capability:   "operation watch",
 			Local:        coverageCovered,
 			AppleSilicon: coverageOptional,
 			AWS:          coverageGated,
-			Evidence:     "Local e2e starts and watches provider rollout IDs; Apple rolls to a second release.",
+			Evidence:     "Local e2e starts rollout operations and watches durable operation events; Apple rolls to a second release.",
 			Command:      "make e2e-local",
 		},
 		{

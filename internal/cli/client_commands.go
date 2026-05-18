@@ -145,7 +145,9 @@ func runStatus(binary string, args []string, root rootOptions, stdout, stderr io
 	if err != nil {
 		return writeClientCommandError(binary, "status", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "status", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -308,8 +310,13 @@ func writeClientCommandError(binary, command, format, traceID string, err error,
 }
 
 func runCompletion(binary string, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 1 && isHelpArg(args[0]) {
+		printCompletionUsage(stdout, binary)
+		return ExitSuccess
+	}
 	if len(args) != 1 {
 		fmt.Fprintf(stderr, "%s completion: expected shell name bash, zsh, or fish\n", binary)
+		printCompletionUsage(stderr, binary)
 		return ExitUserError
 	}
 	shell := args[0]
@@ -333,6 +340,10 @@ func runCompletion(binary string, args []string, stdout, stderr io.Writer) int {
 		return ExitUserError
 	}
 	return ExitSuccess
+}
+
+func printCompletionUsage(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s completion <bash|zsh|fish>\n", binary)
 }
 
 func firstNonEmptyCLI(values ...string) string {

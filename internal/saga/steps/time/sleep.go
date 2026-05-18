@@ -101,7 +101,7 @@ func (s Sleep) waiting(params sleepParams, sagaID, stepID string, duration stdti
 		Duration:     duration.String(),
 		ResumeAfter:  canonical.Time(resumeAfter),
 		NextAction:   "resume_after_bake",
-		Command:      fmt.Sprintf("skiff saga resume %s --step %s --format json", sagaID, stepID),
+		Command:      fmt.Sprintf("skiff ops resume %s --step %s --format json", sagaID, stepID),
 	}
 	return &steps.StepResult{Status: steps.StatusWaiting, Result: rawJSON(result), Summary: fmt.Sprintf("waiting %s for canary bake", duration)}
 }

@@ -6,7 +6,7 @@ Use this when commands report S3, KMS, IAM, or object-state access denied.
 
 ```bash
 skiff doctor <service> --direct --state <state-uri> --env <env> --provider aws --region <region> --fresh --format json --trace-id <trace-id>
-skiff events --scope service --service <service> --direct --state <state-uri> --format json --trace-id <trace-id>
+skiff ops events <service> --direct --state <state-uri> --format json --trace-id <trace-id>
 skiff config show --direct --state <state-uri> --env <env> --provider aws --region <region> --format json --trace-id <trace-id>
 ```
 

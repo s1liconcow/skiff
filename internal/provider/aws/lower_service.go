@@ -771,6 +771,10 @@ func instanceTypeForMachine(machine ir.Machine) string {
 	}
 }
 
+func InstanceTypeForMachine(machine ir.Machine) string {
+	return instanceTypeForMachine(machine)
+}
+
 func healthCheckType(targetGroups []string) string {
 	if len(targetGroups) == 0 {
 		return "EC2"

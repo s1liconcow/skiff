@@ -75,7 +75,9 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	fs.String("log-level", "", "log level")
 	fs.String("mode", "", "config mode; must be skiffd for serve")
 
-	if err := fs.Parse(args); err != nil {
+	if handled, err := cli.ParseCommandFlags(fs, args, stdout); handled {
+		return cli.ExitSuccess
+	} else if err != nil {
 		return writeServeError(*format, *traceID, err, stdout, stderr)
 	}
 	if fs.NArg() != 0 {

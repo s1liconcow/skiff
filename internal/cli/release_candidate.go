@@ -90,7 +90,9 @@ func runReleaseCandidateCreate(binary string, args []string, root rootOptions, s
 	if err != nil {
 		return writeClientCommandError(binary, "release-candidate-create", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "release-candidate-create", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -168,7 +170,9 @@ func runReleaseCandidateShow(binary string, args []string, root rootOptions, std
 	if err != nil {
 		return writeClientCommandError(binary, "release-candidate-show", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "release-candidate-show", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {

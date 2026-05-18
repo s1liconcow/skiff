@@ -97,7 +97,7 @@ func (d Deployer) Deploy(ctx context.Context, graph *ir.Graph, req Request) (*Re
 		Plan:        plan,
 		NextCommands: []string{
 			fmt.Sprintf("skiff status %s --format json --trace-id %s", graph.Service, req.TraceID),
-			fmt.Sprintf("skiff events --scope operation --service %s --operation %s --format json --trace-id %s", graph.Service, req.OperationID, req.TraceID),
+			fmt.Sprintf("skiff ops events %s --service %s --format json --trace-id %s", req.OperationID, graph.Service, req.TraceID),
 		},
 	}
 	if req.DryRun || req.PlanOnly {

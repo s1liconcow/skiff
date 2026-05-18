@@ -1,6 +1,11 @@
 package cost
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/s1liconcow/skiff/internal/ir"
+)
 
 func TestAnalyzeOverprovisionedService(t *testing.T) {
 	cpu := 18.0
@@ -56,6 +61,81 @@ func TestPlanWarningsFlagExpensiveDefaults(t *testing.T) {
 	assertRecommendation(t, warnings, "cost.plan.fixed_warm_capacity", ConfidenceLow)
 }
 
+func TestAnalyzeWithPricingAddsEC2Estimates(t *testing.T) {
+	cpu := 18.0
+	mem := 41.0
+	warm := 8
+	result, err := AnalyzeWithPricing(Input{
+		Shape: ServiceShape{Service: "payments-api", Env: "prod", MachineSize: "medium", MinReplicas: 12, MaxReplicas: 24},
+		Signals: ObservedSignals{
+			CPUP95Percent:    &cpu,
+			MemoryP95Percent: &mem,
+			WarmCapacity:     &warm,
+		},
+	}, fakePricingCatalog(), PricingOptions{MonthlyHours: 730})
+	if err != nil {
+		t.Fatalf("AnalyzeWithPricing: %v", err)
+	}
+	if result.Pricing == nil {
+		t.Fatalf("missing pricing estimate")
+	}
+	if result.Pricing.InstanceType != "t3.medium" || len(result.Pricing.Schemes) != 2 {
+		t.Fatalf("unexpected pricing estimate: %+v", result.Pricing)
+	}
+	if got, want := result.Pricing.Schemes[0].MinMonthlyUSD, 364.416; got != want {
+		t.Fatalf("min monthly = %v, want %v", got, want)
+	}
+	rec := findRecommendation(result.Recommendations, "cost.shape.downsize")
+	if rec == nil || !strings.Contains(rec.EstimatedImpact, "on_demand saves about $182.21/month") {
+		t.Fatalf("downsize impact was not priced: %+v", rec)
+	}
+}
+
+func TestEstimateInfrastructureIncludesStatefulStorageAndSupport(t *testing.T) {
+	graph := &ir.Graph{
+		Service: "orders-stream",
+		Env:     "prod",
+		Resources: ir.Resources{
+			StatefulGroups: []ir.StatefulGroup{{Replicas: 3}},
+			StatefulMembers: []ir.StatefulMember{
+				{Ordinal: 0},
+				{Ordinal: 1},
+				{Ordinal: 2},
+			},
+			StatefulVolumes: []ir.StatefulVolume{
+				{Size: "250Gi", Type: "gp3"},
+				{Size: "250Gi", Type: "gp3"},
+				{Size: "250Gi", Type: "gp3"},
+			},
+			StatefulDNS: []ir.StatefulDNS{
+				{DNSName: "orders-stream-0.example.com"},
+				{DNSName: "orders-stream-1.example.com"},
+				{DNSName: "orders-stream-2.example.com"},
+			},
+			StatefulRecipes:  []ir.StatefulRecipe{{Metrics: ir.AppMetrics{Enabled: true}, HealthCheck: ir.HealthCheck{Port: 8222}}},
+			SnapshotPolicies: []ir.SnapshotPolicy{{Enabled: true}},
+		},
+	}
+	estimate := EstimateInfrastructure(graph, fakePricingCatalog(), PricingOptions{MonthlyHours: 730})
+	for _, id := range []string{"compute.instances.on_demand", "storage.ebs.gp3", "storage.ebs_snapshots", "network.route53_records", "observability.logs", "observability.metrics"} {
+		if !hasInfraLineItem(estimate.LineItems, id) {
+			t.Fatalf("missing line item %s in %+v", id, estimate.LineItems)
+		}
+	}
+	if len(estimate.Totals) == 0 || estimate.Totals[0].MonthlyUSD != 143.052 {
+		t.Fatalf("unexpected totals: %+v", estimate.Totals)
+	}
+	if len(estimate.Scenarios) != 3 {
+		t.Fatalf("scenarios = %+v", estimate.Scenarios)
+	}
+	if estimate.Scenarios[0].Name != "low" || estimate.Scenarios[0].SnapshotDataGB != 187.5 || estimate.Scenarios[0].Totals[0].MonthlyUSD != 114.927 {
+		t.Fatalf("unexpected low scenario: %+v", estimate.Scenarios[0])
+	}
+	if estimate.Scenarios[2].Name != "high" || estimate.Scenarios[2].Totals[0].MonthlyUSD != 143.052 {
+		t.Fatalf("unexpected high scenario: %+v", estimate.Scenarios[2])
+	}
+}
+
 func assertRecommendation(t *testing.T, recs []Recommendation, id, confidence string) {
 	t.Helper()
 	rec := findRecommendation(recs, id)
@@ -70,6 +150,15 @@ func assertRecommendation(t *testing.T, recs []Recommendation, id, confidence st
 	}
 }
 
+func hasInfraLineItem(items []InfraLineItem, id string) bool {
+	for _, item := range items {
+		if item.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func findRecommendation(recs []Recommendation, id string) *Recommendation {
 	for i := range recs {
 		if recs[i].ID == id {
@@ -77,4 +166,39 @@ func findRecommendation(recs []Recommendation, id string) *Recommendation {
 		}
 	}
 	return nil
+}
+
+func fakePricingCatalog() PricingCatalog {
+	return PricingCatalog{
+		Provider:        "aws",
+		Region:          "us-east-1",
+		Currency:        "USD",
+		PublicationDate: "2026-05-14T21:07:47Z",
+		Items: []InstancePricing{
+			{
+				MachineSize:  "small",
+				InstanceType: "t3.small",
+				VCPU:         2,
+				MemoryGB:     2,
+				Rates: []PricingRate{
+					{Scheme: PricingSchemeOnDemand, Summary: "On-Demand", Currency: "USD", HourlyUSD: 0.0208, EffectiveHourlyUSD: 0.0208},
+					{Scheme: PricingSchemeRI3yrStandardAllUpfront, Summary: "3yr Standard RI All Upfront", Currency: "USD", UpfrontUSD: 206, EffectiveHourlyUSD: 206.0 / 26280.0, TermHours: 26280},
+				},
+			},
+			{
+				MachineSize:  "medium",
+				InstanceType: "t3.medium",
+				VCPU:         2,
+				MemoryGB:     4,
+				Rates: []PricingRate{
+					{Scheme: PricingSchemeOnDemand, Summary: "On-Demand", Currency: "USD", HourlyUSD: 0.0416, EffectiveHourlyUSD: 0.0416},
+					{Scheme: PricingSchemeRI3yrStandardAllUpfront, Summary: "3yr Standard RI All Upfront", Currency: "USD", UpfrontUSD: 411, EffectiveHourlyUSD: 411.0 / 26280.0, TermHours: 26280},
+				},
+			},
+		},
+		StorageRates: []StoragePricing{
+			{Kind: StorageKindEBSVolumeGBMonth, ResourceType: "gp3", Unit: "GB-Mo", UnitPriceUSD: 0.08},
+			{Kind: StorageKindEBSSnapshotGBMonth, Unit: "GB-Mo", UnitPriceUSD: 0.05},
+		},
+	}
 }

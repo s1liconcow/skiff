@@ -209,7 +209,7 @@ func apiOperationForAction(action doctor.RecommendedAction, service string) *API
 	case strings.Contains(id, "inspect_metrics") || strings.Contains(command, " metrics "):
 		operation = "metrics.query"
 		params["since"] = firstNonEmpty(flagValue(action.Command, "since"), "20m")
-	case strings.Contains(id, "watch_rollout") || strings.Contains(command, " rollout watch "):
+	case strings.Contains(id, "watch_rollout") || strings.Contains(command, " rollout watch ") || strings.Contains(command, " ops watch "):
 		operation = "rollout.watch"
 		params["operation_id"] = flagValue(action.Command, "operation")
 		if providerID := flagValue(action.Command, "provider-id"); providerID != "" {

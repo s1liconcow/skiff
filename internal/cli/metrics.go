@@ -46,7 +46,9 @@ func runMetrics(binary string, args []string, root rootOptions, stdout, stderr i
 	if err != nil {
 		return writeSpecError(binary, "METRICS_INVALID", root.Format, root.TraceID, err, nil, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeSpecError(binary, "METRICS_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 	}
 	if len(positionals) > 1 {

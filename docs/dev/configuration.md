@@ -65,8 +65,10 @@ skiff config use-context local --config .skiffconfig
 
 Selection works like kubeconfig: `SKIFF_CONFIG` chooses the config file,
 `SKIFF_CONTEXT` chooses a context without modifying the file, and `--context`
-overrides both for one command. If no config path is provided and `.skiffconfig`
-exists in the current working directory, Skiff uses it.
+overrides both for one command. For single-variable environments, `SKIFF_CONFIG`
+may include a context fragment such as `.skiffconfig#prod`; `SKIFF_CONTEXT` and
+`--context` still override that fragment. If no config path is provided and
+`.skiffconfig` exists in the current working directory, Skiff uses it.
 
 Environment variable equivalents:
 

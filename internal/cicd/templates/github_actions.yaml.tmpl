@@ -187,7 +187,7 @@ jobs:
         env:
           PROD_APPROVAL_ID: ${{ github.run_id }}
         run: |
-          [[ .SkiffBinary ]] promote "$SKIFF_SERVICE" \
+          [[ .SkiffBinary ]] release promote "$SKIFF_SERVICE" \
             --direct \
             --state "$SKIFF_STATE" \
             --env "$SKIFF_STAGING_ENV" \

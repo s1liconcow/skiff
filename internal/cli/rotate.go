@@ -92,7 +92,9 @@ func runRotateKey(binary string, args []string, root rootOptions, stdout, stderr
 	if err != nil {
 		return writeClientCommandError(binary, "rotate key", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "rotate key", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -164,7 +166,9 @@ func runRotateCertificate(binary string, args []string, root rootOptions, stdout
 	if err != nil {
 		return writeClientCommandError(binary, "rotate cert", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "rotate cert", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -236,7 +240,9 @@ func runRotateSecret(binary string, args []string, root rootOptions, stdout, std
 	if err != nil {
 		return writeClientCommandError(binary, "rotate secret", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "rotate secret", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {

@@ -38,8 +38,8 @@ delete release objects or hide the old failed operation.
 ## Diagnose Failure
 
 ```bash
-skiff ops inspect payments-api --operation op_01Jrollback --direct --state s3://skiff-state-prod --format json
-skiff rollout watch --service payments-api --operation op_01Jrollback --direct --state s3://skiff-state-prod --format json
+skiff ops inspect op_01Jrollback --service payments-api --direct --state s3://skiff-state-prod --format json
+skiff ops watch payments-api --operation op_01Jrollback --direct --state s3://skiff-state-prod --format json
 skiff logs payments-api --since 20m --direct --state s3://skiff-state-prod --format json
 ```
 

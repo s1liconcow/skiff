@@ -26,7 +26,7 @@ Implement Skiff release candidates, environment promotion, and CI/CD-friendly co
 - Define ReleaseCandidate schema with git metadata, artifact digest, CI provider/run URL, checks, SBOM/provenance references, and created actor.
 - Add object paths for candidates under service prefixes.
 - Implement `skiff release candidate create`.
-- Implement `skiff promote <service> --from <env> --to <env>`.
+- Implement `skiff release promote <service> --from <env> --to <env>`.
 - Validate promotion requirements such as staging stable duration, contract tests passed, scan evidence present, and approval context.
 - Add CI-friendly JSON and Markdown plan output.
 - Emit events and audit records for candidate creation and promotion.
@@ -100,7 +100,7 @@ Provide generated CI/CD templates that demonstrate test, build, contract, plan, 
 - Create `skiff ci generate buildkite`.
 - Include examples for direct mode and API mode.
 - Include OIDC/IAM role assumptions as documented placeholders.
-- Add pipeline steps for `skiff validate`, `skiff contract test`, `skiff plan`, `skiff release candidate create`, `skiff deploy`, and `skiff promote`.
+- Add pipeline steps for `skiff validate`, `skiff contract test`, `skiff plan`, `skiff release candidate create`, `skiff deploy`, and `skiff release promote`.
 - Add docs explaining what each pipeline step proves.
 
 #### Likely Files
@@ -1433,7 +1433,7 @@ Runbooks should be command-first:
 
 ```bash
 skiff doctor payments-api --format json
-skiff events payments-api --since 1h
+skiff ops events payments-api --since 1h
 skiff rollback payments-api --to previous-stable
 skiff --direct --state s3://... status payments-api
 ```

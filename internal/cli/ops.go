@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/s1liconcow/skiff/internal/client"
@@ -58,17 +59,25 @@ var (
 
 func runOps(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		return writeClientCommandError(binary, "ops", root.Format, root.TraceID, errors.New("expected ops command list, inspect, resume, or watch"), stdout, stderr)
+		return writeClientCommandError(binary, "ops", root.Format, root.TraceID, errors.New("expected ops command list, inspect, events, watch, approve, reject, or resume"), stdout, stderr)
 	}
 	switch args[0] {
 	case "list":
 		return runOpsList(binary, args[1:], root, stdout, stderr)
 	case "inspect":
 		return runOpsInspect(binary, args[1:], root, stdout, stderr)
+	case "events":
+		return runOpsEvents(binary, args[1:], root, stdout, stderr)
 	case "resume":
 		return runOpsResume(binary, args[1:], root, stdout, stderr)
 	case "watch":
 		return runOpsWatch(binary, args[1:], root, stdout, stderr)
+	case "approve":
+		return runSagaApproval(binary, "approve", args[1:], root, stdout, stderr)
+	case "reject":
+		return runSagaApproval(binary, "reject", args[1:], root, stdout, stderr)
+	case "cancel", "compensate":
+		return runSagaSkeleton(binary, args[0], args[1:], root, stdout, stderr)
 	case "help", "-h", "--help":
 		printOpsUsage(stdout, binary)
 		return ExitSuccess
@@ -89,7 +98,9 @@ func runOpsList(binary string, args []string, root rootOptions, stdout, stderr i
 	if err != nil {
 		return writeClientCommandError(binary, "ops", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "ops", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 0 {
@@ -135,6 +146,9 @@ func runOpsList(binary string, args []string, root rootOptions, stdout, stderr i
 }
 
 func runOpsInspect(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	if len(args) > 0 && isSagaIDArg(args[0]) {
+		return runSagaInspect(binary, args, root, stdout, stderr)
+	}
 	fs := flag.NewFlagSet(binary+" ops inspect", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	flags := addClientFlags(fs, root)
@@ -145,7 +159,9 @@ func runOpsInspect(binary string, args []string, root rootOptions, stdout, stder
 	if err != nil {
 		return writeClientCommandError(binary, "ops", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "ops", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -192,6 +208,9 @@ func runOpsInspect(binary string, args []string, root rootOptions, stdout, stder
 }
 
 func runOpsResume(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	if len(args) > 0 && isSagaIDArg(args[0]) {
+		return runSagaResume(binary, args, root, stdout, stderr)
+	}
 	fs := flag.NewFlagSet(binary+" ops resume", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	flags := addClientFlags(fs, root)
@@ -203,7 +222,9 @@ func runOpsResume(binary string, args []string, root rootOptions, stdout, stderr
 	if err != nil {
 		return writeClientCommandError(binary, "ops", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "ops", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -260,6 +281,9 @@ func runOpsResume(binary string, args []string, root rootOptions, stdout, stderr
 }
 
 func runOpsWatch(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	if len(args) > 0 && isSagaIDArg(args[0]) {
+		return runSagaWatch(binary, args, root, stdout, stderr)
+	}
 	fs := flag.NewFlagSet(binary+" ops watch", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	flags := addClientFlags(fs, root)
@@ -272,17 +296,30 @@ func runOpsWatch(binary string, args []string, root rootOptions, stdout, stderr 
 	if err != nil {
 		return writeClientCommandError(binary, "ops", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "ops", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if len(positionals) > 1 {
-		return writeClientCommandError(binary, "ops", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	if len(positionals) > 2 {
+		return writeClientCommandError(binary, "ops", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[2]), stdout, stderr)
 	}
-	if len(positionals) == 1 && *operation == "" {
+	if len(positionals) == 2 {
+		if *service == "" {
+			*service = positionals[0]
+		}
+		if *operation == "" {
+			*operation = positionals[1]
+		}
+	} else if len(positionals) == 1 && *service == "" && *operation != "" {
+		*service = positionals[0]
+	} else if len(positionals) == 1 && *operation == "" && *service != "" {
 		*operation = positionals[0]
+	} else if len(positionals) == 1 && *service == "" {
+		*service = positionals[0]
 	}
-	if *operation == "" || *service == "" {
-		return writeClientCommandError(binary, "ops", *flags.format, *flags.traceID, errors.New("operation ID and --service are required"), stdout, stderr)
+	if *service == "" {
+		return writeClientCommandError(binary, "ops", *flags.format, *flags.traceID, errors.New("service is required"), stdout, stderr)
 	}
 	_ = flags.noColor
 	_ = flags.yes
@@ -295,9 +332,13 @@ func runOpsWatch(binary string, args []string, root rootOptions, stdout, stderr 
 	if err != nil {
 		return writeClientError(binary, "ops", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
+	scope := "service"
+	if *operation != "" {
+		scope = "operation"
+	}
 	return runEventsWatch(eventsWatchContext(), binary, skiffClient, client.EventWatchOptions{
 		EventOptions: client.EventOptions{
-			Scope:     "operation",
+			Scope:     scope,
 			Service:   *service,
 			Operation: *operation,
 			Limit:     *limit,
@@ -306,6 +347,43 @@ func runOpsWatch(binary string, args []string, root rootOptions, stdout, stderr 
 		AfterID:      *afterID,
 		PollInterval: eventsWatchPollInterval,
 	}, *flags.format, *flags.traceID, stdout, stderr)
+}
+
+func runOpsEvents(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		return runEvents(binary, nil, root, stdout, stderr)
+	}
+	if isHelpArg(args[0]) {
+		printOpsEventsUsage(stdout, binary)
+		return ExitSuccess
+	}
+	first := args[0]
+	if strings.HasPrefix(first, "-") {
+		return runEvents(binary, args, root, stdout, stderr)
+	}
+	scopeArgs := eventScopeArgs(first)
+	transformed := make([]string, 0, len(scopeArgs)+len(args)-1)
+	transformed = append(transformed, scopeArgs...)
+	transformed = append(transformed, args[1:]...)
+	return runEvents(binary, transformed, root, stdout, stderr)
+}
+
+func eventScopeArgs(target string) []string {
+	if isSagaID(target) {
+		return []string{"--scope", "saga", "--saga", target}
+	}
+	if strings.HasPrefix(target, "op_") || strings.HasPrefix(target, "operation_") {
+		return []string{"--scope", "operation", "--operation", target}
+	}
+	return []string{"--scope", "service", "--service", target}
+}
+
+func isSagaIDArg(arg string) bool {
+	return !strings.HasPrefix(arg, "-") && isSagaID(arg)
+}
+
+func isSagaID(id string) bool {
+	return strings.HasPrefix(id, "saga_") || strings.HasPrefix(id, "saga-")
 }
 
 func loadOpsStore(binary string, root rootOptions, fs *flag.FlagSet, flags clientFlagSet, stdout, stderr io.Writer) (objstore.ObjectStore, config.Loaded, int) {
@@ -393,5 +471,30 @@ func splitOpsWatchArgs(args []string) ([]string, []string, error) {
 }
 
 func printOpsUsage(w io.Writer, binary string) {
-	fmt.Fprintf(w, "Usage: %s ops <list|inspect|resume|watch> [flags]\n", binary)
+	fmt.Fprintf(w, "Usage: %s ops <command> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  list      List operations")
+	fmt.Fprintln(w, "  inspect   Inspect an operation or saga")
+	fmt.Fprintln(w, "  events    List recent, service, operation, or saga events")
+	fmt.Fprintln(w, "  watch     Watch service or operation events")
+	fmt.Fprintln(w, "  approve   Approve a waiting saga step")
+	fmt.Fprintln(w, "  reject    Reject a waiting saga step")
+	fmt.Fprintln(w, "  resume    Resume an operation or saga")
+	fmt.Fprintln(w, "  cancel    Register saga cancellation intent")
+	fmt.Fprintln(w, "  compensate Register saga compensation intent")
+}
+
+func printOpsEventsUsage(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s ops events [service|operation|saga] [flags]\n\n", binary)
+	fmt.Fprintln(w, "Flags:")
+	fmt.Fprintln(w, "  --state-dir <dir>")
+	fmt.Fprintln(w, "  --scope recent|service|operation|saga")
+	fmt.Fprintln(w, "  --service <service>")
+	fmt.Fprintln(w, "  --operation <operation>")
+	fmt.Fprintln(w, "  --saga <saga>")
+	fmt.Fprintln(w, "  --limit <n>")
+	fmt.Fprintln(w, "  --fresh")
+	fmt.Fprintln(w, "  --watch")
+	fmt.Fprintln(w, "  --after <event-id>")
+	fmt.Fprintln(w, "  --format human|json|json-pretty")
 }

@@ -83,7 +83,7 @@ promote-prod:
   script:
     - export CANDIDATE_ID="$(jq -r '.result.candidate.candidate_id' skiff-candidate.json)"
     - export PROD_APPROVAL_ID="${CI_PIPELINE_ID}-${CI_JOB_ID}"
-    - [[ .SkiffBinary ]] promote "$SKIFF_SERVICE" --direct --state "$SKIFF_STATE" --env "$SKIFF_STAGING_ENV" --provider "$SKIFF_PROVIDER" --region "$AWS_REGION" --from "$SKIFF_STAGING_ENV" --to "$SKIFF_PROD_ENV" --candidate "$CANDIDATE_ID" --approval-id "$PROD_APPROVAL_ID" --format json > skiff-promote-prod.json
+    - [[ .SkiffBinary ]] release promote "$SKIFF_SERVICE" --direct --state "$SKIFF_STATE" --env "$SKIFF_STAGING_ENV" --provider "$SKIFF_PROVIDER" --region "$AWS_REGION" --from "$SKIFF_STAGING_ENV" --to "$SKIFF_PROD_ENV" --candidate "$CANDIDATE_ID" --approval-id "$PROD_APPROVAL_ID" --format json > skiff-promote-prod.json
   artifacts:
     when: always
     paths:

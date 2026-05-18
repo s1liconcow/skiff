@@ -60,8 +60,8 @@ shift-traffic-100
 ## Diagnose Failure
 
 ```bash
-skiff saga inspect saga_01Jfailover --direct --state s3://skiff-state-prod --format json
-skiff events --scope saga --saga saga_01Jfailover --direct --state s3://skiff-state-prod --format json
+skiff ops inspect saga_01Jfailover --direct --state s3://skiff-state-prod --format json
+skiff ops events saga_01Jfailover --direct --state s3://skiff-state-prod --format json
 skiff doctor orders --direct --state s3://skiff-state-prod --fresh --format json
 ```
 

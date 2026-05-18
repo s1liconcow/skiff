@@ -34,7 +34,7 @@ turn the AWS smoke gate into a live primitive deployment.
 | explain | covered | not_applicable | gated | Local and AWS smoke explain visible AWS primitives. |
 | release signing and verification | covered | covered | gated | Local verifies release/runtime manifests; Apple publishes signed runtime manifests into RustFS and verifies the fetched release through the CLI; AWS live apply publishes signed release/runtime objects before provider mutation. |
 | deploy | covered | optional | gated | Local deploys twice through the fake provider; Apple proves runner-side rollout; AWS live apply deploys core IAM, security group, log group, target group, launch template, and ASG primitives when live gates are present. |
-| rollout watch | covered | optional | gated | Local starts and watches provider rollout IDs; Apple rolls to a second release. |
+| operation watch | covered | optional | gated | Local starts rollout operations and watches durable operation events; Apple rolls to a second release. |
 | status | covered | optional | gated | Local reads direct-mode status from object state; Apple reads direct status and local `skiffd` API status from RustFS-backed S3 state. |
 | events | covered | optional | gated | Local reads service events and writes report object paths; Apple writes runner, operation, and saga events into RustFS and replays canary saga events through local `skiffd`. |
 | logs | covered | not_applicable | gated | Local queries fake-provider logs through the same CLI provider factory used by direct mode. |
@@ -45,7 +45,7 @@ turn the AWS smoke gate into a live primitive deployment.
 | direct mode | covered | covered | gated | Local uses `--direct`; Apple uses direct mode against RustFS for runner recovery checks and to start the canary saga. |
 | drift | covered | not_applicable | gated | Local runs drift against persisted fake-provider resource records. |
 | debug collect | covered | not_implemented | gated | Local direct mode collects a redacted bundle through the fake provider and writes durable audit/event records. AWS remains gated behind a live SSM client adapter. |
-| cost advisor | covered | not_applicable | gated | Local runs `skiff cost explain` with supplied metrics. AWS remains gated until provider metrics and pricing adapters exist. |
+| cost advisor | covered | fixture | gated | Local runs `skiff cost explain` with supplied metrics and AWS price-list fixtures. Live AWS pricing fetches remain gated by explicit `--aws-pricing`. |
 | provider conformance | covered | not_applicable | gated | CI runs `go test ./tests/conformance/provider`; local e2e documents the entry point. |
 | plugin conformance | covered | not_applicable | not_applicable | CI runs `go test ./tests/conformance/plugin`; local e2e runs `skiff plugin validate`. |
 | runner signed release | covered | covered | gated | Local runner fixture serves a signed release; Apple runs signed OCI releases in local Linux VMs. |
@@ -82,7 +82,7 @@ Useful first commands:
 
 ```bash
 skiff status http-hello --direct --state file://<state-dir> --env prod --provider fake --region local --format json
-skiff events --scope service --service http-hello --direct --state file://<state-dir> --env prod --provider fake --region local --format json
+skiff ops events http-hello --direct --state file://<state-dir> --env prod --provider fake --region local --format json
 skiff drift http-hello --direct --state file://<state-dir> --env prod --provider fake --region local --format json
 ```
 

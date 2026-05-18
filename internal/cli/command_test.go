@@ -12,6 +12,175 @@ import (
 
 var ansiEscapeRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
+func TestCommandsSupportHelpFlags(t *testing.T) {
+	paths := [][]string{
+		nil,
+		{"adopt"},
+		{"adopt", "terraform"},
+		{"authz"},
+		{"authz", "explain"},
+		{"bootstrap"},
+		{"bootstrap", "aws"},
+		{"ci"},
+		{"ci", "generate"},
+		{"compile"},
+		{"completion"},
+		{"config"},
+		{"config", "show"},
+		{"config", "get-contexts"},
+		{"config", "current-context"},
+		{"config", "use-context"},
+		{"contract"},
+		{"contract", "test"},
+		{"cost"},
+		{"cost", "explain"},
+		{"cutover"},
+		{"database"},
+		{"database", "backup"},
+		{"database", "restore"},
+		{"debug"},
+		{"debug", "collect"},
+		{"debug", "shell"},
+		{"debug", "port-forward"},
+		{"debug", "command"},
+		{"deploy"},
+		{"doctor"},
+		{"drift"},
+		{"events"},
+		{"explain"},
+		{"failover"},
+		{"gc"},
+		{"gc", "plan"},
+		{"gc", "apply"},
+		{"import"},
+		{"import", "kube"},
+		{"init"},
+		{"init", "stack"},
+		{"init", "stack", "api-database"},
+		{"logs"},
+		{"metrics"},
+		{"object"},
+		{"object", "verify"},
+		{"ops"},
+		{"ops", "list"},
+		{"ops", "inspect"},
+		{"ops", "events"},
+		{"ops", "resume"},
+		{"ops", "watch"},
+		{"ops", "approve"},
+		{"ops", "reject"},
+		{"ops", "cancel"},
+		{"ops", "compensate"},
+		{"plan"},
+		{"plugin"},
+		{"plugin", "list"},
+		{"plugin", "validate"},
+		{"plugin", "explain"},
+		{"plugin", "dev"},
+		{"policy"},
+		{"policy", "explain"},
+		{"promote"},
+		{"release"},
+		{"release", "promote"},
+		{"release", "verify"},
+		{"release", "candidate"},
+		{"release", "candidate", "create"},
+		{"release", "candidate", "show"},
+		{"rollback"},
+		{"rollout"},
+		{"rollout", "watch"},
+		{"rotate"},
+		{"rotate", "cert"},
+		{"rotate", "key"},
+		{"rotate", "secret"},
+		{"saga"},
+		{"saga", "inspect"},
+		{"saga", "approve"},
+		{"saga", "reject"},
+		{"saga", "start"},
+		{"saga", "resume"},
+		{"saga", "watch"},
+		{"saga", "cancel"},
+		{"saga", "compensate"},
+		{"solve"},
+		{"state"},
+		{"state", "path"},
+		{"stateful"},
+		{"stateful", "plan"},
+		{"stateful", "apply"},
+		{"stateful", "inspect"},
+		{"stateful", "status"},
+		{"stateful", "doctor"},
+		{"stateful", "solve"},
+		{"stateful", "logs"},
+		{"stateful", "metrics"},
+		{"stateful", "replace-member"},
+		{"stateful", "snapshot"},
+		{"stateful", "backup"},
+		{"stateful", "backup", "plan"},
+		{"stateful", "restore"},
+		{"stateful", "restore", "plan"},
+		{"stateful", "restore", "apply"},
+		{"stateful", "resume"},
+		{"stateful", "watch"},
+		{"stateful", "cancel"},
+		{"stateful", "compensate"},
+		{"status"},
+		{"terraform"},
+		{"terraform", "generate"},
+		{"tui"},
+		{"validate"},
+		{"version"},
+		{"help", "workflows"},
+		{"help", "adoption"},
+		{"help", "dev"},
+		{"help", "all"},
+		{"help", "flags"},
+	}
+
+	for _, helpFlag := range []string{"-h", "--help"} {
+		for _, path := range paths {
+			name := strings.Join(append(append([]string{}, path...), helpFlag), " ")
+			if name == "" {
+				name = helpFlag
+			}
+			t.Run(name, func(t *testing.T) {
+				args := append(append([]string{}, path...), helpFlag)
+				var stdout, stderr bytes.Buffer
+				code := Run("skiff", args, &stdout, &stderr)
+				if code != ExitSuccess {
+					t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+				}
+				if stderr.Len() != 0 {
+					t.Fatalf("stderr = %q, want empty", stderr.String())
+				}
+				if !strings.Contains(stdout.String(), "Usage") {
+					t.Fatalf("stdout does not look like help output:\n%s", stdout.String())
+				}
+			})
+		}
+	}
+}
+
+func TestRootHelpUsesCuratedCommandList(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{"help"}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"  deploy", "  ops", "  cost", "skiff help workflows", "skiff help all"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("root help missing %q:\n%s", want, out)
+		}
+	}
+	for _, hidden := range []string{"  authz", "  object", "  state ", "  terraform", "  rollout"} {
+		if strings.Contains(out, hidden) {
+			t.Fatalf("root help should not show niche command %q:\n%s", hidden, out)
+		}
+	}
+}
+
 func TestVersionJSONPretty(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -169,6 +338,16 @@ contexts:
 	}
 	if !got.OK || got.Context != "prod" || got.Config.Provider != "aws" || got.Config.StateBucket != "s3://skiff-state-prod" {
 		t.Fatalf("unexpected config show: %+v", got)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Run("skiff", []string{"config", "current-context", "--config", path + "#local", "--format", "human"}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("fragment current-context exit = %d, stderr = %s", code, stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "local" {
+		t.Fatalf("fragment current-context output = %q", stdout.String())
 	}
 }
 

@@ -83,7 +83,9 @@ func runDatabaseBackup(binary string, args []string, root rootOptions, stdout, s
 	if err != nil {
 		return writeClientCommandError(binary, "database backup", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "database backup", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -155,7 +157,9 @@ func runDatabaseRestore(binary string, args []string, root rootOptions, stdout, 
 	if err != nil {
 		return writeClientCommandError(binary, "database restore", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeClientCommandError(binary, "database restore", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {

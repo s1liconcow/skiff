@@ -349,28 +349,29 @@ Core commands:
 ```bash
 skiff bootstrap aws
 skiff validate skiff.yaml
-skiff compile skiff.yaml
 skiff plan skiff.yaml
+skiff explain skiff.yaml
 skiff deploy skiff.yaml
 skiff deploy skiff.yaml --canary
-skiff release verify release.json --runtime-manifest runtime-manifest.json
-skiff object verify release.json
 skiff status payments-api
 skiff logs payments-api --follow
 skiff metrics payments-api
 skiff doctor payments-api
-skiff solve payments-api --goal restore-health --format json
+skiff cost explain payments-api --file skiff.yaml
 skiff rollback payments-api --to previous-stable
-skiff saga list
-skiff saga inspect saga_01J...
-skiff saga watch saga_01J...
-skiff saga approve saga_01J... --step approval_before_cutover
-skiff restore database payments-db --to 2026-05-15T10:00:00Z
+skiff ops list --service payments-api
+skiff ops inspect saga_01J...
+skiff ops watch saga_01J...
+skiff ops approve saga_01J... --step approval_before_cutover
+skiff database restore payments-db --to 2026-05-15T10:00:00Z --secret-ref secret://managed-database/payments-db/url
 skiff rotate secret prod/payments/db-password
 skiff drift payments-api
 skiff gc plan
 skiff tui
 ```
+
+Run `skiff help workflows`, `skiff help adoption`, `skiff help dev`, or
+`skiff help all` to discover the less common operational and low-level tools.
 
 Every operational command should support:
 
@@ -479,7 +480,7 @@ skiff status payments-api
 ```bash
 skiff import kube ./k8s --out skiff.yaml
 skiff deploy skiff.yaml --shadow
-skiff saga start traffic-cutover --from kube/payments-api --to skiff/payments-api
+skiff cutover payments-api --from kube --to skiff --percent 10
 ```
 
 ### From Terraform
@@ -503,7 +504,7 @@ skiff contract test skiff.yaml --artifact "$IMAGE_REF"
 skiff plan skiff.yaml --artifact "$IMAGE_REF"
 skiff release candidate create --service payments-api --artifact "$IMAGE_REF"
 skiff deploy skiff.yaml --env staging --candidate latest --yes
-skiff promote payments-api --from staging --to prod --candidate latest-stable --strategy canary --yes
+skiff release promote payments-api --from staging --to prod --candidate latest-stable --strategy canary --yes
 ```
 
 ## Testing strategy

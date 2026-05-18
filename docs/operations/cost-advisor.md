@@ -5,7 +5,8 @@ that tradeoff visible without turning Skiff into a bin-packing scheduler.
 
 The advisor is read-only. It combines the service spec shape with optional
 observed signals and emits relative recommendations with confidence and
-evidence. It does not claim exact cloud billing impact.
+evidence. When a local pricing config is available, it estimates compute and
+baseline storage spend for On-Demand and Reserved Instance schemes.
 
 ```bash
 skiff cost explain payments-api \
@@ -19,6 +20,52 @@ skiff cost explain payments-api \
   --window 24h \
   --format json
 ```
+
+AWS pricing estimates use a local pricing config file. Refresh it explicitly
+from public AWS EC2 Price List data:
+
+```bash
+skiff cost pricing update \
+  --region us-east-1 \
+  --out .skiff-pricing.json
+```
+
+Then run `cost explain` without making a network request. When the config is
+written to the default `.skiff-pricing.json` path, `cost explain` detects it on
+the next run without needing `--pricing-config`:
+
+```bash
+skiff cost explain payments-api \
+  --file examples/service/http-hello/skiff.yaml \
+  --region us-east-1 \
+  --pricing-scheme on-demand \
+  --pricing-scheme ri-1yr-standard-no-upfront \
+  --pricing-scheme ri-3yr-standard-all-upfront \
+  --format json
+```
+
+`skiff cost pricing update` is the slow public-data refresh step. It fetches the
+regional Amazon EC2 bulk price list and writes a small Skiff pricing catalog.
+Use `--aws-pricing-file <path>` for offline tests or pinned comparisons.
+The estimate uses the AWS instance type produced by Skiff's provider lowering
+for the service machine size, for example `small` -> `t3.small`.
+Teams with negotiated rates can edit the pricing config or pass another
+`--pricing-config` file; `cost explain` consumes the local file as-is. The
+default `.skiff-pricing.json` path is local operator state and is ignored by
+git.
+
+`cost explain` does not fetch AWS pricing by default. For one-off diagnostics,
+`--aws-pricing` still forces a live public AWS pricing fetch, but normal
+operator use should prefer a local pricing config. If pricing data is missing,
+human and JSON output include the exact `skiff cost pricing update` command to
+generate the local config.
+
+The infrastructure section includes low, medium, and high utilization
+scenarios. Fixed resources such as provisioned EBS volume storage stay fixed.
+Autoscaled services use min replicas for low, the midpoint for medium, and max
+replicas for high. Stateful groups keep their fixed replica count and vary
+snapshot-storage assumptions across 25%, 50%, and 100% of provisioned volume
+size.
 
 Useful signals:
 
@@ -37,7 +84,12 @@ Those warnings are static and low-confidence until runtime metrics are supplied.
 
 Limitations:
 
-- Pricing, discounts, committed use, and region-specific rates are not modeled.
-- Recommendations are relative shape and capacity guidance, not billing truth.
+- AWS pricing estimates include EC2 instance compute and baseline EBS storage
+  when present. They exclude load balancer hourly/LCU charges, NAT, data
+  transfer, CloudWatch usage, taxes, credits, Savings Plans, and private
+  discounts.
+- RI estimates are effective hourly equivalents for matching Standard RI terms.
+  Actual billing can differ with existing reservations, size flexibility, scope,
+  and account discounts.
 - Production capacity changes still need SLO validation and an explicit Skiff
   operation or saga before mutation.

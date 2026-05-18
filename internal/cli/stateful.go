@@ -123,7 +123,9 @@ func runStatefulPlan(binary string, args []string, root rootOptions, stdout, std
 	if err != nil {
 		return writeSpecError(binary, "STATEFUL_PLAN_INVALID", *format, *traceID, err, nil, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeSpecError(binary, "STATEFUL_PLAN_INVALID", *format, *traceID, err, nil, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -186,7 +188,9 @@ func runStatefulApply(binary string, args []string, root rootOptions, stdout, st
 	if err != nil {
 		return writeStatefulCommandError(binary, "stateful apply", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeStatefulCommandError(binary, "stateful apply", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -241,7 +245,9 @@ func runStatefulInspect(binary string, args []string, root rootOptions, stdout, 
 	if err != nil {
 		return writeStatefulCommandError(binary, "stateful inspect", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeStatefulCommandError(binary, "stateful inspect", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -285,7 +291,9 @@ func runStatefulStatus(binary string, args []string, root rootOptions, stdout, s
 	if err != nil {
 		return writeStatefulCommandError(binary, "stateful status", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeStatefulCommandError(binary, "stateful status", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -326,7 +334,9 @@ func runStatefulDoctor(binary string, args []string, root rootOptions, stdout, s
 	if err != nil {
 		return writeStatefulCommandError(binary, "stateful doctor", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeStatefulCommandError(binary, "stateful doctor", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -364,7 +374,9 @@ func runStatefulSolve(binary string, args []string, root rootOptions, stdout, st
 	if err != nil {
 		return writeStatefulCommandError(binary, "stateful solve", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeStatefulCommandError(binary, "stateful solve", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -408,7 +420,9 @@ func runStatefulLogs(binary string, args []string, root rootOptions, stdout, std
 	if err != nil {
 		return writeStatefulCommandError(binary, "stateful logs", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeStatefulCommandError(binary, "stateful logs", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -463,7 +477,9 @@ func runStatefulMetrics(binary string, args []string, root rootOptions, stdout, 
 	if err != nil {
 		return writeStatefulCommandError(binary, "stateful metrics", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeStatefulCommandError(binary, "stateful metrics", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -525,7 +541,9 @@ func runStatefulReplaceMember(binary string, args []string, root rootOptions, st
 	if err != nil {
 		return writeStatefulCommandError(binary, "stateful replace-member", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeStatefulCommandError(binary, "stateful replace-member", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -582,7 +600,9 @@ func runStatefulSnapshot(binary string, args []string, root rootOptions, stdout,
 	if err != nil {
 		return writeStatefulCommandError(binary, "stateful snapshot", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeStatefulCommandError(binary, "stateful snapshot", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -622,6 +642,10 @@ func runStatefulSnapshot(binary string, args []string, root rootOptions, stdout,
 }
 
 func runStatefulBackup(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	if len(args) > 0 && isHelpArg(args[0]) {
+		printStatefulBackupUsage(stdout, binary)
+		return ExitSuccess
+	}
 	if len(args) == 0 || args[0] != "plan" {
 		return writeStatefulCommandError(binary, "stateful backup", defaultString(root.Format, "human"), root.TraceID, errors.New("expected stateful backup plan"), stdout, stderr)
 	}
@@ -638,7 +662,9 @@ func runStatefulBackup(binary string, args []string, root rootOptions, stdout, s
 	if err != nil {
 		return writeStatefulCommandError(binary, "stateful backup plan", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeStatefulCommandError(binary, "stateful backup plan", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -677,6 +703,10 @@ func runStatefulBackup(binary string, args []string, root rootOptions, stdout, s
 }
 
 func runStatefulRestore(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	if len(args) > 0 && isHelpArg(args[0]) {
+		printStatefulRestoreUsage(stdout, binary)
+		return ExitSuccess
+	}
 	if len(args) == 0 || (args[0] != "plan" && args[0] != "apply") {
 		return writeStatefulCommandError(binary, "stateful restore", defaultString(root.Format, "human"), root.TraceID, errors.New("expected stateful restore plan or apply"), stdout, stderr)
 	}
@@ -697,7 +727,9 @@ func runStatefulRestore(binary string, args []string, root rootOptions, stdout, 
 	if err != nil {
 		return writeStatefulCommandError(binary, "stateful restore "+command, *flags.format, *flags.traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writeStatefulCommandError(binary, "stateful restore "+command, *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -1307,4 +1339,17 @@ func printStatefulUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  watch      Watch stateful saga events")
 	fmt.Fprintln(w, "  cancel     Cancel a registered stateful saga")
 	fmt.Fprintln(w, "  compensate Compensate a registered stateful saga")
+}
+
+func printStatefulBackupUsage(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s stateful backup <command> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  plan  Render a StatefulGroup backup saga plan")
+}
+
+func printStatefulRestoreUsage(w io.Writer, binary string) {
+	fmt.Fprintf(w, "Usage: %s stateful restore <command> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  plan   Render a StatefulGroup restore saga plan")
+	fmt.Fprintln(w, "  apply  Apply a StatefulGroup restore saga")
 }

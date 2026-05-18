@@ -1628,7 +1628,7 @@ skiff validate
 skiff plan
 skiff apply
 skiff deploy
-skiff promote
+skiff release promote
 skiff rollback
 skiff status
 skiff doctor
@@ -2181,7 +2181,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: curl -fsSL https://get.skiff.dev | sh
-      - run: skiff promote payments-api --from staging --to prod --candidate latest-stable --strategy canary --yes --format json
+      - run: skiff release promote payments-api --from staging --to prod --candidate latest-stable --strategy canary --yes --format json
 ```
 
 ---
@@ -2303,7 +2303,7 @@ skiff dev run
 skiff contract test
 skiff deploy --env staging
 skiff logs payments-api --follow
-skiff promote payments-api --from staging --to prod
+skiff release promote payments-api --from staging --to prod
 ```
 
 Generated defaults:
@@ -2325,7 +2325,7 @@ Generated defaults:
 ```bash
 skiff init stack api-postgres payments
 skiff deploy --env staging
-skiff promote payments --to prod
+skiff release promote payments --to prod
 ```
 
 Skiff creates or configures:

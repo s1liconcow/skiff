@@ -990,7 +990,7 @@ func replacementRecommendedActions(params ReplaceMemberParams, failure *schema.S
 	}
 	actions := []map[string]any{
 		{"id": "inspect_stateful_member", "command": fmt.Sprintf("skiff stateful inspect %s --format json", params.Group), "mutating": false},
-		{"id": "inspect_saga", "command": fmt.Sprintf("skiff saga inspect %s --format json", sagaID), "mutating": false},
+		{"id": "inspect_saga", "command": fmt.Sprintf("skiff ops inspect %s --format json", sagaID), "mutating": false},
 	}
 	if failure != nil {
 		actions = append(actions, map[string]any{

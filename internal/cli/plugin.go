@@ -104,7 +104,9 @@ func runPluginList(binary string, args []string, root rootOptions, stdout, stder
 	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
 	var pluginPaths pluginPathsFlag
 	fs.Var(&pluginPaths, "plugin", "plugin manifest path or directory; may be repeated")
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writePluginError(binary, "plugin list", *format, *traceID, err, stdout, stderr)
 	}
 	if fs.NArg() != 0 {
@@ -150,7 +152,9 @@ func runPluginValidate(binary string, args []string, root rootOptions, stdout, s
 	if err != nil {
 		return writePluginError(binary, "plugin validate", *format, *traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writePluginError(binary, "plugin validate", *format, *traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -197,7 +201,9 @@ func runPluginExplain(binary string, args []string, root rootOptions, stdout, st
 	if err != nil {
 		return writePluginError(binary, "plugin explain", *format, *traceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writePluginError(binary, "plugin explain", *format, *traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
@@ -274,7 +280,9 @@ func runPluginDev(binary string, args []string, root rootOptions, stdout, stderr
 	pluginPath := fs.String("plugin", "", "plugin manifest path or directory")
 	hook := fs.String("hook", "", "hook to run locally")
 	requestPath := fs.String("request", "", "JSON request body")
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
 		return writePluginError(binary, "plugin dev", *format, *traceID, err, stdout, stderr)
 	}
 	if fs.NArg() != 0 {

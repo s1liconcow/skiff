@@ -48,8 +48,8 @@ records before provider changes continue.
 Diagnose regional failures with:
 
 ```bash
-skiff saga inspect saga_01J... --direct --state s3://skiff-state-prod --format json
-skiff events --scope saga --saga saga_01J... --direct --state s3://skiff-state-prod --format json
+skiff ops inspect saga_01J... --direct --state s3://skiff-state-prod --format json
+skiff ops events saga_01J... --direct --state s3://skiff-state-prod --format json
 skiff doctor orders --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --fresh --format json
 ```
 

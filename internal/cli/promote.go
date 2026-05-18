@@ -23,15 +23,19 @@ type promoteOutput struct {
 }
 
 func runPromote(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	return runPromoteCommand(binary, "promote", args, root, stdout, stderr)
+}
+
+func runPromoteCommand(binary, command string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		printPromoteUsage(stderr, binary)
+		printPromoteUsage(stderr, binary, command)
 		return ExitUserError
 	}
 	if len(args) == 1 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
-		printPromoteUsage(stdout, binary)
+		printPromoteUsage(stdout, binary, command)
 		return ExitSuccess
 	}
-	fs := flag.NewFlagSet(binary+" promote", flag.ContinueOnError)
+	fs := flag.NewFlagSet(binary+" "+command, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	flags := addClientFlags(fs, root)
 	service := fs.String("service", "", "service name")
@@ -49,13 +53,15 @@ func runPromote(binary string, args []string, root rootOptions, stdout, stderr i
 
 	flagArgs, positionals, err := splitPromoteArgs(args)
 	if err != nil {
-		return writeClientCommandError(binary, "promote", defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
+		return writeClientCommandError(binary, command, defaultString(root.Format, "human"), root.TraceID, err, stdout, stderr)
 	}
-	if err := fs.Parse(flagArgs); err != nil {
-		return writeClientCommandError(binary, "promote", *flags.format, *flags.traceID, err, stdout, stderr)
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return ExitSuccess
+	} else if err != nil {
+		return writeClientCommandError(binary, command, *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if len(positionals) > 1 {
-		return writeClientCommandError(binary, "promote", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+		return writeClientCommandError(binary, command, *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
 	}
 	if len(positionals) == 1 && *service == "" {
 		*service = positionals[0]
@@ -65,18 +71,18 @@ func runPromote(binary string, args []string, root rootOptions, stdout, stderr i
 
 	duration, err := time.ParseDuration(*minStable)
 	if err != nil {
-		return writeClientCommandError(binary, "promote", *flags.format, *flags.traceID, fmt.Errorf("--min-stable-duration: %w", err), stdout, stderr)
+		return writeClientCommandError(binary, command, *flags.format, *flags.traceID, fmt.Errorf("--min-stable-duration: %w", err), stdout, stderr)
 	}
 	loaded, err := flags.load(binary, root, fs)
 	if err != nil {
 		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
 	}
 	if loaded.Config.Mode != config.ModeDirect {
-		return writeClientCommandError(binary, "promote", *flags.format, *flags.traceID, errors.New("promote currently requires --direct mode"), stdout, stderr)
+		return writeClientCommandError(binary, command, *flags.format, *flags.traceID, errors.New("release promotion currently requires --direct mode"), stdout, stderr)
 	}
 	store, err := client.OpenObjectStore(loaded.Config)
 	if err != nil {
-		return writeClientError(binary, "promote", *flags.format, *flags.traceID, err, stdout, stderr)
+		return writeClientError(binary, command, *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	result, err := (release.Manager{Store: store}).Promote(nilContext(), release.PromotionRequest{
 		Service:           *service,
@@ -92,10 +98,10 @@ func runPromote(binary string, args []string, root rootOptions, stdout, stderr i
 		TraceID:           *flags.traceID,
 	})
 	if err != nil {
-		return writeClientCommandError(binary, "promote", *flags.format, *flags.traceID, err, stdout, stderr)
+		return writeClientCommandError(binary, command, *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	if result == nil {
-		return writeClientCommandError(binary, "promote", *flags.format, *flags.traceID, errors.New("promotion result is nil"), stdout, stderr)
+		return writeClientCommandError(binary, command, *flags.format, *flags.traceID, errors.New("promotion result is nil"), stdout, stderr)
 	}
 	exitCode := ExitSuccess
 	code := ""
@@ -122,12 +128,12 @@ func runPromote(binary string, args []string, root rootOptions, stdout, stderr i
 		return exitCode
 	case "json":
 		if err := json.NewEncoder(stdout).Encode(promoteOutput{OK: result.OK, TraceID: *flags.traceID, Code: code, Summary: summary, Result: *result}); err != nil {
-			fmt.Fprintf(stderr, "%s promote: %v\n", binary, err)
+			fmt.Fprintf(stderr, "%s %s: %v\n", binary, command, err)
 			return ExitInternalError
 		}
 		return exitCode
 	default:
-		return writeClientCommandError(binary, "promote", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", "json-pretty", or "markdown"`), stdout, stderr)
+		return writeClientCommandError(binary, command, *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", "json-pretty", or "markdown"`), stdout, stderr)
 	}
 }
 
@@ -171,8 +177,8 @@ func splitPromoteArgs(args []string) ([]string, []string, error) {
 	return splitArgs(args, valueFlags)
 }
 
-func printPromoteUsage(w io.Writer, binary string) {
-	fmt.Fprintf(w, "Usage: %s promote <service> --from <env> --to <env> --candidate <id> [flags]\n\n", binary)
+func printPromoteUsage(w io.Writer, binary, command string) {
+	fmt.Fprintf(w, "Usage: %s %s <service> --from <env> --to <env> --candidate <id> [flags]\n\n", binary, command)
 	fmt.Fprintln(w, "Flags:")
 	fmt.Fprintln(w, "  --candidate <id>")
 	fmt.Fprintln(w, "  --from <env> --to <env>")
