@@ -13,6 +13,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/ir"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/objstore/file"
+	opsstate "github.com/s1liconcow/skiff/internal/ops"
 	"github.com/s1liconcow/skiff/internal/provider"
 	sagastate "github.com/s1liconcow/skiff/internal/saga"
 	"github.com/s1liconcow/skiff/internal/saga/steps/approval"
@@ -657,6 +658,68 @@ func TestSagaStartCanaryDeployJSONCreatesAndRuns(t *testing.T) {
 	if updated.Control.DesiredRelease != "rel_new" || updated.Control.StableRelease != "rel_new" {
 		t.Fatalf("canary did not mark release stable: %+v", updated.Control)
 	}
+	op, err := opsstate.NewStore(store).Inspect(context.Background(), "payments-api", got.Result.OperationID)
+	if err != nil {
+		t.Fatalf("inspect canary operation: %v", err)
+	}
+	if op.Status != schema.OperationSucceeded || op.Kind != "canary-deploy" {
+		t.Fatalf("unexpected canary operation: %+v", op)
+	}
+}
+
+func TestSagaStartFailedCanaryRecordsFailedOperation(t *testing.T) {
+	clearSkiffEnv(t)
+	dir := t.TempDir()
+	store, err := file.New(dir)
+	if err != nil {
+		t.Fatalf("new file store: %v", err)
+	}
+	control := schema.NewServiceControl("payments-api", "prod", canonical.Time(time.Date(2026, 5, 17, 3, 20, 0, 0, time.UTC)), schema.Actor{ID: "agent-one", Type: "agent"})
+	control.DesiredRelease = "rel_old"
+	control.StableRelease = "rel_old"
+	if _, err := state.NewClient(store).CreateServiceControl(context.Background(), control); err != nil {
+		t.Fatalf("create service control: %v", err)
+	}
+	fake := &fakeCanaryCLIProvider{healthStatus: "unhealthy"}
+	oldProvider := newSagaProvider
+	newSagaProvider = func(config.Config, objstore.ObjectStore) (provider.Provider, error) {
+		return fake, nil
+	}
+	defer func() { newSagaProvider = oldProvider }()
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"saga", "start", "canary-deploy",
+		"--service", "payments-api",
+		"--release-id", "rel_bad",
+		"--operation-id", "op_canary_failed",
+		"--stages", "100",
+		"--bake", "0s",
+		"--direct",
+		"--state", "file://" + dir,
+		"--env", "prod",
+		"--provider", "aws",
+		"--region", "us-west-2",
+		"--format", "json",
+		"--trace-id", "tr_canary_cli_failed",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	var got canarySagaOutput
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("saga start output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if got.Result.Status != schema.SagaFailed || got.Result.OperationID != "op_canary_failed" {
+		t.Fatalf("unexpected failed canary output: %+v", got)
+	}
+	op, err := opsstate.NewStore(store).Inspect(context.Background(), "payments-api", "op_canary_failed")
+	if err != nil {
+		t.Fatalf("inspect canary operation: %v", err)
+	}
+	if op.Status != schema.OperationFailed || op.Kind != "canary-deploy" || len(op.StepResults) == 0 {
+		t.Fatalf("unexpected failed canary operation: %+v", op)
+	}
 }
 
 func seedStatefulSagaCLIControls(t *testing.T, store objstore.ObjectStore, volumeID string) {
@@ -690,7 +753,8 @@ func seedStatefulSagaCLIControls(t *testing.T, store objstore.ObjectStore, volum
 }
 
 type fakeCanaryCLIProvider struct {
-	rollouts []provider.RolloutRequest
+	rollouts     []provider.RolloutRequest
+	healthStatus string
 }
 
 func (p *fakeCanaryCLIProvider) Name() string { return "aws" }
@@ -708,7 +772,11 @@ func (p *fakeCanaryCLIProvider) InspectService(ctx context.Context, ref provider
 }
 
 func (p *fakeCanaryCLIProvider) InspectResource(ctx context.Context, ref provider.ResourceRef) (*provider.ResourceInspection, error) {
-	return &provider.ResourceInspection{Kind: ref.Kind, LogicalID: ref.LogicalID, ProviderID: "tg-123", Status: "healthy"}, nil
+	status := p.healthStatus
+	if status == "" {
+		status = "healthy"
+	}
+	return &provider.ResourceInspection{Kind: ref.Kind, LogicalID: ref.LogicalID, ProviderID: "tg-123", Status: status}, nil
 }
 
 func (p *fakeCanaryCLIProvider) Logs(ctx context.Context, req provider.LogsRequest) (*provider.LogsResult, error) {

@@ -1768,6 +1768,8 @@ func runRelease(binary string, args []string, root rootOptions, stdout, stderr i
 	switch args[0] {
 	case "candidate":
 		return runReleaseCandidate(binary, args[1:], root, stdout, stderr)
+	case "list":
+		return runReleaseList(binary, args[1:], root, stdout, stderr)
 	case "promote":
 		return runPromoteCommand(binary, "release promote", args[1:], root, stdout, stderr)
 	case "verify":
@@ -2397,6 +2399,7 @@ func printReleaseUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s release <command> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  candidate  Create or inspect release candidate evidence")
+	fmt.Fprintln(w, "  list       List immutable release manifests for a service")
 	fmt.Fprintln(w, "  promote    Validate and record release promotion intent")
 	fmt.Fprintln(w, "  verify     Verify a signed release manifest")
 }

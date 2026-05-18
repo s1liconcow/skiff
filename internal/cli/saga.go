@@ -14,12 +14,15 @@ import (
 	"github.com/s1liconcow/skiff/internal/client"
 	"github.com/s1liconcow/skiff/internal/config"
 	"github.com/s1liconcow/skiff/internal/objstore"
+	opsstate "github.com/s1liconcow/skiff/internal/ops"
 	"github.com/s1liconcow/skiff/internal/provider"
 	sagastate "github.com/s1liconcow/skiff/internal/saga"
 	"github.com/s1liconcow/skiff/internal/saga/steps/approval"
 	"github.com/s1liconcow/skiff/internal/saga/steps/builtin"
 	"github.com/s1liconcow/skiff/internal/saga/templates"
 	"github.com/s1liconcow/skiff/internal/state"
+	"github.com/s1liconcow/skiff/internal/state/canonical"
+	"github.com/s1liconcow/skiff/internal/state/paths"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 )
 
@@ -571,18 +574,28 @@ func createAndMaybeRunCanary(ctx context.Context, binary string, cfg config.Conf
 		return nil, err
 	}
 	req = templates.NormalizeCanaryRequest(req)
+	initialStatus := schema.OperationPending
+	if run {
+		initialStatus = schema.OperationRunning
+	}
+	if err := createCanaryOperationDocs(ctx, store, req, initialStatus); err != nil {
+		return nil, err
+	}
 	createReq, err := templates.DeploymentCanary(req)
 	if err != nil {
+		_ = markCanaryOperationFailed(ctx, store, req, "create_saga", err)
 		return nil, err
 	}
 	sagas := sagastate.NewStore(store)
 	if _, err := sagas.Create(ctx, createReq); err != nil {
+		_ = markCanaryOperationFailed(ctx, store, req, "create_saga", err)
 		return nil, err
 	}
 	var execution *sagastate.ExecutionResult
 	if run {
 		cloud, err := newSagaProvider(cfg, store)
 		if err != nil {
+			_ = markCanaryOperationFailed(ctx, store, req, "create_provider", err)
 			return nil, err
 		}
 		execution, err = (&sagastate.Executor{
@@ -591,15 +604,115 @@ func createAndMaybeRunCanary(ctx context.Context, binary string, cfg config.Conf
 			Owner: "skiff-cli",
 		}).Execute(ctx, req.SagaID)
 		if err != nil {
+			_ = markCanaryOperationFailed(ctx, store, req, "execute_saga", err)
 			return nil, err
 		}
 	}
 	inspect, err := sagas.Inspect(ctx, req.SagaID)
 	if err != nil {
+		_ = markCanaryOperationFailed(ctx, store, req, "inspect_saga", err)
+		return nil, err
+	}
+	if err := updateCanaryOperationFromSaga(ctx, store, req, *inspect); err != nil {
 		return nil, err
 	}
 	result := canaryResultFromInspect(*inspect, execution)
 	return &result, nil
+}
+
+func createCanaryOperationDocs(ctx context.Context, store objstore.ObjectStore, req templates.CanaryRequest, status schema.OperationStatus) error {
+	intent := schema.NewOperationIntent(req.OperationID, req.Service, req.Env, templates.CanaryDeployCommand, schema.Target{Kind: "service", Name: req.Service}, req.Actor, req.TraceID, canonical.Time(req.CreatedAt.UTC()))
+	intent.Risk = schema.RiskMedium
+	intent.Reversibility = schema.Compensatable
+	intent.Summary = fmt.Sprintf("canary deploy %s release %s", req.Service, req.ReleaseID)
+	intent.Params = rawJSON(map[string]any{
+		"saga_id":         req.SagaID,
+		"release_id":      req.ReleaseID,
+		"stages":          req.Stages,
+		"bake_duration":   req.BakeDuration,
+		"metric_gates":    req.MetricGates,
+		"rollback_policy": req.RollbackPolicy,
+	})
+	intentBody, err := canonical.Marshal(intent)
+	if err != nil {
+		return err
+	}
+	intentKey, err := paths.OperationIntent(req.Service, req.OperationID)
+	if err != nil {
+		return err
+	}
+	if _, err := store.Create(ctx, intentKey, intentBody, objstore.PutOptions{ContentType: canonical.ContentType}); err != nil {
+		return err
+	}
+	control := schema.OperationControl{
+		SchemaVersion: schema.Version,
+		OperationID:   req.OperationID,
+		Service:       req.Service,
+		Env:           req.Env,
+		Status:        status,
+		UpdatedAt:     canonical.Time(req.CreatedAt.UTC()),
+		TraceID:       req.TraceID,
+	}
+	controlBody, err := canonical.Marshal(control)
+	if err != nil {
+		return err
+	}
+	controlKey, err := paths.OperationControl(req.Service, req.OperationID)
+	if err != nil {
+		return err
+	}
+	_, err = store.Create(ctx, controlKey, controlBody, objstore.PutOptions{ContentType: canonical.ContentType})
+	return err
+}
+
+func updateCanaryOperationFromSaga(ctx context.Context, store objstore.ObjectStore, req templates.CanaryRequest, inspect sagastate.InspectResult) error {
+	doc, err := opsstate.NewStore(store).GetControl(ctx, req.Service, req.OperationID)
+	if err != nil {
+		return err
+	}
+	next := doc.Control
+	next.Status = canaryOperationStatus(inspect.Status)
+	next.StepResults = append([]schema.StepResultRef(nil), inspect.Control.StepResults...)
+	next.TraceID = firstNonEmptyString(next.TraceID, req.TraceID)
+	_, err = opsstate.NewStore(store).UpdateControlCAS(ctx, doc, next)
+	return err
+}
+
+func markCanaryOperationFailed(ctx context.Context, store objstore.ObjectStore, req templates.CanaryRequest, step string, cause error) error {
+	doc, err := opsstate.NewStore(store).GetControl(ctx, req.Service, req.OperationID)
+	if err != nil {
+		return err
+	}
+	next := doc.Control
+	next.Status = schema.OperationFailed
+	next.StepResults = append(next.StepResults, schema.StepResultRef{
+		StepID: step,
+		Kind:   templates.DeploymentCanaryKind,
+		Status: "failed",
+		Failure: &schema.StepFailure{
+			Code:    "CANARY_OPERATION_FAILED",
+			Summary: cause.Error(),
+		},
+	})
+	_, err = opsstate.NewStore(store).UpdateControlCAS(ctx, doc, next)
+	return err
+}
+
+func canaryOperationStatus(status schema.SagaStatus) schema.OperationStatus {
+	switch status {
+	case schema.SagaPending:
+		return schema.OperationPending
+	case schema.SagaRunning, schema.SagaCompensating:
+		return schema.OperationRunning
+	case schema.SagaSucceeded:
+		return schema.OperationSucceeded
+	case schema.SagaFailed:
+		return schema.OperationFailed
+	case schema.SagaCanceled:
+		return schema.OperationCanceled
+	default:
+		return schema.OperationRunning
+	}
 }
 
 func createAndMaybeRunStatefulOrdered(ctx context.Context, binary string, cfg config.Config, req templates.StatefulOrderedUpdateRequest, run bool) (*statefulOrderedSagaResult, error) {

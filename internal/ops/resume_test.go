@@ -72,6 +72,27 @@ func TestResumeOperationContinuesStoredASGRollout(t *testing.T) {
 	}
 }
 
+func TestListIncludesSagaBackedOperationsWithoutOperationControl(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	createSagaOperation(t, store, "saga_canary_failed", "payments-api", "prod", "op_canary_failed", schema.SagaFailed)
+
+	items, err := ops.NewStore(store).List(ctx, ops.ListOptions{Service: "payments-api", IncludeTerminal: true})
+	if err != nil {
+		t.Fatalf("list operations: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("operations = %d, want 1: %+v", len(items), items)
+	}
+	got := items[0]
+	if got.OperationID != "op_canary_failed" || got.Kind != "canary-deploy" || got.Status != schema.OperationFailed {
+		t.Fatalf("unexpected saga-backed operation summary: %+v", got)
+	}
+	if got.ControlKey == "" || got.IntentKey == "" {
+		t.Fatalf("saga-backed operation should carry object paths: %+v", got)
+	}
+}
+
 func createOperationIntent(t *testing.T, store objstore.ObjectStore, service, env, operationID, kind string, params any) {
 	t.Helper()
 	intent := schema.NewOperationIntent(operationID, service, env, kind, schema.Target{Kind: "service", Name: service}, schema.Actor{ID: "agent-one", Type: "agent"}, "tr_resume", canonical.Time(testNow()))
@@ -112,6 +133,38 @@ func createServiceControl(t *testing.T, store objstore.ObjectStore, service, env
 	createJSON(t, store, mustServiceControlKey(t, service), control)
 }
 
+func createSagaOperation(t *testing.T, store objstore.ObjectStore, sagaID, service, env, operationID string, status schema.SagaStatus) {
+	t.Helper()
+	now := canonical.Time(testNow())
+	intent := schema.SagaIntent{
+		SchemaVersion: schema.Version,
+		SagaID:        sagaID,
+		Kind:          "deployment.canary",
+		Target:        schema.Target{Kind: "service", Name: service},
+		Actor:         schema.Actor{ID: "agent-one", Type: "agent"},
+		TraceID:       "tr_resume",
+		Risk:          schema.RiskMedium,
+		Reversibility: schema.Compensatable,
+		Summary:       "canary deploy " + service,
+		CreatedAt:     now,
+		Params: rawJSON(t, map[string]string{
+			"service":      service,
+			"env":          env,
+			"operation_id": operationID,
+			"release_id":   "rel_canary",
+		}),
+	}
+	createJSON(t, store, mustSagaIntentKey(t, sagaID), intent)
+	control := schema.SagaControl{
+		SchemaVersion: schema.Version,
+		SagaID:        sagaID,
+		Status:        status,
+		UpdatedAt:     now,
+		TraceID:       "tr_resume",
+	}
+	createJSON(t, store, mustSagaControlKey(t, sagaID), control)
+}
+
 func readOperationControl(t *testing.T, store objstore.ObjectStore, service, operationID string) schema.OperationControl {
 	t.Helper()
 	obj, err := store.Get(context.Background(), mustOperationControlKey(t, service, operationID))
@@ -149,6 +202,15 @@ func createJSON(t *testing.T, store objstore.ObjectStore, key string, value any)
 	}
 }
 
+func rawJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	body, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
 func mustOperationIntentKey(t *testing.T, service, operationID string) string {
 	t.Helper()
 	key, err := paths.OperationIntent(service, operationID)
@@ -170,6 +232,24 @@ func mustOperationControlKey(t *testing.T, service, operationID string) string {
 func mustServiceControlKey(t *testing.T, service string) string {
 	t.Helper()
 	key, err := paths.ServiceControl(service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
+func mustSagaIntentKey(t *testing.T, sagaID string) string {
+	t.Helper()
+	key, err := paths.SagaIntent(sagaID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
+func mustSagaControlKey(t *testing.T, sagaID string) string {
+	t.Helper()
+	key, err := paths.SagaControl(sagaID)
 	if err != nil {
 		t.Fatal(err)
 	}

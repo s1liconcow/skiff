@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -57,6 +58,7 @@ func (s *Store) List(ctx context.Context, opts ListOptions) ([]Summary, error) {
 		return nil, err
 	}
 	out := make([]Summary, 0)
+	seen := make(map[string]struct{})
 	for _, meta := range metas {
 		service, operationID, ok := parseOperationControlKey(meta.Key)
 		if !ok {
@@ -78,7 +80,13 @@ func (s *Store) List(ctx context.Context, opts ListOptions) ([]Summary, error) {
 			summary.IntentKey = intent.Key
 		}
 		out = append(out, summary)
+		seen[operationKey(service, operationID)] = struct{}{}
 	}
+	sagaItems, err := s.listSagaOperationSummaries(ctx, opts, seen)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, sagaItems...)
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Service == out[j].Service {
 			if out[i].UpdatedAt == out[j].UpdatedAt {
@@ -90,6 +98,73 @@ func (s *Store) List(ctx context.Context, opts ListOptions) ([]Summary, error) {
 	})
 	if opts.Limit > 0 && opts.Limit < len(out) {
 		out = out[:opts.Limit]
+	}
+	return out, nil
+}
+
+func (s *Store) listSagaOperationSummaries(ctx context.Context, opts ListOptions, seen map[string]struct{}) ([]Summary, error) {
+	metas, err := s.store.List(ctx, "sagas/", objstore.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Summary, 0)
+	for _, meta := range metas {
+		sagaID, ok := parseSagaIntentKey(meta.Key)
+		if !ok {
+			continue
+		}
+		intentObj, err := s.store.Get(ctx, meta.Key)
+		if err != nil {
+			return nil, err
+		}
+		var intent schema.SagaIntent
+		if err := canonical.UnmarshalStrict(intentObj.Body, &intent); err != nil {
+			return nil, fmt.Errorf("decode saga intent %q: %w", meta.Key, err)
+		}
+		params := sagaOperationParams(intent)
+		if params.OperationID == "" {
+			continue
+		}
+		service := firstNonEmpty(params.Service, intent.Target.Name)
+		if service == "" {
+			continue
+		}
+		if opts.Service != "" && service != opts.Service {
+			continue
+		}
+		key := operationKey(service, params.OperationID)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		controlKey, err := paths.SagaControl(sagaID)
+		if err != nil {
+			return nil, err
+		}
+		controlObj, err := s.store.Get(ctx, controlKey)
+		if err != nil {
+			return nil, err
+		}
+		var control schema.SagaControl
+		if err := canonical.UnmarshalStrict(controlObj.Body, &control); err != nil {
+			return nil, fmt.Errorf("decode saga control %q: %w", controlKey, err)
+		}
+		status := operationStatusFromSaga(control.Status)
+		if !opts.IncludeTerminal && terminalStatus(status) {
+			continue
+		}
+		out = append(out, Summary{
+			OperationID: params.OperationID,
+			Service:     service,
+			Env:         params.Env,
+			Kind:        operationKindFromSaga(intent.Kind),
+			Status:      status,
+			UpdatedAt:   control.UpdatedAt,
+			TraceID:     firstNonEmpty(control.TraceID, intent.TraceID),
+			Resumable:   status == schema.OperationPending || status == schema.OperationRunning,
+			ControlKey:  controlKey,
+			IntentKey:   meta.Key,
+		})
+		seen[key] = struct{}{}
 	}
 	return out, nil
 }
@@ -260,6 +335,50 @@ func terminalStatus(status schema.OperationStatus) bool {
 	}
 }
 
+func operationStatusFromSaga(status schema.SagaStatus) schema.OperationStatus {
+	switch status {
+	case schema.SagaPending:
+		return schema.OperationPending
+	case schema.SagaRunning, schema.SagaCompensating:
+		return schema.OperationRunning
+	case schema.SagaSucceeded:
+		return schema.OperationSucceeded
+	case schema.SagaFailed:
+		return schema.OperationFailed
+	case schema.SagaCanceled:
+		return schema.OperationCanceled
+	default:
+		return schema.OperationRunning
+	}
+}
+
+func operationKindFromSaga(kind string) string {
+	switch kind {
+	case "deployment.canary":
+		return "canary-deploy"
+	default:
+		return kind
+	}
+}
+
+func sagaOperationParams(intent schema.SagaIntent) struct {
+	Service     string `json:"service"`
+	Env         string `json:"env"`
+	OperationID string `json:"operation_id"`
+} {
+	var params struct {
+		Service     string `json:"service"`
+		Env         string `json:"env"`
+		OperationID string `json:"operation_id"`
+	}
+	_ = json.Unmarshal(intent.Params, &params)
+	return params
+}
+
+func operationKey(service, operationID string) string {
+	return service + "\x00" + operationID
+}
+
 func resumableControl(control schema.OperationControl) bool {
 	return !terminalStatus(control.Status) && len(control.ProviderOperations) > 0
 }
@@ -273,6 +392,14 @@ func parseOperationControlKey(key string) (string, string, bool) {
 		return "", "", false
 	}
 	return parts[1], parts[3], true
+}
+
+func parseSagaIntentKey(key string) (string, bool) {
+	parts := strings.Split(key, "/")
+	if len(parts) != 3 || parts[0] != "sagas" || parts[2] != "intent.json" || parts[1] == "" {
+		return "", false
+	}
+	return parts[1], true
 }
 
 func objectMetaFromObject(obj *objstore.Object) objstore.ObjectMeta {
