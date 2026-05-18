@@ -58,8 +58,8 @@ func TestReplaceMemberFencesBeforeReattachingVolume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list audit records: %v", err)
 	}
-	if len(metas) != 2 {
-		t.Fatalf("audit record count = %d, want 2", len(metas))
+	if len(metas) != 7 {
+		t.Fatalf("audit record count = %d, want 7", len(metas))
 	}
 	for _, meta := range metas {
 		object, err := store.Get(ctx, meta.Key)
@@ -73,6 +73,13 @@ func TestReplaceMemberFencesBeforeReattachingVolume(t *testing.T) {
 		if record.Action != "stateful.replace_member" || record.Target.Kind != "stateful-member" || record.Target.Name != "postgres/0" || record.Risk != schema.RiskHigh || record.TraceID != "tr_replace" {
 			t.Fatalf("unexpected audit record: %+v", record)
 		}
+	}
+	eventMetas, err := store.List(ctx, "services/postgres/operations/op_replace/events/", objstore.ListOptions{})
+	if err != nil {
+		t.Fatalf("list replacement events: %v", err)
+	}
+	if len(eventMetas) != 7 {
+		t.Fatalf("replacement event count = %d, want 7", len(eventMetas))
 	}
 }
 

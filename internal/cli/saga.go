@@ -71,6 +71,12 @@ type statefulOrderedSagaOutput struct {
 	Result  statefulOrderedSagaResult `json:"result"`
 }
 
+type statefulReplacementSagaOutput struct {
+	OK      bool                          `json:"ok"`
+	TraceID string                        `json:"trace_id,omitempty"`
+	Result  statefulReplacementSagaResult `json:"result"`
+}
+
 type statefulOrderedSagaResult struct {
 	SagaID       string                     `json:"saga_id"`
 	OperationID  string                     `json:"operation_id,omitempty"`
@@ -83,6 +89,23 @@ type statefulOrderedSagaResult struct {
 	CurrentSteps []string                   `json:"current_steps,omitempty"`
 	Execution    *sagastate.ExecutionResult `json:"execution,omitempty"`
 	Inspect      *sagastate.InspectResult   `json:"inspect,omitempty"`
+}
+
+type statefulReplacementSagaResult struct {
+	SagaID             string                     `json:"saga_id"`
+	OperationID        string                     `json:"operation_id,omitempty"`
+	Group              string                     `json:"group"`
+	Env                string                     `json:"env,omitempty"`
+	Member             int                        `json:"member"`
+	Status             schema.SagaStatus          `json:"status"`
+	NextAction         string                     `json:"next_action,omitempty"`
+	CurrentSteps       []string                   `json:"current_steps,omitempty"`
+	Facts              []schema.Fact              `json:"facts,omitempty"`
+	Hypotheses         []schema.Fact              `json:"hypotheses,omitempty"`
+	RecommendedActions []recommendedAction        `json:"recommended_actions,omitempty"`
+	Execution          *sagastate.ExecutionResult `json:"execution,omitempty"`
+	Inspect            *sagastate.InspectResult   `json:"inspect,omitempty"`
+	Replacement        json.RawMessage            `json:"replacement,omitempty"`
 }
 
 var (
@@ -587,6 +610,43 @@ func createAndMaybeRunStatefulOrdered(ctx context.Context, binary string, cfg co
 	return &result, nil
 }
 
+func createAndMaybeRunStatefulReplacement(ctx context.Context, binary string, cfg config.Config, req templates.StatefulReplaceMemberRequest, run bool) (*statefulReplacementSagaResult, error) {
+	store, err := openSagaObjectStore(cfg)
+	if err != nil {
+		return nil, err
+	}
+	req = templates.NormalizeStatefulReplaceMemberRequest(req)
+	createReq, err := templates.StatefulReplaceMember(req)
+	if err != nil {
+		return nil, err
+	}
+	sagas := sagastate.NewStore(store)
+	if _, err := sagas.Create(ctx, createReq); err != nil {
+		return nil, err
+	}
+	var execution *sagastate.ExecutionResult
+	if run {
+		cloud, err := newSagaProvider(cfg, store)
+		if err != nil {
+			return nil, err
+		}
+		execution, err = (&sagastate.Executor{
+			Store: sagas,
+			Steps: builtin.New(builtin.Options{Store: store, Provider: cloud, Binary: binary}),
+			Owner: "skiff-cli",
+		}).Execute(ctx, req.SagaID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	inspect, err := sagas.Inspect(ctx, req.SagaID)
+	if err != nil {
+		return nil, err
+	}
+	result := statefulReplacementResultFromInspect(*inspect, execution)
+	return &result, nil
+}
+
 func orderedUpdateMembersFromControl(ctx context.Context, store objstore.ObjectStore, group string) ([]int, error) {
 	doc, err := state.NewClient(store).GetStatefulGroupControl(ctx, group)
 	if err != nil {
@@ -649,6 +709,29 @@ func writeStatefulOrderedSagaResult(binary, command, format, traceID string, res
 		return ExitSuccess
 	case "json":
 		if err := json.NewEncoder(stdout).Encode(statefulOrderedSagaOutput{OK: true, TraceID: traceID, Result: result}); err != nil {
+			fmt.Fprintf(stderr, "%s %s: %v\n", binary, command, err)
+			return ExitInternalError
+		}
+		return ExitSuccess
+	default:
+		return writeClientCommandError(binary, "saga", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
+	}
+}
+
+func writeStatefulReplacementSagaResult(binary, command, format, traceID string, result statefulReplacementSagaResult, stdout, stderr io.Writer) int {
+	switch format {
+	case "human", "text":
+		fmt.Fprintf(stdout, "stateful replacement saga %s status=%s\n", result.SagaID, result.Status)
+		fmt.Fprintf(stdout, "member: %s/%d\n", result.Group, result.Member)
+		if result.OperationID != "" {
+			fmt.Fprintf(stdout, "operation: %s\n", result.OperationID)
+		}
+		if result.NextAction != "" {
+			fmt.Fprintf(stdout, "next: %s\n", result.NextAction)
+		}
+		return ExitSuccess
+	case "json":
+		if err := json.NewEncoder(stdout).Encode(statefulReplacementSagaOutput{OK: true, TraceID: traceID, Result: result}); err != nil {
 			fmt.Fprintf(stderr, "%s %s: %v\n", binary, command, err)
 			return ExitInternalError
 		}
@@ -732,6 +815,81 @@ func statefulOrderedResultFromInspect(inspect sagastate.InspectResult, execution
 		result.NextAction = "resume"
 	}
 	return result
+}
+
+func statefulReplacementResultFromInspect(inspect sagastate.InspectResult, execution *sagastate.ExecutionResult) statefulReplacementSagaResult {
+	var params struct {
+		Group       string `json:"group"`
+		Env         string `json:"env"`
+		Member      int    `json:"member"`
+		OperationID string `json:"operation_id"`
+	}
+	_ = json.Unmarshal(inspect.Intent.Params, &params)
+	result := statefulReplacementSagaResult{
+		SagaID:       inspect.SagaID,
+		OperationID:  params.OperationID,
+		Group:        firstNonEmptyString(params.Group, inspect.Target.Name),
+		Env:          params.Env,
+		Member:       params.Member,
+		Status:       inspect.Status,
+		CurrentSteps: append([]string(nil), inspect.CurrentSteps...),
+		Facts: []schema.Fact{
+			{Type: "stateful_member", Message: fmt.Sprintf("%s/%d", firstNonEmptyString(params.Group, inspect.Target.Name), params.Member)},
+			{Type: "operation", Message: params.OperationID},
+		},
+		Execution: execution,
+		Inspect:   &inspect,
+	}
+	for _, ref := range inspect.Control.StepResults {
+		if ref.StepID == "replace-member" && len(ref.Result) > 0 {
+			result.Replacement = append(json.RawMessage(nil), ref.Result...)
+			mergeStatefulReplacementStepPayload(&result, ref.Result)
+		}
+	}
+	switch inspect.Status {
+	case schema.SagaSucceeded:
+		result.NextAction = "complete"
+	case schema.SagaFailed:
+		result.NextAction = "inspect_failure"
+	default:
+		result.NextAction = "resume"
+	}
+	result.RecommendedActions = statefulReplacementRecommendedActions(result)
+	return result
+}
+
+func mergeStatefulReplacementStepPayload(result *statefulReplacementSagaResult, raw json.RawMessage) {
+	var payload struct {
+		Facts      []schema.Fact `json:"facts"`
+		Hypotheses []schema.Fact `json:"hypotheses"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return
+	}
+	if len(payload.Facts) > 0 {
+		result.Facts = payload.Facts
+	}
+	if len(payload.Hypotheses) > 0 {
+		result.Hypotheses = payload.Hypotheses
+	}
+}
+
+func statefulReplacementRecommendedActions(result statefulReplacementSagaResult) []recommendedAction {
+	actions := []recommendedAction{
+		{ID: "inspect_stateful_member", Command: fmt.Sprintf("skiff stateful inspect %s --format json", result.Group), Mutating: false},
+		{ID: "inspect_saga", Command: fmt.Sprintf("skiff saga inspect %s --format json", result.SagaID), Mutating: false},
+	}
+	if result.Status != schema.SagaSucceeded {
+		actions = append(actions, recommendedAction{
+			ID:            "resume_replacement",
+			Command:       fmt.Sprintf("skiff stateful resume %s --format json", result.SagaID),
+			Mutating:      true,
+			Safety:        "resumes from durable replacement progress",
+			Reversibility: schema.Compensatable,
+			Risk:          schema.RiskHigh,
+		})
+	}
+	return actions
 }
 
 func canaryProgressFromStep(ref schema.StepResultRef) (int, string, string) {

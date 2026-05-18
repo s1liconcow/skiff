@@ -216,6 +216,99 @@ func TestSagaStartStatefulOrderedUpdateDirectJSON(t *testing.T) {
 	}
 }
 
+func TestStatefulReplaceMemberDirectJSONCreatesAndRunsSaga(t *testing.T) {
+	clearSkiffEnv(t)
+	dir := t.TempDir()
+	store, err := file.New(dir)
+	if err != nil {
+		t.Fatalf("new file store: %v", err)
+	}
+	client := state.NewClient(store)
+	if _, err := client.CreateStatefulGroupControl(context.Background(), schema.StatefulGroupControl{
+		Group: "orders-stream",
+		Env:   "prod",
+		Members: []schema.StatefulMemberSummary{
+			{Member: 0, Generation: 1, InstanceID: "i-old", VolumeID: "vol-0", DNSName: "orders-stream-0.internal", Phase: state.StatefulMemberReady},
+		},
+		Replicas:  1,
+		UpdatedBy: schema.Actor{ID: "seed", Type: "test"},
+	}); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if _, err := client.CreateStatefulMemberControl(context.Background(), schema.StatefulMemberControl{
+		Group:      "orders-stream",
+		Env:        "prod",
+		Member:     0,
+		Zone:       "us-west-2a",
+		InstanceID: "i-old",
+		VolumeID:   "vol-0",
+		DNSName:    "orders-stream-0.internal",
+		Generation: 1,
+		Phase:      state.StatefulMemberReady,
+		UpdatedBy:  schema.Actor{ID: "seed", Type: "test"},
+	}); err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"stateful", "replace-member", "orders-stream",
+		"--member", "0",
+		"--yes",
+		"--direct",
+		"--state", "file://" + dir,
+		"--env", "prod",
+		"--provider", "fake",
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", "tr_stateful_replace_cli",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	var got statefulReplacementSagaOutput
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("stateful replacement output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_stateful_replace_cli" || got.Result.Status != schema.SagaSucceeded || got.Result.Group != "orders-stream" || got.Result.Member != 0 {
+		t.Fatalf("unexpected replacement output: %+v", got)
+	}
+	member, err := client.GetStatefulMemberControl(context.Background(), "orders-stream", 0)
+	if err != nil {
+		t.Fatalf("get member: %v", err)
+	}
+	if member.Control.InstanceID != "fake-orders-stream-0-gen-2" || member.Control.Generation != 2 || member.Control.Phase != state.StatefulMemberReady {
+		t.Fatalf("member was not replaced by CLI saga: %+v", member.Control)
+	}
+}
+
+func TestStatefulReplaceMemberProdRequiresApproval(t *testing.T) {
+	clearSkiffEnv(t)
+	dir := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"stateful", "replace-member", "orders-stream",
+		"--member", "0",
+		"--direct",
+		"--state", "file://" + dir,
+		"--env", "prod",
+		"--provider", "fake",
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", "tr_stateful_replace_approval",
+	}, &stdout, &stderr)
+	if code != ExitPolicyDenied {
+		t.Fatalf("exit code = %d, want %d; stderr = %s stdout = %s", code, ExitPolicyDenied, stderr.String(), stdout.String())
+	}
+	var got commandErrorOutput
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("approval output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if got.Code != "APPROVAL_REQUIRED" || len(got.RecommendedActions) != 1 || !got.RecommendedActions[0].Mutating || got.RecommendedActions[0].Risk != schema.RiskHigh {
+		t.Fatalf("unexpected approval output: %+v", got)
+	}
+}
+
 func TestSagaWatchDirectModeStreamsSagaEvents(t *testing.T) {
 	clearSkiffEnv(t)
 	dir := t.TempDir()

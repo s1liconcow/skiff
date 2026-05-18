@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/s1liconcow/skiff/internal/objstore/memory"
+	"github.com/s1liconcow/skiff/internal/provider"
 	sagastate "github.com/s1liconcow/skiff/internal/saga"
 	"github.com/s1liconcow/skiff/internal/saga/steps"
 	statefulsteps "github.com/s1liconcow/skiff/internal/saga/steps/stateful"
@@ -130,6 +131,86 @@ func TestOrderedUpdateMarksMemberFailedOnRecipeFailure(t *testing.T) {
 	}
 }
 
+func TestReplaceMemberExecutorPersistsProviderProgress(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	seedStatefulControls(t, ctx, store, []schema.StatefulMemberSummary{memberSummary(0, state.StatefulMemberReady)})
+	createReq := replaceMemberCreateRequest(t)
+	sagas := sagastate.NewStore(store)
+	if _, err := sagas.Create(ctx, createReq); err != nil {
+		t.Fatalf("create saga: %v", err)
+	}
+	fake := &fakeStatefulOps{replacementID: "i-new"}
+	result, err := (&sagastate.Executor{
+		Store: sagas,
+		Steps: stepMap(statefulsteps.NewWithProvider(store, fake, nil)),
+		Owner: "test",
+	}).Execute(ctx, "saga_stateful_replace")
+	if err != nil {
+		t.Fatalf("execute saga: %v", err)
+	}
+	if result.Status != schema.SagaSucceeded {
+		t.Fatalf("unexpected execution result: %+v", result)
+	}
+	if !reflect.DeepEqual(fake.calls, []string{"fence", "detach", "launch", "attach", "dns"}) {
+		t.Fatalf("provider call order = %v", fake.calls)
+	}
+	client := state.NewClient(store)
+	member, err := client.GetStatefulMemberControl(ctx, "orders-stream", 0)
+	if err != nil {
+		t.Fatalf("get member: %v", err)
+	}
+	if member.Control.InstanceID != "i-new" || member.Control.Generation != 2 || member.Control.Phase != state.StatefulMemberReady || member.Control.Lease != nil {
+		t.Fatalf("member was not replaced safely: %+v", member.Control)
+	}
+	if len(member.Control.ProviderOperations) != 5 {
+		t.Fatalf("provider ops = %d, want 5", len(member.Control.ProviderOperations))
+	}
+	group, err := client.GetStatefulGroupControl(ctx, "orders-stream")
+	if err != nil {
+		t.Fatalf("get group: %v", err)
+	}
+	if group.Control.Members[0].InstanceID != "i-new" || group.Control.Members[0].Generation != 2 {
+		t.Fatalf("group summary was not updated: %+v", group.Control.Members)
+	}
+}
+
+func TestReplaceMemberExecutorClassifiesProviderFailure(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	seedStatefulControls(t, ctx, store, []schema.StatefulMemberSummary{memberSummary(0, state.StatefulMemberReady)})
+	sagas := sagastate.NewStore(store)
+	if _, err := sagas.Create(ctx, replaceMemberCreateRequest(t)); err != nil {
+		t.Fatalf("create saga: %v", err)
+	}
+	fake := &fakeStatefulOps{replacementID: "i-new", failAttach: true}
+	result, err := (&sagastate.Executor{
+		Store: sagas,
+		Steps: stepMap(statefulsteps.NewWithProvider(store, fake, nil)),
+		Owner: "test",
+	}).Execute(ctx, "saga_stateful_replace")
+	if err != nil {
+		t.Fatalf("execute saga: %v", err)
+	}
+	if result.Status != schema.SagaFailed || result.FailedStep != "replace-member" {
+		t.Fatalf("unexpected execution result: %+v", result)
+	}
+	inspect, err := sagas.Inspect(ctx, "saga_stateful_replace")
+	if err != nil {
+		t.Fatalf("inspect saga: %v", err)
+	}
+	if len(inspect.Control.StepResults) != 1 || inspect.Control.StepResults[0].Failure == nil || inspect.Control.StepResults[0].Failure.Code != "STATEFUL_PROVIDER_ERROR" {
+		t.Fatalf("unexpected failure ref: %+v", inspect.Control.StepResults)
+	}
+	member, err := state.NewClient(store).GetStatefulMemberControl(ctx, "orders-stream", 0)
+	if err != nil {
+		t.Fatalf("get member: %v", err)
+	}
+	if member.Control.Replacement == nil || member.Control.Replacement.NewInstanceID != "i-new" || member.Control.Replacement.AttachedAt != "" || member.Control.InstanceID != "i-old" {
+		t.Fatalf("failed replacement progress is not resumable: %+v", member.Control)
+	}
+}
+
 func orderedUpdateCreateRequest(t *testing.T, members []int) sagastate.CreateRequest {
 	t.Helper()
 	req, err := templates.StatefulOrderedUpdate(templates.StatefulOrderedUpdateRequest{
@@ -149,6 +230,25 @@ func orderedUpdateCreateRequest(t *testing.T, members []int) sagastate.CreateReq
 	})
 	if err != nil {
 		t.Fatalf("StatefulOrderedUpdate: %v", err)
+	}
+	return req
+}
+
+func replaceMemberCreateRequest(t *testing.T) sagastate.CreateRequest {
+	t.Helper()
+	req, err := templates.StatefulReplaceMember(templates.StatefulReplaceMemberRequest{
+		SagaID:      "saga_stateful_replace",
+		OperationID: "op_stateful_replace",
+		Group:       "orders-stream",
+		Env:         "prod",
+		Member:      0,
+		Reason:      "member failed health checks",
+		TraceID:     "tr_stateful_replace",
+		Actor:       schema.Actor{ID: "agent-one", Type: "agent"},
+		CreatedAt:   time.Date(2026, 5, 18, 3, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("StatefulReplaceMember: %v", err)
 	}
 	return req
 }
@@ -244,4 +344,47 @@ func (r *recordingRecipe) record(ctx context.Context, req stateruntime.RecipeReq
 
 func callName(req stateruntime.RecipeRequest, hook string) string {
 	return fmt.Sprintf("%d:%s", req.Member, hook)
+}
+
+type fakeStatefulOps struct {
+	replacementID string
+	failAttach    bool
+	calls         []string
+}
+
+func (f *fakeStatefulOps) FenceInstance(ctx context.Context, req provider.FenceInstanceRequest) (*provider.FenceInstanceResult, error) {
+	f.calls = append(f.calls, "fence")
+	return &provider.FenceInstanceResult{ProviderOperation: f.op("fence-instance", "fence/"+req.InstanceID), FencedAt: time.Now().UTC()}, ctx.Err()
+}
+
+func (f *fakeStatefulOps) DetachVolume(ctx context.Context, req provider.DetachVolumeRequest) (*provider.VolumeAttachmentResult, error) {
+	f.calls = append(f.calls, "detach")
+	return &provider.VolumeAttachmentResult{ProviderOperation: f.op("detach-volume", "detach/"+req.VolumeID), VolumeID: req.VolumeID, InstanceID: req.InstanceID, CompletedAt: time.Now().UTC()}, ctx.Err()
+}
+
+func (f *fakeStatefulOps) LaunchReplacement(ctx context.Context, req provider.LaunchReplacementRequest) (*provider.ReplacementInstance, error) {
+	f.calls = append(f.calls, "launch")
+	return &provider.ReplacementInstance{ProviderOperation: f.op("launch-replacement", "launch/"+f.replacementID), InstanceID: f.replacementID, Zone: req.Zone, LaunchedAt: time.Now().UTC()}, ctx.Err()
+}
+
+func (f *fakeStatefulOps) AttachVolume(ctx context.Context, req provider.AttachVolumeRequest) (*provider.VolumeAttachmentResult, error) {
+	f.calls = append(f.calls, "attach")
+	if f.failAttach {
+		return nil, &provider.Error{Code: provider.CodeProvider, Provider: "fake", Op: "attach_volume", Summary: "attach failed"}
+	}
+	return &provider.VolumeAttachmentResult{ProviderOperation: f.op("attach-volume", "attach/"+req.VolumeID), VolumeID: req.VolumeID, InstanceID: req.InstanceID, CompletedAt: time.Now().UTC()}, ctx.Err()
+}
+
+func (f *fakeStatefulOps) UpdateMemberDNS(ctx context.Context, req provider.UpdateMemberDNSRequest) (*provider.DNSUpdateResult, error) {
+	f.calls = append(f.calls, "dns")
+	return &provider.DNSUpdateResult{ProviderOperation: f.op("update-member-dns", "dns/"+req.DNSName), DNSName: req.DNSName, UpdatedAt: time.Now().UTC()}, ctx.Err()
+}
+
+func (f *fakeStatefulOps) SnapshotVolume(ctx context.Context, req provider.SnapshotVolumeRequest) (*provider.VolumeSnapshot, error) {
+	f.calls = append(f.calls, "snapshot")
+	return &provider.VolumeSnapshot{ProviderOperation: f.op("snapshot-volume", "snapshot/"+req.VolumeID), SnapshotID: "snap-123", VolumeID: req.VolumeID, CreatedAt: time.Now().UTC()}, ctx.Err()
+}
+
+func (f *fakeStatefulOps) op(kind, id string) schema.ProviderOperationRef {
+	return schema.ProviderOperationRef{Provider: "fake", Kind: kind, ID: id}
 }

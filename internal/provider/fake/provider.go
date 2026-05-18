@@ -401,6 +401,101 @@ func (p *Provider) Rollback(ctx context.Context, req provider.RollbackRequest) (
 	return &rollout, nil
 }
 
+func (p *Provider) FenceInstance(ctx context.Context, req provider.FenceInstanceRequest) (*provider.FenceInstanceResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.InstanceID) == "" {
+		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "fence_instance", Summary: "instance ID is required"}
+	}
+	now := p.now()
+	return &provider.FenceInstanceResult{
+		ProviderOperation: p.statefulOperation("fence-instance", "fence/"+req.InstanceID, "fenced fake stateful instance "+req.InstanceID, now),
+		FencedAt:          now,
+	}, nil
+}
+
+func (p *Provider) DetachVolume(ctx context.Context, req provider.DetachVolumeRequest) (*provider.VolumeAttachmentResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.VolumeID) == "" {
+		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "detach_volume", Summary: "volume ID is required"}
+	}
+	now := p.now()
+	return &provider.VolumeAttachmentResult{
+		ProviderOperation: p.statefulOperation("detach-volume", "detach/"+req.VolumeID, "detached fake stateful volume "+req.VolumeID, now),
+		VolumeID:          req.VolumeID,
+		InstanceID:        req.InstanceID,
+		CompletedAt:       now,
+	}, nil
+}
+
+func (p *Provider) LaunchReplacement(ctx context.Context, req provider.LaunchReplacementRequest) (*provider.ReplacementInstance, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if req.Generation <= 0 {
+		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "launch_replacement", Summary: "generation must be positive"}
+	}
+	now := p.now()
+	instanceID := "fake-" + pathSafeResourceName(fmt.Sprintf("%s-%d-gen-%d", req.Ref.Group, req.Ref.Member, req.Generation))
+	return &provider.ReplacementInstance{
+		ProviderOperation: p.statefulOperation("launch-replacement", "run-instances/"+instanceID, "launched fake replacement stateful instance "+instanceID, now),
+		InstanceID:        instanceID,
+		Zone:              req.Zone,
+		LaunchedAt:        now,
+	}, nil
+}
+
+func (p *Provider) AttachVolume(ctx context.Context, req provider.AttachVolumeRequest) (*provider.VolumeAttachmentResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.InstanceID) == "" || strings.TrimSpace(req.VolumeID) == "" {
+		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "attach_volume", Summary: "instance ID and volume ID are required"}
+	}
+	now := p.now()
+	return &provider.VolumeAttachmentResult{
+		ProviderOperation: p.statefulOperation("attach-volume", "attach/"+req.VolumeID+"/"+req.InstanceID, "attached fake stateful volume "+req.VolumeID, now),
+		VolumeID:          req.VolumeID,
+		InstanceID:        req.InstanceID,
+		CompletedAt:       now,
+	}, nil
+}
+
+func (p *Provider) UpdateMemberDNS(ctx context.Context, req provider.UpdateMemberDNSRequest) (*provider.DNSUpdateResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.DNSName) == "" || strings.TrimSpace(req.InstanceID) == "" {
+		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "update_member_dns", Summary: "DNS name and instance ID are required"}
+	}
+	now := p.now()
+	return &provider.DNSUpdateResult{
+		ProviderOperation: p.statefulOperation("update-member-dns", "dns/"+req.DNSName, "updated fake stateful DNS "+req.DNSName, now),
+		DNSName:           req.DNSName,
+		UpdatedAt:         now,
+	}, nil
+}
+
+func (p *Provider) SnapshotVolume(ctx context.Context, req provider.SnapshotVolumeRequest) (*provider.VolumeSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.VolumeID) == "" {
+		return nil, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "snapshot_volume", Summary: "volume ID is required"}
+	}
+	now := p.now()
+	snapshotID := "snap-" + pathSafeResourceName(req.VolumeID)
+	return &provider.VolumeSnapshot{
+		ProviderOperation: p.statefulOperation("snapshot-volume", "snapshot/"+snapshotID, "created fake stateful volume snapshot "+snapshotID, now),
+		SnapshotID:        snapshotID,
+		VolumeID:          req.VolumeID,
+		CreatedAt:         now,
+	}, nil
+}
+
 func (p *Provider) ShiftTraffic(ctx context.Context, req provider.TrafficShiftRequest) (*provider.TrafficShiftResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -804,6 +899,16 @@ func pathSafeResourceName(value string) string {
 		return "resource"
 	}
 	return out
+}
+
+func (p *Provider) statefulOperation(kind, id, description string, observedAt time.Time) schema.ProviderOperationRef {
+	return schema.ProviderOperationRef{
+		Provider:    Name,
+		Kind:        kind,
+		ID:          id,
+		ObservedAt:  canonical.Time(observedAt),
+		Description: description,
+	}
 }
 
 func firstNonEmpty(values ...string) string {

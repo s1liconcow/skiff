@@ -10,6 +10,7 @@ import (
 
 	"github.com/s1liconcow/skiff/internal/events"
 	"github.com/s1liconcow/skiff/internal/objstore"
+	"github.com/s1liconcow/skiff/internal/provider"
 	"github.com/s1liconcow/skiff/internal/saga/steps"
 	"github.com/s1liconcow/skiff/internal/state"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
@@ -21,6 +22,7 @@ const (
 	KindOrderedUpdatePlan     = "stateful.ordered_update.plan"
 	KindOrderedMemberUpdate   = "stateful.member.ordered_update"
 	KindOrderedUpdateComplete = "stateful.ordered_update.complete"
+	KindReplaceMember         = "stateful.member.replace"
 )
 
 type OrderedUpdateParams struct {
@@ -35,6 +37,16 @@ type OrderedUpdateParams struct {
 	MaxUnavailable     int          `json:"max_unavailable,omitempty"`
 	Recipe             string       `json:"recipe,omitempty"`
 	Actor              schema.Actor `json:"actor,omitempty"`
+}
+
+type ReplaceMemberParams struct {
+	SagaID      string       `json:"saga_id,omitempty"`
+	OperationID string       `json:"operation_id"`
+	Group       string       `json:"group"`
+	Env         string       `json:"env,omitempty"`
+	Member      int          `json:"member"`
+	Reason      string       `json:"reason,omitempty"`
+	Actor       schema.Actor `json:"actor,omitempty"`
 }
 
 type PlanOrderedUpdate struct {
@@ -55,12 +67,106 @@ type CompleteOrderedUpdate struct {
 	Clock func() time.Time
 }
 
+type ReplaceMember struct {
+	Store    objstore.ObjectStore
+	Provider provider.StatefulOperations
+	Recipe   stateruntime.Recipe
+	Clock    func() time.Time
+	LeaseTTL time.Duration
+}
+
 func New(store objstore.ObjectStore, recipe stateruntime.Recipe) []steps.Step {
+	return NewWithProvider(store, nil, recipe)
+}
+
+func NewWithProvider(store objstore.ObjectStore, statefulProvider provider.StatefulOperations, recipe stateruntime.Recipe) []steps.Step {
 	return []steps.Step{
 		PlanOrderedUpdate{Store: store},
 		OrderedMemberUpdate{Store: store, Recipe: recipe},
 		CompleteOrderedUpdate{Store: store},
+		ReplaceMember{Store: store, Provider: statefulProvider, Recipe: recipe},
 	}
+}
+
+func (ReplaceMember) Kind() string { return KindReplaceMember }
+
+func (s ReplaceMember) ValidateParams(ctx context.Context, params json.RawMessage) error {
+	_, err := decodeReplaceParams(params)
+	return err
+}
+
+func (s ReplaceMember) Plan(ctx context.Context, req steps.StepRequest) (*steps.StepPlan, error) {
+	return &steps.StepPlan{Summary: "replace one stateful member after explicit provider fencing", Risk: schema.RiskHigh, Reversibility: schema.Compensatable}, nil
+}
+
+func (s ReplaceMember) Run(ctx context.Context, req steps.StepRequest) (*steps.StepResult, error) {
+	params, err := decodeReplaceParams(req.Node.Params)
+	if err != nil {
+		return nil, err
+	}
+	params.SagaID = firstNonEmpty(params.SagaID, req.SagaID)
+	actor := actorOrDefault(params.Actor, req.Intent.Actor)
+	if s.Store == nil {
+		return nil, errors.New("stateful replacement step requires object store")
+	}
+	if s.Provider == nil {
+		return replacementFailed(params, "STATEFUL_PROVIDER_UNSUPPORTED", "stateful provider does not implement replacement lifecycle operations", nil), nil
+	}
+	log, err := events.NewLog(events.Options{Store: s.Store, Clock: s.Clock})
+	if err != nil {
+		return nil, err
+	}
+	result, err := (stateruntime.ReplacementRunner{
+		Store:    state.NewClient(s.Store, state.WithClock(stateClock(s.Clock))),
+		Provider: s.Provider,
+		Recipe:   s.Recipe,
+		Audit:    log,
+		EventLog: log,
+		Owner:    "saga:" + req.SagaID + ":stateful-replace-member",
+		LeaseTTL: leaseTTL(s.LeaseTTL),
+	}).Replace(ctx, stateruntime.ReplaceMemberRequest{
+		Group:       params.Group,
+		Env:         params.Env,
+		Member:      params.Member,
+		OperationID: params.OperationID,
+		SagaID:      params.SagaID,
+		TraceID:     req.TraceID,
+		Actor:       actor,
+		Reason:      params.Reason,
+	})
+	if err != nil {
+		code, summary := classifyReplaceError(err)
+		return replacementFailed(params, code, summary, err), nil
+	}
+	payload := replacementResultPayload(params, result, nil)
+	return &steps.StepResult{
+		Status:             steps.StatusSucceeded,
+		Summary:            fmt.Sprintf("replaced stateful member %s/%d", result.Group, result.Member),
+		Result:             rawJSON(payload),
+		ProviderOperations: append([]schema.ProviderOperationRef(nil), result.ProviderOperations...),
+	}, nil
+}
+
+func (s ReplaceMember) Resume(ctx context.Context, req steps.StepRequest) (*steps.StepResult, error) {
+	return s.Run(ctx, req)
+}
+
+func (s ReplaceMember) Compensate(ctx context.Context, req steps.StepRequest, result schema.StepResult) (*steps.StepResult, error) {
+	params, _ := decodeReplaceParams(req.Node.Params)
+	return &steps.StepResult{
+		Status:  steps.StatusSucceeded,
+		Summary: "stateful member replacement compensation requires explicit follow-up",
+		Result: rawJSON(map[string]any{
+			"group":        params.Group,
+			"member":       params.Member,
+			"operation_id": params.OperationID,
+			"summary":      "replacement fencing and volume attachment are not automatically reversed",
+		}),
+	}, nil
+}
+
+func (s ReplaceMember) Doctor(ctx context.Context, req steps.StepRequest) ([]steps.Finding, error) {
+	return nil, nil
 }
 
 func (PlanOrderedUpdate) Kind() string { return KindOrderedUpdatePlan }
@@ -376,6 +482,23 @@ func decodeOrderedParams(raw json.RawMessage, requireMember bool) (OrderedUpdate
 	return params, nil
 }
 
+func decodeReplaceParams(raw json.RawMessage) (ReplaceMemberParams, error) {
+	var params ReplaceMemberParams
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return params, err
+	}
+	if params.Group == "" {
+		return params, errors.New("stateful group is required")
+	}
+	if params.Member < 0 {
+		return params, errors.New("member ordinal must be non-negative")
+	}
+	if params.OperationID == "" {
+		return params, errors.New("operation ID is required")
+	}
+	return params, nil
+}
+
 func enforceMaxUnavailable(ctx context.Context, client *state.Client, params OrderedUpdateParams) error {
 	group, err := client.GetStatefulGroupControl(ctx, params.Group)
 	if err != nil {
@@ -461,6 +584,103 @@ func orderedMemberResult(params OrderedUpdateParams, control schema.StatefulMemb
 	}
 }
 
+func replacementResultPayload(params ReplaceMemberParams, result *stateruntime.ReplaceMemberResult, failure *schema.StepFailure) map[string]any {
+	payload := map[string]any{
+		"group":        params.Group,
+		"env":          params.Env,
+		"member":       params.Member,
+		"operation_id": params.OperationID,
+		"saga_id":      params.SagaID,
+		"facts": []schema.Fact{
+			{Type: "stateful_member", Message: fmt.Sprintf("%s/%d", params.Group, params.Member)},
+			{Type: "operation", Message: params.OperationID},
+		},
+		"recommended_actions": replacementRecommendedActions(params, failure),
+	}
+	if result != nil {
+		payload["env"] = result.Env
+		payload["generation"] = result.Generation
+		payload["old_instance_id"] = result.OldInstanceID
+		payload["new_instance_id"] = result.NewInstanceID
+		payload["volume_id"] = result.VolumeID
+		payload["dns_name"] = result.DNSName
+		payload["provider_operations"] = append([]schema.ProviderOperationRef(nil), result.ProviderOperations...)
+		payload["phase"] = result.Phase
+	}
+	if failure != nil {
+		payload["failure"] = failure
+		payload["hypotheses"] = []schema.Fact{{Type: "replacement_incomplete", Message: "member control records the last durable provider step; resume the saga after the underlying issue is corrected"}}
+	}
+	return payload
+}
+
+func replacementRecommendedActions(params ReplaceMemberParams, failure *schema.StepFailure) []map[string]any {
+	sagaID := params.SagaID
+	if sagaID == "" {
+		sagaID = "<saga-id>"
+	}
+	actions := []map[string]any{
+		{"id": "inspect_stateful_member", "command": fmt.Sprintf("skiff stateful inspect %s --format json", params.Group), "mutating": false},
+		{"id": "inspect_saga", "command": fmt.Sprintf("skiff saga inspect %s --format json", sagaID), "mutating": false},
+	}
+	if failure != nil {
+		actions = append(actions, map[string]any{
+			"id":            "resume_replacement",
+			"command":       fmt.Sprintf("skiff stateful resume %s --format json", sagaID),
+			"mutating":      true,
+			"risk":          schema.RiskHigh,
+			"reversibility": schema.Compensatable,
+			"safety":        "resumes from durable member replacement progress",
+		})
+	}
+	return actions
+}
+
+func replacementFailed(params ReplaceMemberParams, code, summary string, cause error) *steps.StepResult {
+	failure := &schema.StepFailure{Code: code, Summary: summary, Cause: causeString(cause), Retriable: replacementFailureRetriable(code)}
+	return &steps.StepResult{
+		Status:  steps.StatusFailed,
+		Summary: summary,
+		Failure: failure,
+		Result:  rawJSON(replacementResultPayload(params, nil, failure)),
+	}
+}
+
+func classifyReplaceError(err error) (string, string) {
+	switch {
+	case errors.Is(err, state.ErrLeaseHeld):
+		return string(state.CodeLeaseHeld), err.Error()
+	case errors.Is(err, state.ErrLeaseLost):
+		return string(state.CodeLeaseLost), err.Error()
+	case errors.Is(err, state.ErrPreconditionFailed):
+		return string(state.CodePreconditionFailed), err.Error()
+	}
+	var providerErr *provider.Error
+	if errors.As(err, &providerErr) {
+		if providerErr.Code == provider.CodeUnsupported {
+			return "STATEFUL_PROVIDER_UNSUPPORTED", err.Error()
+		}
+		return "STATEFUL_PROVIDER_ERROR", err.Error()
+	}
+	return "STATEFUL_REPLACE_FAILED", err.Error()
+}
+
+func replacementFailureRetriable(code string) bool {
+	switch code {
+	case string(state.CodeLeaseHeld), string(state.CodePreconditionFailed), "STATEFUL_PROVIDER_ERROR":
+		return true
+	default:
+		return false
+	}
+}
+
+func causeString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
 func actorOrDefault(actor, fallback schema.Actor) schema.Actor {
 	if actor.ID == "" {
 		actor = fallback
@@ -500,6 +720,15 @@ func (c stepClock) Now() time.Time {
 
 func stateClock(clock func() time.Time) state.Clock {
 	return stepClock(clockFunc(clock))
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func succeeded(summary string, result any) (*steps.StepResult, error) {

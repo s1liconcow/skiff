@@ -70,6 +70,39 @@ func TestStatefulOrderedUpdateRequiresMembersFromControl(t *testing.T) {
 	}
 }
 
+func TestStatefulReplaceMemberBuildsExecutableHighRiskGraph(t *testing.T) {
+	req, err := templates.StatefulReplaceMember(templates.StatefulReplaceMemberRequest{
+		SagaID:      "saga_replace",
+		OperationID: "op_replace",
+		Group:       "orders-stream",
+		Env:         "prod",
+		Member:      0,
+		Reason:      "instance failed health checks",
+		TraceID:     "tr_replace",
+		Actor:       schema.Actor{ID: "operator", Type: "user"},
+		CreatedAt:   time.Date(2026, 5, 18, 3, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("StatefulReplaceMember returned error: %v", err)
+	}
+	if req.Intent.Kind != templates.StatefulReplaceMemberKind || req.Intent.Risk != schema.RiskHigh || req.Intent.Reversibility != schema.Compensatable {
+		t.Fatalf("unexpected intent: %+v", req.Intent)
+	}
+	if len(req.Graph.Nodes) != 1 {
+		t.Fatalf("node count = %d, want 1", len(req.Graph.Nodes))
+	}
+	node := req.Graph.Nodes[0]
+	if node.ID != "replace-member" || node.Kind != "stateful.member.replace" || node.Risk != schema.RiskHigh || node.Reversibility != schema.Compensatable {
+		t.Fatalf("unexpected replacement node: %+v", node)
+	}
+	if node.Compensate == nil || node.Compensate.Kind != "stateful.member.replace.compensate" {
+		t.Fatalf("replacement node missing compensation: %+v", node.Compensate)
+	}
+	if _, err := sagastate.TopologicalOrder(req.Graph); err != nil {
+		t.Fatalf("graph is not topological: %v", err)
+	}
+}
+
 func nodeIDs(nodes []schema.SagaNode) []string {
 	out := make([]string, 0, len(nodes))
 	for _, node := range nodes {

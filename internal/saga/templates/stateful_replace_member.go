@@ -40,17 +40,15 @@ func StatefulReplaceMember(req StatefulReplaceMemberRequest) (saga.CreateRequest
 	}
 	now := canonical.Time(req.CreatedAt.UTC())
 	params := mustJSON(req)
-	nodes := []schema.SagaNode{
-		{ID: "acquire-member-lease", Kind: "stateful.member.acquire_lease", Params: params, Risk: schema.RiskLow, Reversibility: schema.Reversible},
-		{ID: "fence-old-instance", Kind: "stateful.member.fence_instance", Requires: []string{"acquire-member-lease"}, Params: params, Risk: schema.RiskHigh, Reversibility: schema.Compensatable},
-		{ID: "detach-volume", Kind: "stateful.volume.detach", Requires: []string{"fence-old-instance"}, Params: params, Risk: schema.RiskHigh, Reversibility: schema.Compensatable},
-		{ID: "launch-replacement", Kind: "stateful.member.launch_replacement", Requires: []string{"detach-volume"}, Params: params, Risk: schema.RiskMedium, Reversibility: schema.Compensatable},
-		{ID: "attach-volume", Kind: "stateful.volume.attach", Requires: []string{"launch-replacement"}, Params: params, Risk: schema.RiskHigh, Reversibility: schema.Compensatable},
-		{ID: "boot-same-identity", Kind: "stateful.member.boot_identity", Requires: []string{"attach-volume"}, Params: params, Risk: schema.RiskMedium, Reversibility: schema.Compensatable},
-		{ID: "run-recipe-recovery", Kind: "stateful.recipe.recover", Requires: []string{"boot-same-identity"}, Params: params, Risk: schema.RiskMedium, Reversibility: schema.Compensatable},
-		{ID: "verify-member", Kind: "stateful.recipe.health", Requires: []string{"run-recipe-recovery"}, Params: params, Risk: schema.RiskLow, Reversibility: schema.Reversible},
-		{ID: "publish-member-control", Kind: "stateful.member.publish_control", Requires: []string{"verify-member"}, Params: params, Risk: schema.RiskMedium, Reversibility: schema.Compensatable},
-	}
+	nodes := []schema.SagaNode{{
+		ID:            "replace-member",
+		Kind:          "stateful.member.replace",
+		Params:        params,
+		Retry:         &schema.RetryPolicy{MaxAttempts: 2, Backoff: "2s"},
+		Compensate:    &schema.CompensationSpec{Kind: "stateful.member.replace.compensate", Params: params},
+		Risk:          schema.RiskHigh,
+		Reversibility: schema.Compensatable,
+	}}
 	return saga.CreateRequest{
 		Intent: schema.SagaIntent{
 			SchemaVersion: schema.Version,
@@ -74,6 +72,11 @@ func NormalizeStatefulReplaceMemberRequest(req StatefulReplaceMemberRequest) Sta
 	if req.CreatedAt.IsZero() {
 		req.CreatedAt = time.Now().UTC()
 	}
+	req.SagaID = strings.TrimSpace(req.SagaID)
+	req.OperationID = strings.TrimSpace(req.OperationID)
+	req.Group = strings.TrimSpace(req.Group)
+	req.Env = strings.TrimSpace(req.Env)
+	req.Reason = strings.TrimSpace(req.Reason)
 	if req.Actor.ID == "" {
 		req.Actor = schema.Actor{ID: "skiff", Type: "user"}
 	}

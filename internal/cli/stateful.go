@@ -16,6 +16,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/provider"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
+	"github.com/s1liconcow/skiff/internal/saga/templates"
 	"github.com/s1liconcow/skiff/internal/spec"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 )
@@ -52,6 +53,14 @@ func runStateful(binary string, args []string, root rootOptions, stdout, stderr 
 		return runStatefulApply(binary, args[1:], root, stdout, stderr)
 	case "inspect":
 		return runStatefulInspect(binary, args[1:], root, stdout, stderr)
+	case "replace-member":
+		return runStatefulReplaceMember(binary, args[1:], root, stdout, stderr)
+	case "resume":
+		return runSagaResume(binary, args[1:], root, stdout, stderr)
+	case "watch":
+		return runSagaWatch(binary, args[1:], root, stdout, stderr)
+	case "cancel", "compensate":
+		return runSagaSkeleton(binary, args[0], args[1:], root, stdout, stderr)
 	case "help", "-h", "--help":
 		printStatefulUsage(stdout, binary)
 		return ExitSuccess
@@ -227,6 +236,63 @@ func runStatefulInspect(binary string, args []string, root rootOptions, stdout, 
 		return writeStatefulCommandError(binary, "stateful inspect", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	return writeStatefulInspectResult(binary, *flags.format, *flags.traceID, result, stdout, stderr)
+}
+
+func runStatefulReplaceMember(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(binary+" stateful replace-member", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := addClientFlags(fs, root)
+	group := fs.String("group", "", "StatefulGroup name")
+	member := fs.Int("member", -1, "stateful member ordinal")
+	operationID := fs.String("operation-id", "", "operation ID to use")
+	sagaID := fs.String("saga-id", "", "saga ID to use")
+	reason := fs.String("reason", "", "replacement reason")
+	approvalID := fs.String("approval-id", "", "approval ID for high-risk production replacement")
+	run := fs.Bool("run", true, "run the saga after creating it")
+
+	flagArgs, positionals, err := splitStatefulReplaceArgs(args)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful replace-member", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return writeStatefulCommandError(binary, "stateful replace-member", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	if len(positionals) > 1 {
+		return writeStatefulCommandError(binary, "stateful replace-member", *flags.format, *flags.traceID, fmt.Errorf("unexpected argument %q", positionals[1]), stdout, stderr)
+	}
+	if *group == "" && len(positionals) == 1 {
+		*group = positionals[0]
+	}
+	if *group == "" || *member < 0 {
+		return writeStatefulCommandError(binary, "stateful replace-member", *flags.format, *flags.traceID, errors.New("StatefulGroup name and --member are required"), stdout, stderr)
+	}
+	_ = flags.noColor
+
+	loaded, err := flags.load(binary, root, fs)
+	if err != nil {
+		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+	}
+	if loaded.Config.Mode != config.ModeDirect {
+		return writeStatefulCommandError(binary, "stateful replace-member", *flags.format, *flags.traceID, errors.New("stateful replace-member currently requires --direct mode"), stdout, stderr)
+	}
+	if loaded.Config.Env == "prod" && !*flags.yes && strings.TrimSpace(*approvalID) == "" {
+		return writeStatefulApprovalRequired(binary, *flags.format, *flags.traceID, *group, *member, stdout, stderr)
+	}
+	req := templates.StatefulReplaceMemberRequest{
+		SagaID:      *sagaID,
+		OperationID: *operationID,
+		Group:       *group,
+		Env:         loaded.Config.Env,
+		Member:      *member,
+		Reason:      *reason,
+		Actor:       schema.Actor{ID: "skiff-cli", Type: "user"},
+		TraceID:     *flags.traceID,
+	}
+	result, err := createAndMaybeRunStatefulReplacement(nilContext(), binary, loaded.Config, req, *run)
+	if err != nil {
+		return writeStatefulCommandError(binary, "stateful replace-member", *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	return writeStatefulReplacementSagaResult(binary, "stateful replace-member", *flags.format, *flags.traceID, *result, stdout, stderr)
 }
 
 func loadStatefulGraph(filePath string) (*ir.Graph, error) {
@@ -416,10 +482,61 @@ func splitStatefulInspectArgs(args []string) ([]string, []string, error) {
 	return splitArgs(args, valueFlags)
 }
 
+func splitStatefulReplaceArgs(args []string) ([]string, []string, error) {
+	valueFlags := map[string]bool{
+		"api-url":      true,
+		"approval-id":  true,
+		"config":       true,
+		"context":      true,
+		"env":          true,
+		"format":       true,
+		"group":        true,
+		"member":       true,
+		"mode":         true,
+		"operation-id": true,
+		"provider":     true,
+		"reason":       true,
+		"region":       true,
+		"saga-id":      true,
+		"state":        true,
+		"state-bucket": true,
+		"trace-id":     true,
+	}
+	return splitArgs(args, valueFlags)
+}
+
+func writeStatefulApprovalRequired(binary, format, traceID, group string, member int, stdout, stderr io.Writer) int {
+	command := fmt.Sprintf("%s stateful replace-member %s --member %d --yes --format json", binary, group, member)
+	if isJSONFormat(format) {
+		_ = writeJSON(stdout, format, commandErrorOutput{
+			OK:      false,
+			Code:    "APPROVAL_REQUIRED",
+			Summary: "production stateful replacement is high risk and requires approval",
+			TraceID: traceID,
+			RecommendedActions: []recommendedAction{{
+				ID:            "approve_and_replace_member",
+				Command:       command,
+				Mutating:      true,
+				Safety:        "requires an explicit operator approval signal",
+				Reversibility: schema.Compensatable,
+				Risk:          schema.RiskHigh,
+			}},
+		})
+		return ExitPolicyDenied
+	}
+	fmt.Fprintf(stderr, "%s stateful replace-member: production replacement requires --yes or --approval-id\n", binary)
+	return ExitPolicyDenied
+}
+
 func printStatefulUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s stateful <command> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  plan       Plan StatefulGroup provider resources")
 	fmt.Fprintln(w, "  apply      Write StatefulGroup durable object state")
 	fmt.Fprintln(w, "  inspect    Inspect StatefulGroup direct object state")
+	fmt.Fprintln(w, "  replace-member  Replace one failed StatefulGroup member through a saga")
+	fmt.Fprintln(w, "  resume     Resume a stateful saga")
+	fmt.Fprintln(w, "  watch      Watch stateful saga events")
+	fmt.Fprintln(w, "  cancel     Cancel a registered stateful saga")
+	fmt.Fprintln(w, "  compensate Compensate a registered stateful saga")
 }

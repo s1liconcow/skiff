@@ -144,6 +144,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/doctor", s.handleDoctor)
 	mux.HandleFunc("/v1/services", s.handleServices)
 	mux.HandleFunc("/v1/sagas", s.handleSagas)
+	mux.HandleFunc("/v1/stateful/replace-member", s.handleStatefulReplaceMember)
+	mux.HandleFunc("/v1/stateful/sagas/", s.handleStatefulSagaAction)
 	mux.HandleFunc("/v1/events/recent", s.handleRecentEvents)
 	mux.HandleFunc("/v1/events/stream", s.handleEventsStream)
 	mux.HandleFunc("/v1/admin/index", s.handleAdminIndex)

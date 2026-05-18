@@ -37,7 +37,8 @@ func New(opts Options) map[string]steps.Step {
 		service.MarkStable{Store: opts.Store, Provider: opts.Provider},
 		sagatime.Sleep{},
 	}
-	items = append(items, statefulsteps.New(opts.Store, nil)...)
+	statefulProvider, _ := opts.Provider.(provider.StatefulOperations)
+	items = append(items, statefulsteps.NewWithProvider(opts.Store, statefulProvider, nil)...)
 	if trafficProvider, ok := opts.Provider.(provider.TrafficOperations); ok {
 		items = append(items, service.TrafficShift{Shifter: trafficProvider})
 	}
