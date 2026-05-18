@@ -13,7 +13,10 @@ import (
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
 	"github.com/s1liconcow/skiff/internal/state/schema"
+	stateruntime "github.com/s1liconcow/skiff/internal/stateful"
 )
+
+const statefulGroupTag = "skiff.dev/stateful-group"
 
 type ActionKind string
 
@@ -100,6 +103,9 @@ func (p Planner) Plan(ctx context.Context, req PlanRequest) (*Plan, error) {
 		return nil, err
 	}
 	if err := p.addResourceRecordActions(ctx, plan, req, now, retention); err != nil {
+		return nil, err
+	}
+	if err := p.addStatefulBackupActions(ctx, plan, req, now, retention); err != nil {
 		return nil, err
 	}
 	sort.Slice(plan.Actions, func(i, j int) bool {
@@ -287,7 +293,7 @@ func (p Planner) addResourceRecordActions(ctx context.Context, plan *Plan, req P
 			Mutating:     true,
 			Safety:       "refresh_before_cleanup",
 		}
-		if isStatefulKind(record.Provider.Kind) {
+		if isStatefulRecord(record) {
 			action.Kind = ActionProtectStateful
 			action.Protected = true
 			action.RequiresSnapshot = true
@@ -296,6 +302,50 @@ func (p Planner) addResourceRecordActions(ctx context.Context, plan *Plan, req P
 			action.Safety = "snapshot_and_explicit_approval_required"
 		}
 		plan.Actions = append(plan.Actions, action)
+	}
+	return nil
+}
+
+func (p Planner) addStatefulBackupActions(ctx context.Context, plan *Plan, req PlanRequest, now time.Time, retention time.Duration) error {
+	prefix := "stateful/"
+	if req.Service != "" {
+		prefix = "stateful/" + req.Service + "/backups/"
+	}
+	metas, err := p.Store.List(ctx, prefix, objstore.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, meta := range metas {
+		if !strings.HasSuffix(meta.Key, "/record.json") || !strings.Contains(meta.Key, "/backups/") {
+			continue
+		}
+		var record stateruntime.BackupRecord
+		if !p.readJSON(ctx, meta.Key, &record) {
+			continue
+		}
+		if req.Service != "" && record.Group != req.Service {
+			continue
+		}
+		if req.Env != "" && record.Env != req.Env {
+			continue
+		}
+		if !backupOutsideRetention(record, now, retention) {
+			continue
+		}
+		plan.Actions = append(plan.Actions, Action{
+			ID:               "stateful-backup:" + record.Group + ":" + firstNonEmpty(record.BackupID, record.SnapshotID),
+			Kind:             ActionProtectStateful,
+			Key:              meta.Key,
+			Service:          record.Group,
+			Env:              record.Env,
+			ResourceKind:     "stateful-backup",
+			ProviderID:       firstNonEmpty(record.ProviderID, record.SnapshotID),
+			Summary:          "stateful backup is outside retention but protected from automatic cleanup",
+			Mutating:         true,
+			Protected:        true,
+			RequiresApproval: true,
+			Safety:           "retention_check_and_explicit_approval_required",
+		})
 	}
 	return nil
 }
@@ -323,7 +373,25 @@ func (p Planner) now() time.Time {
 
 func isStatefulKind(kind string) bool {
 	kind = strings.ToLower(kind)
-	return strings.Contains(kind, "database") || strings.Contains(kind, "rds") || strings.Contains(kind, "volume")
+	return strings.Contains(kind, "database") ||
+		strings.Contains(kind, "rds") ||
+		strings.Contains(kind, "volume") ||
+		strings.Contains(kind, "snapshot") ||
+		strings.Contains(kind, "fencing") ||
+		strings.Contains(kind, "stateful")
+}
+
+func isStatefulRecord(record schema.ResourceRecord) bool {
+	return isStatefulKind(record.Provider.Kind) || strings.TrimSpace(record.Tags[statefulGroupTag]) != ""
+}
+
+func backupOutsideRetention(record stateruntime.BackupRecord, now time.Time, retention time.Duration) bool {
+	if record.ExpiresAt != "" {
+		expiresAt, err := time.Parse(time.RFC3339Nano, record.ExpiresAt)
+		return err == nil && !now.Before(expiresAt.UTC())
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, record.CreatedAt)
+	return err == nil && now.Sub(createdAt.UTC()) >= retention
 }
 
 func firstNonEmpty(values ...string) string {

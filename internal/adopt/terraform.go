@@ -127,6 +127,24 @@ func MappingFromAWSResources(resources *aws.ServiceResources, mode string) Terra
 	for _, item := range resources.AutoScalingGroups {
 		add(resourceKey(item.LogicalID), aws.ResourceKindAutoScalingGroup, item.LogicalID, item.Name, item.Name, item.Tags)
 	}
+	for _, item := range resources.StatefulMembers {
+		add(resourceKey(item.LogicalID), aws.ResourceKindEC2Instance, item.LogicalID, item.Name, item.Name, item.Tags)
+	}
+	for _, item := range resources.EBSVolumes {
+		add(resourceKey(item.LogicalID), aws.ResourceKindEBSVolume, item.LogicalID, item.Name, item.Name, item.Tags)
+	}
+	for _, item := range resources.VolumeAttachments {
+		add(resourceKey(item.LogicalID), aws.ResourceKindEBSAttachment, item.LogicalID, item.Name, item.Name, item.Tags)
+	}
+	for _, item := range resources.Route53Records {
+		add(resourceKey(item.LogicalID), aws.ResourceKindRoute53Record, item.LogicalID, item.Name, item.Name, item.Tags)
+	}
+	for _, item := range resources.SnapshotPolicies {
+		add(resourceKey(item.LogicalID), aws.ResourceKindSnapshotPolicy, item.LogicalID, item.Name, item.Name, item.Tags)
+	}
+	for _, item := range resources.FencingPolicies {
+		add(resourceKey(item.LogicalID), aws.ResourceKindFencingPolicy, item.LogicalID, item.Name, item.Name, item.Tags)
+	}
 	return mapping
 }
 

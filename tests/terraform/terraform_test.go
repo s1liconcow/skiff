@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/s1liconcow/skiff/internal/adopt"
 	"github.com/s1liconcow/skiff/internal/compiler"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
 	"github.com/s1liconcow/skiff/internal/spec"
@@ -49,6 +50,37 @@ func TestRenderAWSServiceTerraformMinimalAndIngress(t *testing.T) {
 	}
 }
 
+func TestRenderAWSServiceTerraformStatefulGroup(t *testing.T) {
+	module := renderFixture(t, filepath.Join("..", "..", "examples", "stateful", "jetstream", "skiff.yaml"))
+	main := module.Files["main.tf"]
+	outputs := module.Files["outputs.tf"]
+	for _, want := range []string{
+		`resource "aws_ebs_volume"`,
+		`prevent_destroy = true`,
+		`resource "aws_instance"`,
+		`resource "aws_volume_attachment"`,
+		`resource "aws_route53_record"`,
+		`resource "terraform_data"`,
+		`route53_zone_id`,
+		`ebs-volume`,
+		`ec2-instance`,
+		`snapshot-policy`,
+		`fencing-policy`,
+	} {
+		if !strings.Contains(main+outputs+module.Files["variables.tf"], want) {
+			t.Fatalf("stateful Terraform missing %q\nmain.tf:\n%s\noutputs.tf:\n%s", want, main, outputs)
+		}
+	}
+	for _, kind := range []string{"ec2-instance", "ebs-volume", "ebs-volume-attachment", "route53-record", "snapshot-policy", "fencing-policy"} {
+		if !mappingHasKind(module.Mapping.Resources, kind) {
+			t.Fatalf("stateful adoption mapping missing kind %s: %+v", kind, module.Mapping.Resources)
+		}
+	}
+	if !balancedBraces(main) || !balancedBraces(outputs) {
+		t.Fatalf("generated stateful Terraform has unbalanced braces")
+	}
+}
+
 func renderFixture(t *testing.T, path string) *terraformrender.Module {
 	t.Helper()
 	doc, err := spec.LoadFile(path, spec.DecodeOptions{})
@@ -68,6 +100,15 @@ func renderFixture(t *testing.T, path string) *terraformrender.Module {
 		t.Fatalf("render: %v", err)
 	}
 	return module
+}
+
+func mappingHasKind(resources map[string]adopt.TerraformResource, kind string) bool {
+	for _, resource := range resources {
+		if resource.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func balancedBraces(value string) bool {

@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -46,6 +47,13 @@ func Convert(objects []Object, opts Options) (*Result, error) {
 
 	deployment := ctx.firstWorkload("Deployment")
 	if deployment == nil {
+		statefulSet := ctx.firstWorkload("StatefulSet")
+		if statefulSet != nil {
+			ctx.findUnsupportedPodFeatures(*statefulSet)
+			service := ctx.matchingService(*statefulSet)
+			doc := ctx.statefulGroupProposal(*statefulSet, service, opts)
+			return ctx.finish(doc)
+		}
 		ctx.error("KUBE_DEPLOYMENT_REQUIRED", "$", "simple imports require an apps/v1 Deployment")
 		return ctx.finish(spec.Document{})
 	}
@@ -96,7 +104,7 @@ func (c *conversionContext) findUnsupportedObjects() {
 		switch object.Kind {
 		case "Deployment", "Service", "Ingress", "HorizontalPodAutoscaler", "ConfigMap", "Secret", "PodDisruptionBudget":
 		case "StatefulSet":
-			c.error("KUBE_STATEFULSET_UNSUPPORTED", objectPath(object), "StatefulSet import requires an explicit Skiff StatefulGroup recipe")
+			c.warn("KUBE_STATEFULSET_PROPOSAL", objectPath(object), "StatefulSet was converted only into a Skiff StatefulGroup proposal; review identity, volumes, and recipe behavior before applying")
 		case "DaemonSet", "Job", "CronJob":
 			c.warn("KUBE_WORKLOAD_REVIEW_REQUIRED", objectPath(object), object.Kind+" is not converted into the Skiff Service spec")
 		default:
@@ -272,6 +280,108 @@ func (c *conversionContext) serviceSpec(deployment Object, service, ingress, hpa
 	}
 	spec.ApplyDefaults(&doc)
 	return doc
+}
+
+func (c *conversionContext) statefulGroupProposal(statefulSet Object, service *Object, opts Options) spec.Document {
+	specMap := mapAt(statefulSet.Raw, "spec")
+	templateSpec := mapAt(mapAt(specMap, "template"), "spec")
+	containers := mapList(templateSpec["containers"])
+	container := map[string]any{}
+	if len(containers) > 0 {
+		container = containers[0]
+	}
+	name := firstNonEmpty(opts.Name, statefulSet.Metadata.Name)
+	env := firstNonEmpty(opts.Env, statefulSet.Metadata.Namespace, "staging")
+	image := stringAt(container, "image")
+	if image == "" {
+		c.error("KUBE_IMAGE_REQUIRED", objectPath(statefulSet)+".spec.template.spec.containers[0].image", "container image is required")
+		image = "missing-image"
+	}
+	if isProductionEnv(env) && !strings.Contains(image, "@sha256:") {
+		c.warn("KUBE_IMAGE_DIGEST_RECOMMENDED", objectPath(statefulSet)+".spec.template.spec.containers[0].image", "production Skiff specs should use digest-pinned OCI images")
+	}
+	port, portName := c.runtimePort(container, service)
+	health := c.health(container, port, portName)
+	runtimeEnv, secrets := c.envAndSecrets(statefulSet, container)
+	volume := c.statefulVolume(statefulSet, container)
+	recipeConfig := map[string]any{
+		"artifact": map[string]any{
+			"type": "oci",
+			"ref":  image,
+		},
+		"runtime": map[string]any{
+			"health": map[string]any{
+				"path": health,
+				"port": port,
+			},
+			"ports": map[string]any{
+				firstNonEmpty(portName, "client"): port,
+			},
+		},
+	}
+	if command := stringSlice(container["command"]); len(command) > 0 {
+		recipeConfig["runtime"].(map[string]any)["command"] = command
+	}
+	if len(runtimeEnv) > 0 {
+		recipeConfig["runtime"].(map[string]any)["env"] = runtimeEnv
+	}
+	configBody, err := json.Marshal(recipeConfig)
+	if err != nil {
+		c.error("KUBE_STATEFULSET_CONFIG_INVALID", objectPath(statefulSet), "could not encode StatefulGroup recipe proposal: "+err.Error())
+	}
+	replicas := intAt(specMap, "replicas")
+	if replicas == 0 {
+		replicas = 1
+	}
+	doc := spec.Document{
+		APIVersion: spec.APIVersion,
+		Kind:       spec.KindStatefulGroup,
+		Metadata: spec.Metadata{
+			Name: name,
+			Env:  env,
+			Labels: map[string]string{
+				"imported-from": "kubernetes",
+			},
+		},
+		Secrets: secrets,
+		StatefulGroup: &spec.StatefulGroup{
+			Replicas: replicas,
+			Volume:   volume,
+			Identity: spec.StatefulIdentity{HostnamePrefix: name},
+			Recipe: spec.StatefulRecipe{
+				Name:   "kubernetes-statefulset",
+				Config: configBody,
+			},
+			Update: spec.StatefulUpdate{Strategy: "ordered"},
+		},
+	}
+	spec.ApplyDefaults(&doc)
+	return doc
+}
+
+func (c *conversionContext) statefulVolume(statefulSet Object, container map[string]any) spec.Volume {
+	volume := spec.Volume{Type: "gp3", MountPath: "/var/lib/skiff/state", Encrypted: true}
+	for _, mount := range mapList(container["volumeMounts"]) {
+		if path := stringAt(mount, "mountPath"); path != "" {
+			volume.MountPath = path
+			break
+		}
+	}
+	claims := mapList(mapAt(statefulSet.Raw, "spec")["volumeClaimTemplates"])
+	if len(claims) == 0 {
+		c.warn("KUBE_STATEFULSET_VOLUME_REVIEW_REQUIRED", objectPath(statefulSet)+".spec.volumeClaimTemplates", "StatefulSet has no volumeClaimTemplates; defaulted StatefulGroup volume size to 10Gi")
+		volume.Size = "10Gi"
+		return volume
+	}
+	requests := mapAt(mapAt(mapAt(claims[0], "spec"), "resources"), "requests")
+	volume.Size = firstNonEmpty(stringAt(requests, "storage"), "10Gi")
+	if storageClass := stringAt(mapAt(claims[0], "spec"), "storageClassName"); storageClass != "" && !isSkiffVolumeType(storageClass) {
+		c.warn("KUBE_STORAGECLASS_REVIEW_REQUIRED", objectPath(statefulSet)+".spec.volumeClaimTemplates[0].spec.storageClassName", "storageClassName "+storageClass+" does not map directly to a Skiff volume type; defaulted volume.type to gp3")
+	} else if storageClass != "" {
+		volume.Type = storageClass
+	}
+	c.warn("KUBE_STATEFULSET_VOLUME_REVIEW_REQUIRED", objectPath(statefulSet)+".spec.volumeClaimTemplates[0]", "persistent volume claim was converted to a StatefulGroup volume proposal; verify size, type, encryption, and retention")
+	return volume
 }
 
 func (c *conversionContext) runtimePort(container map[string]any, service *Object) (int, string) {
@@ -492,6 +602,8 @@ func actionForKind(kind string) string {
 	switch kind {
 	case "Deployment":
 		return "converted to Skiff Service"
+	case "StatefulSet":
+		return "converted to Skiff StatefulGroup proposal"
 	case "Service":
 		return "mapped to runtime port and target group"
 	case "Ingress":
@@ -729,4 +841,13 @@ func isServiceMeshAnnotation(key string) bool {
 		strings.Contains(key, "linkerd.io/") ||
 		strings.Contains(key, "consul.hashicorp.com/") ||
 		strings.Contains(key, "sidecar")
+}
+
+func isSkiffVolumeType(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "gp3", "io1", "standard":
+		return true
+	default:
+		return false
+	}
 }

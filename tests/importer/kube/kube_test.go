@@ -79,15 +79,37 @@ func TestImportReportsUnsupportedFeaturesAsErrors(t *testing.T) {
 	for _, code := range []string{
 		"KUBE_HOSTPATH_UNSUPPORTED",
 		"KUBE_PRIVILEGED_UNSUPPORTED",
-		"KUBE_STATEFULSET_UNSUPPORTED",
 		"KUBE_CRD_UNSUPPORTED",
 	} {
 		if !hasFinding(result.Findings, code, "error") {
 			t.Fatalf("missing error %s in %+v", code, result.Findings)
 		}
 	}
+	if !hasFinding(result.Findings, "KUBE_STATEFULSET_PROPOSAL", "warn") {
+		t.Fatalf("StatefulSet should be reported as a proposal warning: %+v", result.Findings)
+	}
 	if !strings.Contains(result.MarkdownReport, "KUBE_HOSTPATH_UNSUPPORTED") {
 		t.Fatalf("migration report did not include unsupported feature:\n%s", result.MarkdownReport)
+	}
+}
+
+func TestStatefulSetImportProducesStatefulGroupProposal(t *testing.T) {
+	result := convertFixture(t, "statefulset.yaml", kubeimport.Options{Env: "prod"})
+	if !result.OK {
+		t.Fatalf("StatefulSet proposal should be importable with warnings: %+v", result.Findings)
+	}
+	if result.Service.Kind != "StatefulGroup" || result.Service.StatefulGroup == nil {
+		t.Fatalf("expected StatefulGroup proposal: %+v", result.Service)
+	}
+	group := result.Service.StatefulGroup
+	if group.Replicas != 3 || group.Volume.Size != "20Gi" || group.Volume.MountPath != "/var/lib/postgresql/data" {
+		t.Fatalf("unexpected StatefulGroup proposal: %+v", group)
+	}
+	if !hasFinding(result.Findings, "KUBE_STATEFULSET_PROPOSAL", "warn") || !hasFinding(result.Findings, "KUBE_STATEFULSET_VOLUME_REVIEW_REQUIRED", "warn") {
+		t.Fatalf("missing StatefulSet proposal warnings: %+v", result.Findings)
+	}
+	if !strings.Contains(result.SkiffYAML, "kind: StatefulGroup") || !strings.Contains(result.MarkdownReport, "StatefulGroup proposal") {
+		t.Fatalf("stateful report missing proposal output:\n%s", result.MarkdownReport)
 	}
 }
 

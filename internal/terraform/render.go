@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/s1liconcow/skiff/internal/adopt"
@@ -46,6 +47,7 @@ func RenderAWSService(resources *aws.ServiceResources, opts Options) (*Module, e
 	writeTargetGroups(&main, resources, labels, &outputs)
 	writeListenerRules(&main, resources, labels, &outputs)
 	writeLaunchTemplates(&main, resources, labels, &outputs)
+	writeStatefulResources(&main, resources, labels, &outputs)
 	writeAutoScalingGroups(&main, resources, labels, &outputs)
 
 	files := map[string]string{
@@ -82,6 +84,9 @@ func writeVariables(b *strings.Builder, resources *aws.ServiceResources) {
 	b.WriteString("variable \"load_balancer_security_group_id\" {\n  type = string\n  default = \"\"\n}\n\n")
 	if len(resources.ListenerRules) > 0 {
 		b.WriteString("variable \"alb_listener_arn\" {\n  type = string\n}\n\n")
+	}
+	if len(resources.Route53Records) > 0 {
+		b.WriteString("variable \"route53_zone_id\" {\n  type = string\n}\n\n")
 	}
 }
 
@@ -293,6 +298,113 @@ func writeAutoScalingGroups(b *strings.Builder, resources *aws.ServiceResources,
 	}
 }
 
+func writeStatefulResources(b *strings.Builder, resources *aws.ServiceResources, labels map[string]string, outputs *[]outputEntry) {
+	for _, volume := range resources.EBSVolumes {
+		label := labels[volume.LogicalID]
+		fmt.Fprintf(b, "resource \"aws_ebs_volume\" \"%s\" {\n", label)
+		fmt.Fprintf(b, "  availability_zone = %s\n", hclString(firstNonEmpty(volume.AvailabilityZone, "CHANGE-ME")))
+		fmt.Fprintf(b, "  size              = %d\n", ebsSizeGB(volume.Size))
+		fmt.Fprintf(b, "  type              = %s\n", hclString(firstNonEmpty(volume.VolumeType, "gp3")))
+		fmt.Fprintf(b, "  encrypted         = %t\n", volume.Encrypted)
+		if volume.KMSKeyID != "" {
+			fmt.Fprintf(b, "  kms_key_id        = %s\n", hclString(volume.KMSKeyID))
+		}
+		writeTags(b, volume.Tags, "  ")
+		b.WriteString("  lifecycle {\n")
+		b.WriteString("    prevent_destroy = true\n")
+		b.WriteString("  }\n")
+		b.WriteString("}\n\n")
+		*outputs = append(*outputs, outputEntry{Key: keyFor(volume.LogicalID), Kind: aws.ResourceKindEBSVolume, LogicalID: volume.LogicalID, NameExpr: hclString(volume.Name), IDExpr: fmt.Sprintf("aws_ebs_volume.%s.id", label), Tags: volume.Tags})
+	}
+	for _, member := range resources.StatefulMembers {
+		label := labels[member.LogicalID]
+		fmt.Fprintf(b, "resource \"aws_instance\" \"%s\" {\n", label)
+		fmt.Fprintf(b, "  subnet_id = var.subnet_ids[%d %% length(var.subnet_ids)]\n", member.MemberOrdinal)
+		if ltLabel := labels[member.LaunchTemplateRef]; ltLabel != "" {
+			b.WriteString("  launch_template {\n")
+			fmt.Fprintf(b, "    id      = aws_launch_template.%s.id\n", ltLabel)
+			b.WriteString("    version = \"$Latest\"\n")
+			b.WriteString("  }\n")
+		} else {
+			b.WriteString("  ami           = var.ami_id\n")
+			b.WriteString("  instance_type = \"t3.small\"\n")
+		}
+		writeTags(b, member.Tags, "  ")
+		b.WriteString("  lifecycle {\n")
+		b.WriteString("    prevent_destroy = true\n")
+		b.WriteString("  }\n")
+		b.WriteString("}\n\n")
+		*outputs = append(*outputs, outputEntry{Key: keyFor(member.LogicalID), Kind: aws.ResourceKindEC2Instance, LogicalID: member.LogicalID, NameExpr: hclString(member.Name), IDExpr: fmt.Sprintf("aws_instance.%s.id", label), Tags: member.Tags})
+	}
+	for _, attachment := range resources.VolumeAttachments {
+		label := labels[attachment.LogicalID]
+		instanceLabel := labels[attachment.InstanceRef]
+		volumeLabel := labels[attachment.VolumeRef]
+		fmt.Fprintf(b, "resource \"aws_volume_attachment\" \"%s\" {\n", label)
+		fmt.Fprintf(b, "  device_name  = %s\n", hclString(firstNonEmpty(attachment.Device, "/dev/xvdf")))
+		if volumeLabel != "" {
+			fmt.Fprintf(b, "  volume_id    = aws_ebs_volume.%s.id\n", volumeLabel)
+		}
+		if instanceLabel != "" {
+			fmt.Fprintf(b, "  instance_id  = aws_instance.%s.id\n", instanceLabel)
+		}
+		b.WriteString("  skip_destroy = true\n")
+		b.WriteString("}\n\n")
+		idExpr := hclString(attachment.Name)
+		if instanceLabel != "" && volumeLabel != "" {
+			idExpr = fmt.Sprintf("format(\"%%s:%%s\", aws_instance.%s.id, aws_ebs_volume.%s.id)", instanceLabel, volumeLabel)
+		}
+		*outputs = append(*outputs, outputEntry{Key: keyFor(attachment.LogicalID), Kind: aws.ResourceKindEBSAttachment, LogicalID: attachment.LogicalID, NameExpr: hclString(attachment.Name), IDExpr: idExpr, Tags: attachment.Tags})
+	}
+	for _, record := range resources.Route53Records {
+		label := labels[record.LogicalID]
+		targetLabel := labels[record.TargetRef]
+		fmt.Fprintf(b, "resource \"aws_route53_record\" \"%s\" {\n", label)
+		b.WriteString("  zone_id = var.route53_zone_id\n")
+		fmt.Fprintf(b, "  name    = %s\n", hclString(firstNonEmpty(record.DNSName, record.Name)))
+		fmt.Fprintf(b, "  type    = %s\n", hclString(firstNonEmpty(record.RecordType, "A")))
+		fmt.Fprintf(b, "  ttl     = %d\n", firstPositive(record.TTLSeconds, 30))
+		if targetLabel != "" && strings.EqualFold(firstNonEmpty(record.RecordType, "A"), "A") {
+			fmt.Fprintf(b, "  records = [aws_instance.%s.private_ip]\n", targetLabel)
+		} else {
+			b.WriteString("  records = [\"CHANGE-ME\"]\n")
+		}
+		b.WriteString("}\n\n")
+		*outputs = append(*outputs, outputEntry{Key: keyFor(record.LogicalID), Kind: aws.ResourceKindRoute53Record, LogicalID: record.LogicalID, NameExpr: fmt.Sprintf("aws_route53_record.%s.fqdn", label), IDExpr: fmt.Sprintf("aws_route53_record.%s.id", label), Tags: record.Tags})
+	}
+	for _, policy := range resources.SnapshotPolicies {
+		label := labels[policy.LogicalID]
+		fmt.Fprintf(b, "resource \"terraform_data\" \"%s\" {\n", label)
+		b.WriteString("  input = {\n")
+		fmt.Fprintf(b, "    name      = %s\n", hclString(policy.Name))
+		fmt.Fprintf(b, "    enabled   = %t\n", policy.Enabled)
+		fmt.Fprintf(b, "    interval  = %s\n", hclString(policy.Interval))
+		fmt.Fprintf(b, "    retention = %s\n", hclString(policy.Retention))
+		b.WriteString("    volume_refs = [\n")
+		for _, ref := range policy.VolumeRefs {
+			fmt.Fprintf(b, "      %s,\n", hclString(ref))
+		}
+		b.WriteString("    ]\n")
+		b.WriteString("  }\n")
+		b.WriteString("}\n\n")
+		*outputs = append(*outputs, outputEntry{Key: keyFor(policy.LogicalID), Kind: aws.ResourceKindSnapshotPolicy, LogicalID: policy.LogicalID, NameExpr: hclString(policy.Name), IDExpr: fmt.Sprintf("terraform_data.%s.id", label), Tags: policy.Tags})
+	}
+	for _, policy := range resources.FencingPolicies {
+		label := labels[policy.LogicalID]
+		fmt.Fprintf(b, "resource \"terraform_data\" \"%s\" {\n", label)
+		b.WriteString("  input = {\n")
+		fmt.Fprintf(b, "    name                          = %s\n", hclString(policy.Name))
+		fmt.Fprintf(b, "    member_ordinal                = %d\n", policy.MemberOrdinal)
+		fmt.Fprintf(b, "    instance_ref                  = %s\n", hclString(policy.InstanceRef))
+		fmt.Fprintf(b, "    volume_ref                    = %s\n", hclString(policy.VolumeRef))
+		fmt.Fprintf(b, "    requires_instance_termination = %t\n", policy.RequiresInstanceTermination)
+		fmt.Fprintf(b, "    requires_volume_detach        = %t\n", policy.RequiresVolumeDetach)
+		b.WriteString("  }\n")
+		b.WriteString("}\n\n")
+		*outputs = append(*outputs, outputEntry{Key: keyFor(policy.LogicalID), Kind: aws.ResourceKindFencingPolicy, LogicalID: policy.LogicalID, NameExpr: hclString(policy.Name), IDExpr: fmt.Sprintf("terraform_data.%s.id", label), Tags: policy.Tags})
+	}
+}
+
 func renderVariables(resources *aws.ServiceResources) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Variables for %s/%s Terraform-owned infrastructure.\n\n", resources.Env, resources.Service)
@@ -303,6 +415,9 @@ func renderVariables(resources *aws.ServiceResources) string {
 	b.WriteString("load_balancer_security_group_id = \"sg-CHANGE-ME\"\n")
 	if len(resources.ListenerRules) > 0 {
 		b.WriteString("alb_listener_arn = \"arn:aws:elasticloadbalancing:REGION:ACCOUNT:listener/app/CHANGE-ME\"\n")
+	}
+	if len(resources.Route53Records) > 0 {
+		b.WriteString("route53_zone_id = \"Z-CHANGE-ME\"\n")
 	}
 	return b.String()
 }
@@ -451,6 +566,24 @@ func labelsFor(resources *aws.ServiceResources) map[string]string {
 	for _, item := range resources.AutoScalingGroups {
 		add(item.LogicalID)
 	}
+	for _, item := range resources.StatefulMembers {
+		add(item.LogicalID)
+	}
+	for _, item := range resources.EBSVolumes {
+		add(item.LogicalID)
+	}
+	for _, item := range resources.VolumeAttachments {
+		add(item.LogicalID)
+	}
+	for _, item := range resources.Route53Records {
+		add(item.LogicalID)
+	}
+	for _, item := range resources.SnapshotPolicies {
+		add(item.LogicalID)
+	}
+	for _, item := range resources.FencingPolicies {
+		add(item.LogicalID)
+	}
 	return labels
 }
 
@@ -498,4 +631,25 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstPositive(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func ebsSizeGB(value string) int {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	for _, suffix := range []string{"gib", "gi", "gb", "g"} {
+		normalized = strings.TrimSuffix(normalized, suffix)
+	}
+	size, err := strconv.Atoi(strings.TrimSpace(normalized))
+	if err != nil || size <= 0 {
+		return 20
+	}
+	return size
 }

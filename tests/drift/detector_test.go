@@ -35,14 +35,25 @@ func TestDetectClassifiesMissingChangedOrphanedAndUnsafe(t *testing.T) {
 		Tags:          map[string]string{ir.TagService: "payments-api"},
 		ObservedAt:    "2026-05-16T20:00:00Z",
 	})
+	createRecord(t, store, "resources/by-provider/aws/route53-record/dns-123.json", schema.ResourceRecord{
+		SchemaVersion: schema.Version,
+		Logical:       schema.ResourceLogicalRef{Kind: "route53-record", Name: "stateful-dns:payments-api:0"},
+		Provider:      schema.ResourceProviderRef{Provider: "aws", Kind: "route53-record", ID: "dns-123"},
+		Service:       "payments-api",
+		Env:           "prod",
+		Tags:          map[string]string{ir.TagService: "payments-api", ir.TagEnv: "prod", ir.TagStatefulGroup: "payments-api"},
+		ObservedAt:    "2026-05-16T20:00:00Z",
+	})
 	cloud := fakeProvider{inspection: provider.ServiceInspection{
 		Ref:      provider.ServiceRef{Service: "payments-api", Env: "prod"},
 		Provider: "aws",
 		FreshAt:  time.Date(2026, 5, 17, 3, 0, 0, 0, time.UTC),
 		Resources: []provider.ResourceInspection{
 			{Kind: "asg", LogicalID: "asg:payments-api", ProviderID: "asg-123", Tags: map[string]string{ir.TagService: "orders-api", ir.TagEnv: "prod"}},
+			{Kind: "route53-record", LogicalID: "stateful-dns:payments-api:0", ProviderID: "dns-123", Status: "changed outside Skiff", Tags: map[string]string{ir.TagService: "payments-api", ir.TagEnv: "prod", ir.TagStatefulGroup: "payments-api"}},
 			{Kind: "launch-template", LogicalID: "lt:orphan", ProviderID: "lt-orphan", Tags: map[string]string{ir.TagService: "payments-api"}},
 			{Kind: "rds-db-instance", LogicalID: "db:orphan", ProviderID: "db-orphan", Tags: map[string]string{ir.TagService: "payments-api"}},
+			{Kind: "ec2-instance", LogicalID: "stateful-member:payments-api:0", ProviderID: "i-orphan", Tags: map[string]string{ir.TagService: "payments-api", ir.TagStatefulGroup: "payments-api"}},
 		},
 	}}
 
@@ -59,6 +70,21 @@ func TestDetectClassifiesMissingChangedOrphanedAndUnsafe(t *testing.T) {
 			t.Fatalf("missing %s in findings: %+v", code, result.Findings)
 		}
 	}
+	if !got["STATEFUL_RESOURCE_DRIFT"] {
+		t.Fatalf("missing stateful drift finding: %+v", result.Findings)
+	}
+	if !hasProvider(result.Findings, "dns-123") {
+		t.Fatalf("stateful drift did not include provider ID: %+v", result.Findings)
+	}
+}
+
+func hasProvider(findings []drift.Finding, providerID string) bool {
+	for _, finding := range findings {
+		if finding.ProviderID == providerID {
+			return true
+		}
+	}
+	return false
 }
 
 func createRecord(t *testing.T, store objstore.ObjectStore, key string, value any) {

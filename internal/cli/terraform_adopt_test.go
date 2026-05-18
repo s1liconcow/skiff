@@ -132,6 +132,32 @@ func TestDeployUsesTerraformOwnedInfrastructure(t *testing.T) {
 	}
 }
 
+func TestTerraformAdoptRecordsStatefulResources(t *testing.T) {
+	stateRoot := t.TempDir()
+	store, err := file.New(stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapping := terraformMappingForSpec(t, filepath.Join("..", "..", "examples", "stateful", "jetstream", "skiff.yaml"))
+	result, err := adopt.RecordTerraform(context.Background(), store, mapping, adopt.RecordOptions{})
+	if err != nil {
+		t.Fatalf("record stateful terraform resources: %v", err)
+	}
+	for _, kind := range []string{"ec2-instance", "ebs-volume", "ebs-volume-attachment", "route53-record", "snapshot-policy", "fencing-policy"} {
+		if !recordedKind(result.Resources, kind) {
+			t.Fatalf("missing recorded stateful kind %s: %+v", kind, result.Resources)
+		}
+	}
+	for _, resource := range result.Resources {
+		if resource.Record.Ownership == nil || resource.Record.Ownership.ManagedBy != "terraform" {
+			t.Fatalf("stateful resource missing terraform ownership: %+v", resource.Record)
+		}
+		if resource.Record.Provider.Kind == "ebs-volume" && resource.Record.Tags["skiff.dev/stateful-group"] == "" {
+			t.Fatalf("stateful resource missing stateful ownership tag: %+v", resource.Record)
+		}
+	}
+}
+
 func terraformMappingForSpec(t *testing.T, path string) adopt.TerraformMapping {
 	t.Helper()
 	doc, err := spec.LoadFile(path, spec.DecodeOptions{})
@@ -147,4 +173,13 @@ func terraformMappingForSpec(t *testing.T, path string) adopt.TerraformMapping {
 		t.Fatalf("lower: %v", err)
 	}
 	return adopt.MappingFromAWSResources(resources, adopt.OwnershipTerraformInfraSkiffRelease)
+}
+
+func recordedKind(resources []adopt.RecordedResource, kind string) bool {
+	for _, resource := range resources {
+		if resource.Record.Provider.Kind == kind {
+			return true
+		}
+	}
+	return false
 }

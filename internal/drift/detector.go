@@ -15,6 +15,8 @@ import (
 	"github.com/s1liconcow/skiff/internal/state/schema"
 )
 
+const statefulGroupTag = "skiff.dev/stateful-group"
+
 type Class string
 
 const (
@@ -199,18 +201,25 @@ func missingFinding(service string, record schema.ResourceRecord) Finding {
 }
 
 func changedFinding(service string, record schema.ResourceRecord, observed provider.ResourceInspection) *Finding {
+	stateful := isStatefulRecord(record) || isStatefulObserved(observed)
 	for key, desired := range record.Tags {
 		if observed.Tags[key] == desired {
 			continue
 		}
+		code := "RESOURCE_TAG_DRIFT"
+		safety := "provider_update_or_manual_investigation"
+		if stateful {
+			code = "STATEFUL_RESOURCE_DRIFT"
+			safety = "snapshot_and_explicit_approval_required"
+		}
 		return &Finding{
 			Class:      ClassChanged,
-			Code:       "RESOURCE_TAG_DRIFT",
+			Code:       code,
 			Kind:       record.Provider.Kind,
 			LogicalID:  record.Logical.Name,
 			ProviderID: firstNonEmpty(observed.ProviderID, record.Provider.ID),
 			Summary:    fmt.Sprintf("%s tag %s drifted: desired %q observed %q", record.Provider.Kind, key, desired, observed.Tags[key]),
-			Safety:     "provider_update_or_manual_investigation",
+			Safety:     safety,
 			Actions: []Action{{
 				ID:       "plan_service",
 				Command:  fmt.Sprintf("skiff plan <spec> --service %s --format json", service),
@@ -219,14 +228,20 @@ func changedFinding(service string, record schema.ResourceRecord, observed provi
 		}
 	}
 	if strings.Contains(strings.ToLower(observed.Status), "drift") || strings.Contains(strings.ToLower(observed.Status), "changed") {
+		code := "RESOURCE_STATUS_DRIFT"
+		safety := "provider_update_or_manual_investigation"
+		if stateful {
+			code = "STATEFUL_RESOURCE_DRIFT"
+			safety = "snapshot_and_explicit_approval_required"
+		}
 		return &Finding{
 			Class:      ClassChanged,
-			Code:       "RESOURCE_STATUS_DRIFT",
+			Code:       code,
 			Kind:       record.Provider.Kind,
 			LogicalID:  record.Logical.Name,
 			ProviderID: firstNonEmpty(observed.ProviderID, record.Provider.ID),
 			Summary:    fmt.Sprintf("%s status indicates drift: %s", record.Provider.Kind, observed.Status),
-			Safety:     "provider_update_or_manual_investigation",
+			Safety:     safety,
 		}
 	}
 	return nil
@@ -236,7 +251,7 @@ func orphanFinding(service string, observed provider.ResourceInspection) Finding
 	class := ClassOrphaned
 	code := "RESOURCE_ORPHANED"
 	safety := "gc_plan_required"
-	if isStatefulKind(observed.Kind) {
+	if isStatefulObserved(observed) {
 		class = ClassUnsafe
 		code = "STATEFUL_ORPHAN_PROTECTED"
 		safety = "snapshot_and_explicit_approval_required"
@@ -260,7 +275,27 @@ func orphanFinding(service string, observed provider.ResourceInspection) Finding
 
 func isStatefulKind(kind string) bool {
 	kind = strings.ToLower(kind)
-	return strings.Contains(kind, "database") || strings.Contains(kind, "rds") || strings.Contains(kind, "volume")
+	return strings.Contains(kind, "database") ||
+		strings.Contains(kind, "rds") ||
+		strings.Contains(kind, "volume") ||
+		strings.Contains(kind, "snapshot") ||
+		strings.Contains(kind, "fencing") ||
+		strings.Contains(kind, "stateful")
+}
+
+func isStatefulRecord(record schema.ResourceRecord) bool {
+	return isStatefulKind(record.Provider.Kind) || isStatefulTags(record.Tags)
+}
+
+func isStatefulObserved(observed provider.ResourceInspection) bool {
+	return isStatefulKind(observed.Kind) || isStatefulTags(observed.Tags)
+}
+
+func isStatefulTags(tags map[string]string) bool {
+	if len(tags) == 0 {
+		return false
+	}
+	return strings.TrimSpace(tags[statefulGroupTag]) != ""
 }
 
 func logicalKey(kind, logical string) string {

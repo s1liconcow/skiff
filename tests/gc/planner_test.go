@@ -10,6 +10,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/objstore/memory"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
 	"github.com/s1liconcow/skiff/internal/state/schema"
+	stateruntime "github.com/s1liconcow/skiff/internal/stateful"
 )
 
 func TestGCPlanIsReadOnlyAndProtectsStatefulResources(t *testing.T) {
@@ -31,10 +32,14 @@ func TestGCPlanIsReadOnlyAndProtectsStatefulResources(t *testing.T) {
 	}
 	kinds := map[skiffgc.ActionKind]bool{}
 	protected := false
+	protectedBackup := false
 	for _, action := range plan.Actions {
 		kinds[action.Kind] = true
 		if action.Protected && action.RequiresSnapshot {
 			protected = true
+		}
+		if action.Protected && action.ResourceKind == "stateful-backup" && action.RequiresApproval {
+			protectedBackup = true
 		}
 	}
 	for _, kind := range []skiffgc.ActionKind{skiffgc.ActionExpireRelease, skiffgc.ActionArchiveOperation, skiffgc.ActionProtectStateful} {
@@ -44,6 +49,9 @@ func TestGCPlanIsReadOnlyAndProtectsStatefulResources(t *testing.T) {
 	}
 	if !protected {
 		t.Fatalf("stateful resource was not protected: %+v", plan.Actions)
+	}
+	if !protectedBackup {
+		t.Fatalf("stateful backup was not protected: %+v", plan.Actions)
 	}
 }
 
@@ -115,6 +123,29 @@ func seedGCState(t *testing.T, store objstore.ObjectStore) {
 		Service:       "payments-api",
 		Env:           "prod",
 		ObservedAt:    "2026-05-14T00:00:00Z",
+	})
+	createJSON(t, store, "resources/by-provider/aws/launch-template/lt-stateful.json", schema.ResourceRecord{
+		SchemaVersion: schema.Version,
+		Logical:       schema.ResourceLogicalRef{Kind: "launch-template", Name: "stateful-launch-template:payments-api"},
+		Provider:      schema.ResourceProviderRef{Provider: "aws", Kind: "launch-template", ID: "lt-stateful"},
+		Service:       "payments-api",
+		Env:           "prod",
+		Tags:          map[string]string{"skiff.dev/stateful-group": "payments-api"},
+		ObservedAt:    "2026-05-14T00:00:00Z",
+	})
+	createJSON(t, store, "stateful/payments-api/backups/backup_old/record.json", stateruntime.BackupRecord{
+		SchemaVersion: schema.Version,
+		BackupID:      "backup_old",
+		Group:         "payments-api",
+		Env:           "prod",
+		Member:        0,
+		VolumeID:      "vol-123",
+		SnapshotID:    "snap-123",
+		Provider:      "aws",
+		ProviderID:    "snap-123",
+		Status:        "succeeded",
+		CreatedAt:     "2026-05-14T00:00:00Z",
+		ExpiresAt:     "2026-05-16T00:00:00Z",
 	})
 }
 
