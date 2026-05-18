@@ -220,6 +220,6 @@ func writeFailoverResult(binary, format, traceID string, result failoverResult, 
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "failover", format, traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "failover", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }

@@ -127,7 +127,7 @@ func runPromote(binary string, args []string, root rootOptions, stdout, stderr i
 		}
 		return exitCode
 	default:
-		return writeClientCommandError(binary, "promote", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "markdown"`), stdout, stderr)
+		return writeClientCommandError(binary, "promote", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", "json-pretty", or "markdown"`), stdout, stderr)
 	}
 }
 
@@ -178,5 +178,5 @@ func printPromoteUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  --from <env> --to <env>")
 	fmt.Fprintln(w, "  --min-stable-duration <duration>")
 	fmt.Fprintln(w, "  --approval-id <id>")
-	fmt.Fprintln(w, "  --format human|json|markdown")
+	fmt.Fprintln(w, "  --format human|json|json-pretty|markdown")
 }

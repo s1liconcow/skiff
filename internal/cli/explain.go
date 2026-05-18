@@ -26,7 +26,7 @@ func runExplain(binary string, args []string, root rootOptions, stdout, stderr i
 	fs := flag.NewFlagSet(binary+" explain", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	format := fs.String("format", root.Format, "output format: human or json")
+	format := fs.String("format", root.Format, "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
@@ -119,7 +119,7 @@ func runExplain(binary string, args []string, root rootOptions, stdout, stderr i
 		}
 		return ExitSuccess
 	default:
-		return writeSpecError(binary, "EXPLAIN_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), nil, stdout, stderr)
+		return writeSpecError(binary, "EXPLAIN_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), nil, stdout, stderr)
 	}
 }
 

@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
 report_dir="${SKIFF_E2E_REPORT_DIR:-$repo_root/.skiff-demo-reports/apple-container}"
+persist="${SKIFF_APPLE_CONTAINER_PERSIST:-${SKIFF_APPLE_CONTAINER_KEEPALIVE:-}}"
 
 cat <<EOF
 Skiff Apple Container workload demo
@@ -17,6 +18,14 @@ Reports will be written to:
 
 EOF
 
+if [[ "$persist" == "1" ]]; then
+  cat <<'EOF'
+Persistent mode is enabled. RustFS, Caddy, and skiffd will be left running so
+you can use the generated Skiff contexts and TUI after this command exits.
+
+EOF
+fi
+
 if ! command -v container >/dev/null 2>&1; then
   cat >&2 <<'EOF'
 Apple Container CLI was not found.
@@ -29,4 +38,38 @@ fi
 
 mkdir -p "$report_dir"
 export SKIFF_E2E_REPORT_DIR="$report_dir"
-exec make -C "$repo_root" e2e-apple-container
+make -C "$repo_root" e2e-apple-container
+
+latest_env="$(ls -t "$report_dir"/*.env 2>/dev/null || true)"
+latest_env="${latest_env%%$'\n'*}"
+latest_config="$(ls -t "$report_dir"/*.skiffconfig 2>/dev/null || true)"
+latest_config="${latest_config%%$'\n'*}"
+
+if [[ -n "$latest_env" && -n "$latest_config" ]]; then
+  cat <<EOF
+
+Apple Container context artifacts:
+  env:    $latest_env
+  config: $latest_config
+
+The demo used these contexts during the run:
+  source "$latest_env"
+  skiff config get-contexts
+  SKIFF_CONTEXT=local-apple-vms skiff status caddy-web
+  SKIFF_CONTEXT=local-apple-skiffd skiff tui caddy-web --read-only
+
+EOF
+  if [[ "$persist" == "1" ]]; then
+    cat <<EOF
+RustFS, Caddy, and skiffd are still running. Stop them with:
+  make demo-apple-down
+
+EOF
+  else
+    cat <<'EOF'
+This smoke demo is cleanup-safe: the Apple containers and in-process skiffd are
+stopped when the test exits. Use `make demo-apple-context` for a live context
+that stays up.
+EOF
+  fi
+fi

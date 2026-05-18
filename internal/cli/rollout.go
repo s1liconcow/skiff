@@ -102,6 +102,6 @@ func runRolloutWatch(binary string, args []string, root rootOptions, stdout, std
 		}
 		return ExitSuccess
 	default:
-		return writeSpecError(binary, "ROLLOUT_INVALID", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), nil, stdout, stderr)
+		return writeSpecError(binary, "ROLLOUT_INVALID", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), nil, stdout, stderr)
 	}
 }

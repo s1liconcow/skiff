@@ -44,7 +44,7 @@ func runCI(binary string, args []string, root rootOptions, stdout, stderr io.Wri
 func runCIGenerate(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" ci generate", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	format := fs.String("format", root.Format, "output format: human or json")
+	format := fs.String("format", root.Format, "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
@@ -117,7 +117,7 @@ func runCIGenerate(binary string, args []string, root rootOptions, stdout, stder
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "ci generate", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "ci generate", *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -166,5 +166,5 @@ func printCIUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  --provider <provider> --region <region>")
 	fmt.Fprintln(w, "  --staging-env <env> --prod-env <env>")
 	fmt.Fprintln(w, "  --image-repo <repository>")
-	fmt.Fprintln(w, "  --format human|json")
+	fmt.Fprintln(w, "  --format human|json|json-pretty")
 }

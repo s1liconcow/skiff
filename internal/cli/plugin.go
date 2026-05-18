@@ -98,7 +98,7 @@ func runPlugin(binary string, args []string, root rootOptions, stdout, stderr io
 func runPluginList(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" plugin list", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	format := fs.String("format", root.Format, "output format: human or json")
+	format := fs.String("format", root.Format, "output format: human, json, or json-pretty")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier")
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
@@ -134,14 +134,14 @@ func runPluginList(binary string, args []string, root rootOptions, stdout, stder
 		}
 		return ExitSuccess
 	default:
-		return writePluginError(binary, "plugin list", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writePluginError(binary, "plugin list", *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
 func runPluginValidate(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" plugin validate", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	format := fs.String("format", root.Format, "output format: human or json")
+	format := fs.String("format", root.Format, "output format: human, json, or json-pretty")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier")
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
@@ -180,14 +180,14 @@ func runPluginValidate(binary string, args []string, root rootOptions, stdout, s
 		}
 		return ExitSuccess
 	default:
-		return writePluginError(binary, "plugin validate", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writePluginError(binary, "plugin validate", *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
 func runPluginExplain(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" plugin explain", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	format := fs.String("format", root.Format, "output format: human or json")
+	format := fs.String("format", root.Format, "output format: human, json, or json-pretty")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier")
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
@@ -260,14 +260,14 @@ func runPluginExplain(binary string, args []string, root rootOptions, stdout, st
 		}
 		return ExitSuccess
 	default:
-		return writePluginError(binary, "plugin explain", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writePluginError(binary, "plugin explain", *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
 func runPluginDev(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" plugin dev", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	format := fs.String("format", root.Format, "output format: human or json")
+	format := fs.String("format", root.Format, "output format: human, json, or json-pretty")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier")
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
@@ -315,7 +315,7 @@ func runPluginDev(binary string, args []string, root rootOptions, stdout, stderr
 		}
 		return ExitSuccess
 	default:
-		return writePluginError(binary, "plugin dev", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writePluginError(binary, "plugin dev", *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 

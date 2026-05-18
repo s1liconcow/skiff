@@ -116,7 +116,7 @@ func writeMetricsResult(binary, format, traceID string, series []provider.Metric
 		}
 		return ExitSuccess
 	default:
-		return writeSpecError(binary, "METRICS_INVALID", format, traceID, errors.New(`unsupported format; expected "human" or "json"`), nil, stdout, stderr)
+		return writeSpecError(binary, "METRICS_INVALID", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), nil, stdout, stderr)
 	}
 }
 

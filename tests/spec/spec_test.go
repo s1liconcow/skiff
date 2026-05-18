@@ -1,6 +1,7 @@
 package spec_test
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -276,6 +277,26 @@ stateful:
 	}
 	assertDiagnostic(t, result.Diagnostics, "$.stateful.volume.mountPath", "INVALID_PATH")
 	assertDiagnostic(t, result.Diagnostics, "$.stateful.recipe", "RECIPE_REQUIRED")
+}
+
+func TestStatefulJetStreamExampleValidates(t *testing.T) {
+	doc, err := spec.LoadFile(filepath.Join("..", "..", "examples", "stateful", "jetstream", "skiff.yaml"), spec.DecodeOptions{})
+	if err != nil {
+		t.Fatalf("LoadFile returned error: %v", err)
+	}
+	if doc.Kind != spec.KindStatefulGroup || doc.StatefulGroup == nil {
+		t.Fatalf("example decoded as %s with stateful=%v, want StatefulGroup", doc.Kind, doc.StatefulGroup != nil)
+	}
+	if doc.StatefulGroup.Replicas != 3 || len(doc.StatefulGroup.Members) != 3 {
+		t.Fatalf("unexpected stateful membership: %+v", doc.StatefulGroup)
+	}
+	if len(doc.StatefulGroup.Recipe.Config) == 0 {
+		t.Fatal("stateful recipe config was not decoded")
+	}
+	result := spec.Validate(*doc)
+	if !result.OK {
+		t.Fatalf("Validate diagnostics = %+v, want OK", result.Diagnostics)
+	}
 }
 
 func TestMarshalYAMLShowsDefaultedFields(t *testing.T) {

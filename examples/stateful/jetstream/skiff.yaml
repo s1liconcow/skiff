@@ -1,0 +1,80 @@
+apiVersion: skiff.dev/v1alpha1
+kind: StatefulGroup
+metadata:
+  name: orders-stream
+  env: prod
+  labels:
+    app: orders
+    tier: stateful-messaging
+    region: us-west-2
+stateful:
+  replicas: 3
+  members:
+    - ordinal: 0
+      zone: us-west-2a
+      dnsName: orders-stream-0.state.prod.internal.example.com
+    - ordinal: 1
+      zone: us-west-2b
+      dnsName: orders-stream-1.state.prod.internal.example.com
+    - ordinal: 2
+      zone: us-west-2c
+      dnsName: orders-stream-2.state.prod.internal.example.com
+  volume:
+    size: 250Gi
+    type: gp3
+    mountPath: /var/lib/nats
+    encrypted: true
+  identity:
+    dnsZoneRef: route53://Z0123456789EXAMPLE/prod.internal.example.com
+    hostnamePrefix: orders-stream
+  recipe:
+    name: nats-jetstream
+    config:
+      artifact:
+        type: oci
+        ref: docker.io/library/nats:2.14.0@sha256:ddb480f4b97d90f183123e96bbc7c96ab2a126883f7a380531cc208fc8ba9ca7
+      runtime:
+        command:
+          - /usr/local/bin/nats-server
+          - --config
+          - /etc/nats/server.conf
+        ports:
+          client: 4222
+          cluster: 6222
+          monitoring: 8222
+        health:
+          path: /healthz
+          port: 8222
+        metrics:
+          path: /metrics
+          port: 8222
+      cluster:
+        name: orders-prod
+        quorum: 2
+        routes:
+          - nats://orders-stream-0.state.prod.internal.example.com:6222
+          - nats://orders-stream-1.state.prod.internal.example.com:6222
+          - nats://orders-stream-2.state.prod.internal.example.com:6222
+      streams:
+        - name: ORDERS
+          subjects:
+            - orders.>
+          storage: file
+          retention: limits
+          maxAge: 168h
+        - name: PAYMENTS
+          subjects:
+            - payments.>
+          storage: file
+          retention: interest
+          maxAge: 72h
+      snapshots:
+        enabled: true
+        interval: 15m
+        retention: 7d
+      recovery:
+        requireFencing: true
+        replaceMemberSaga: stateful.replace_member
+        maxUnavailableMembers: 1
+  update:
+    strategy: ordered

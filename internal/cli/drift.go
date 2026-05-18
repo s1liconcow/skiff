@@ -80,7 +80,7 @@ func runDrift(binary string, args []string, root rootOptions, stdout, stderr io.
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "drift", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "drift", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 

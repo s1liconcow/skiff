@@ -344,7 +344,7 @@ func runSagaApproval(binary, command string, args []string, root rootOptions, st
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -387,7 +387,7 @@ func runSagaSkeleton(binary, command string, args []string, root rootOptions, st
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -442,7 +442,7 @@ func runSagaInspect(binary string, args []string, root rootOptions, stdout, stde
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -508,7 +508,7 @@ func writeCanarySagaResult(binary, command, format, traceID string, result canar
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "saga", format, traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "saga", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 

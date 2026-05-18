@@ -130,7 +130,7 @@ func runOpsList(binary string, args []string, root rootOptions, stdout, stderr i
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "ops", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "ops", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -187,7 +187,7 @@ func runOpsInspect(binary string, args []string, root rootOptions, stdout, stder
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "ops", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "ops", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -255,7 +255,7 @@ func runOpsResume(binary string, args []string, root rootOptions, stdout, stderr
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "ops", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "ops", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 

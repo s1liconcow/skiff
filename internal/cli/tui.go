@@ -85,11 +85,11 @@ func runTUI(binary string, args []string, root rootOptions, stdout, stderr io.Wr
 			}
 			return ExitSuccess
 		default:
-			return writeClientCommandError(binary, "tui", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+			return writeClientCommandError(binary, "tui", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 		}
 	}
 	if *flags.format != "human" && *flags.format != "text" {
-		return writeClientCommandError(binary, "tui", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "tui", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 	if _, err := newTUIProgram(model, stdout).Run(); err != nil {
 		return writeClientError(binary, "tui", *flags.format, *flags.traceID, err, stdout, stderr)

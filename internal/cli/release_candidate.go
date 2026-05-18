@@ -153,7 +153,7 @@ func runReleaseCandidateCreate(binary string, args []string, root rootOptions, s
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "release-candidate-create", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "release-candidate-create", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -209,7 +209,7 @@ func runReleaseCandidateShow(binary string, args []string, root rootOptions, std
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "release-candidate-show", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "release-candidate-show", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 

@@ -219,7 +219,7 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 		}
 		return ExitSuccess
 	default:
-		return writeSpecError(binary, "DEPLOY_INVALID", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), nil, stdout, stderr)
+		return writeSpecError(binary, "DEPLOY_INVALID", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), nil, stdout, stderr)
 	}
 }
 

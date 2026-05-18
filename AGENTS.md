@@ -14,6 +14,12 @@ Operations are explicit sagas.
 
 Do not infer architecture from Kubernetes, Terraform, or operator frameworks. Skiff has its own model.
 
+## Branch workflow
+
+Prefer keeping work directly on `main` in this repository. Use short-lived branches
+only when a task explicitly needs isolation, then merge them back into `main`
+promptly.
+
 ## What Skiff is
 
 Skiff deploys and operates cloud-native workloads by compiling simple specs into cloud primitives.

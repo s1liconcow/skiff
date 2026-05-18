@@ -152,7 +152,7 @@ func writeTerraformGenerateResult(binary, format, traceID string, result terrafo
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "terraform generate", format, traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "terraform generate", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 

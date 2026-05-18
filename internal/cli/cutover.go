@@ -167,7 +167,7 @@ func writeCutoverResult(binary, format, traceID string, result cutoverResult, st
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "cutover", format, traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "cutover", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 

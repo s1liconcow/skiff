@@ -5,9 +5,61 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+var ansiEscapeRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func TestVersionJSONPretty(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		args      []string
+		wantColor bool
+	}{
+		{
+			name:      "command flag",
+			args:      []string{"version", "--format", "json-pretty", "--trace-id", "tr_pretty"},
+			wantColor: true,
+		},
+		{
+			name:      "global flag",
+			args:      []string{"--format", "json-pretty", "version", "--trace-id", "tr_pretty_global"},
+			wantColor: true,
+		},
+		{
+			name:      "no color",
+			args:      []string{"version", "--format", "json-pretty", "--no-color", "--trace-id", "tr_pretty_plain"},
+			wantColor: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := Run("skiff", tc.args, &stdout, &stderr)
+			if code != ExitSuccess {
+				t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+			if strings.Contains(stdout.String(), "\x1b[") != tc.wantColor {
+				t.Fatalf("color presence = %t, want %t\n%s", strings.Contains(stdout.String(), "\x1b["), tc.wantColor, stdout.String())
+			}
+			stripped := ansiEscapeRE.ReplaceAll(stdout.Bytes(), nil)
+			if !bytes.Contains(stripped, []byte("\n  \"ok\"")) {
+				t.Fatalf("output was not pretty printed:\n%s", stripped)
+			}
+			var got versionOutput
+			if err := json.Unmarshal(stripped, &got); err != nil {
+				t.Fatalf("stripped output is not valid JSON: %v\n%s", err, stripped)
+			}
+			if !got.OK || got.Binary != "skiff" {
+				t.Fatalf("unexpected version output: %+v", got)
+			}
+		})
+	}
+}
 
 func TestConfigShowJSONDirectMode(t *testing.T) {
 	clearSkiffEnv(t)

@@ -109,7 +109,7 @@ func runGCApply(binary string, args []string, root rootOptions, stdout, stderr i
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "gc apply", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "gc apply", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -160,7 +160,7 @@ func writeGCPlan(binary, format, traceID string, plan skiffgc.Plan, stdout, stde
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "gc plan", format, traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "gc plan", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 

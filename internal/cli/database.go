@@ -396,7 +396,7 @@ func writeDatabaseSagaResult(binary, command, format, traceID string, result dat
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "database", format, traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "database", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -463,7 +463,7 @@ func splitDatabaseArgs(args []string) ([]string, []string, error) {
 func addDatabaseClientFlags(fs *flag.FlagSet, root rootOptions) clientFlagSet {
 	mode := string(root.Mode)
 	return clientFlagSet{
-		format:      fs.String("format", root.Format, "output format: human or json"),
+		format:      fs.String("format", root.Format, "output format: human, json, or json-pretty"),
 		noColor:     fs.Bool("no-color", root.NoColor, "disable ANSI color output"),
 		traceID:     fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output"),
 		yes:         fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation"),

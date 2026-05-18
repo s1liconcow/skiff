@@ -100,7 +100,7 @@ func runCostExplain(binary string, args []string, root rootOptions, stdout, stde
 	fs := flag.NewFlagSet(binary+" cost explain", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	format := fs.String("format", root.Format, "output format: human or json")
+	format := fs.String("format", root.Format, "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
@@ -183,7 +183,7 @@ func runCostExplain(binary string, args []string, root rootOptions, stdout, stde
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "cost explain", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "cost explain", *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 

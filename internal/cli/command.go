@@ -61,6 +61,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return writeRootError(binary, root.Format, root.TraceID, err, stdout, stderr)
 	}
+	root.Args, root.Format, stdout = prepareJSONPrettyOutput(root.Args, root.Format, root.NoColor, stdout)
+	defer flushJSONPrettyOutput(stdout)
 	if root.Command == "" {
 		printUsage(stderr, binary)
 		return ExitUserError
@@ -163,7 +165,7 @@ func runVersion(binary string, args []string, root rootOptions, stdout, stderr i
 	fs := flag.NewFlagSet(binary+" version", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	format := fs.String("format", root.Format, "output format: human or json")
+	format := fs.String("format", root.Format, "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
@@ -235,7 +237,7 @@ func runVersion(binary string, args []string, root rootOptions, stdout, stderr i
 		}
 		return ExitSuccess
 	default:
-		return writeRootError(binary, *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeRootError(binary, *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -289,7 +291,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Global flags:")
 	fmt.Fprintln(w, "  --config <path> --context <name> --env <env> --provider <provider> --region <region>")
-	fmt.Fprintln(w, "  --state <uri> --api --direct --format human|json --no-color --yes --trace-id <id>")
+	fmt.Fprintln(w, "  --state <uri> --api --direct --format human|json|json-pretty --no-color --yes --trace-id <id>")
 }
 
 type configShowOutput struct {
@@ -463,7 +465,7 @@ func runConfigShow(binary string, args []string, root rootOptions, stdout, stder
 	fs := flag.NewFlagSet(binary+" config show", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	format := fs.String("format", root.Format, "output format: human or json")
+	format := fs.String("format", root.Format, "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
@@ -571,14 +573,14 @@ func runConfigShow(binary string, args []string, root rootOptions, stdout, stder
 		}
 		return ExitSuccess
 	default:
-		return writeConfigError(binary, *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), redacted.Sources, stdout, stderr)
+		return writeConfigError(binary, *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), redacted.Sources, stdout, stderr)
 	}
 }
 
 func runConfigGetContexts(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" config get-contexts", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	format := fs.String("format", root.Format, "output format: human or json")
+	format := fs.String("format", root.Format, "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	configPath := fs.String("config", root.ConfigPath, "path to Skiff config file")
@@ -641,14 +643,14 @@ func runConfigGetContexts(binary string, args []string, root rootOptions, stdout
 		}
 		return ExitSuccess
 	default:
-		return writeConfigError(binary, *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), nil, stdout, stderr)
+		return writeConfigError(binary, *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), nil, stdout, stderr)
 	}
 }
 
 func runConfigCurrentContext(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" config current-context", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	format := fs.String("format", root.Format, "output format: human or json")
+	format := fs.String("format", root.Format, "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	configPath := fs.String("config", root.ConfigPath, "path to Skiff config file")
@@ -686,14 +688,14 @@ func runConfigCurrentContext(binary string, args []string, root rootOptions, std
 		}
 		return ExitSuccess
 	default:
-		return writeConfigError(binary, *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), nil, stdout, stderr)
+		return writeConfigError(binary, *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), nil, stdout, stderr)
 	}
 }
 
 func runConfigUseContext(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" config use-context", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	format := fs.String("format", root.Format, "output format: human or json")
+	format := fs.String("format", root.Format, "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	configPath := fs.String("config", root.ConfigPath, "path to Skiff config file")
@@ -739,7 +741,7 @@ func runConfigUseContext(binary string, args []string, root rootOptions, stdout,
 		}
 		return ExitSuccess
 	default:
-		return writeConfigError(binary, *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), nil, stdout, stderr)
+		return writeConfigError(binary, *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), nil, stdout, stderr)
 	}
 }
 
@@ -816,7 +818,7 @@ func runBootstrapAWS(binary string, args []string, stdout, stderr io.Writer) int
 	fs := flag.NewFlagSet(binary+" bootstrap aws", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	format := fs.String("format", "human", "output format: human or json")
+	format := fs.String("format", "human", "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", false, "disable ANSI color output")
 	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", false, "apply bootstrap changes without prompting")
@@ -894,7 +896,7 @@ func runBootstrapAWS(binary string, args []string, stdout, stderr io.Writer) int
 		}
 		return ExitSuccess
 	default:
-		return writeBootstrapError(binary, *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeBootstrapError(binary, *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -966,7 +968,7 @@ func runPolicyExplain(binary string, args []string, stdout, stderr io.Writer) in
 	fs := flag.NewFlagSet(binary+" policy explain", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	format := fs.String("format", "human", "output format: human or json")
+	format := fs.String("format", "human", "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", false, "disable ANSI color output")
 	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
@@ -1033,7 +1035,7 @@ func runPolicyExplain(binary string, args []string, stdout, stderr io.Writer) in
 		}
 		return ExitSuccess
 	default:
-		return writePolicyError(binary, *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writePolicyError(binary, *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -1110,7 +1112,7 @@ func runEvents(binary string, args []string, root rootOptions, stdout, stderr io
 			}
 			return ExitSuccess
 		default:
-			return writeEventsError(binary, *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+			return writeEventsError(binary, *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 		}
 	}
 
@@ -1164,7 +1166,7 @@ func runEvents(binary string, args []string, root rootOptions, stdout, stderr io
 		}
 		return ExitSuccess
 	default:
-		return writeEventsError(binary, *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeEventsError(binary, *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -1204,7 +1206,7 @@ func runEventsWatch(ctx context.Context, binary string, skiffClient client.Inter
 				return ExitInternalError
 			}
 		default:
-			return writeEventsError(binary, format, traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+			return writeEventsError(binary, format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 		}
 	}
 	return ExitSuccess
@@ -1299,7 +1301,7 @@ func runCompile(binary string, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" compile", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	format := fs.String("format", "human", "output format: human or json")
+	format := fs.String("format", "human", "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", false, "disable ANSI color output")
 	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
@@ -1324,7 +1326,7 @@ func runCompile(binary string, args []string, stdout, stderr io.Writer) int {
 		return writeCompileError(binary, "SPEC_COMPILE_INVALID", *format, *traceID, errors.New("spec file is required"), nil, stdout, stderr)
 	}
 	if *format != "human" && *format != "text" && *format != "json" {
-		return writeCompileError(binary, "SPEC_COMPILE_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), nil, stdout, stderr)
+		return writeCompileError(binary, "SPEC_COMPILE_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), nil, stdout, stderr)
 	}
 	_ = noColor
 	_ = yes
@@ -1380,7 +1382,7 @@ func runCompile(binary string, args []string, stdout, stderr io.Writer) int {
 		}
 		return ExitSuccess
 	}
-	return writeCompileError(binary, "SPEC_COMPILE_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), nil, stdout, stderr)
+	return writeCompileError(binary, "SPEC_COMPILE_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), nil, stdout, stderr)
 }
 
 func writeCompileError(binary, code, format, traceID string, err error, fields []spec.Diagnostic, stdout, stderr io.Writer) int {
@@ -1490,7 +1492,7 @@ func runValidate(binary string, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, string(body))
 		return ExitSuccess
 	default:
-		return writeSpecError(binary, "SPEC_VALIDATE_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "yaml"`), nil, stdout, stderr)
+		return writeSpecError(binary, "SPEC_VALIDATE_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human", "json", "json-pretty", or "yaml"`), nil, stdout, stderr)
 	}
 }
 
@@ -1542,7 +1544,7 @@ func printBootstrapUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  --bucket <bucket>")
 	fmt.Fprintln(w, "  --dry-run")
 	fmt.Fprintln(w, "  --emit terraform")
-	fmt.Fprintln(w, "  --format human|json")
+	fmt.Fprintln(w, "  --format human|json|json-pretty")
 }
 
 func printPolicyUsage(w io.Writer, binary string) {
@@ -1554,7 +1556,7 @@ func printPolicyUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  --role state-bucket|runner|deployer|skiffd|break-glass")
 	fmt.Fprintln(w, "  --bucket <bucket>")
 	fmt.Fprintln(w, "  --kms-alias <alias/name>")
-	fmt.Fprintln(w, "  --format human|json")
+	fmt.Fprintln(w, "  --format human|json|json-pretty")
 }
 
 func printEventsUsage(w io.Writer, binary string) {
@@ -1566,13 +1568,13 @@ func printEventsUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  --operation <operation>")
 	fmt.Fprintln(w, "  --saga <saga>")
 	fmt.Fprintln(w, "  --limit <n>")
-	fmt.Fprintln(w, "  --format human|json")
+	fmt.Fprintln(w, "  --format human|json|json-pretty")
 }
 
 func printValidateUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s validate <skiff.yaml> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Flags:")
-	fmt.Fprintln(w, "  --format human|json|yaml")
+	fmt.Fprintln(w, "  --format human|json|json-pretty|yaml")
 	fmt.Fprintln(w, "  --show-defaulted")
 	fmt.Fprintln(w, "  --allow-unknown-fields")
 	fmt.Fprintln(w, "  --trace-id <id>")
@@ -1581,7 +1583,7 @@ func printValidateUsage(w io.Writer, binary string) {
 func printCompileUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s compile <skiff.yaml> [flags]\n\n", binary)
 	fmt.Fprintln(w, "Flags:")
-	fmt.Fprintln(w, "  --format human|json")
+	fmt.Fprintln(w, "  --format human|json|json-pretty")
 	fmt.Fprintln(w, "  --out <path>")
 	fmt.Fprintln(w, "  --allow-unknown-fields")
 	fmt.Fprintln(w, "  --trace-id <id>")
@@ -1611,7 +1613,7 @@ func runReleaseVerify(binary string, args []string, stdout, stderr io.Writer) in
 	fs := flag.NewFlagSet(binary+" release verify", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	format := fs.String("format", "human", "output format: human or json")
+	format := fs.String("format", "human", "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", false, "disable ANSI color output")
 	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
@@ -1680,7 +1682,7 @@ func runReleaseVerify(binary string, args []string, stdout, stderr io.Writer) in
 		return ExitUserError
 	}
 	if *format != "human" && *format != "text" {
-		return writeVerifyError(binary, "RELEASE_VERIFY_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeVerifyError(binary, "RELEASE_VERIFY_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 	printReleaseVerification(stdout, result)
 	if result.OK {
@@ -1711,7 +1713,7 @@ func runObjectVerify(binary string, args []string, stdout, stderr io.Writer) int
 	fs := flag.NewFlagSet(binary+" object verify", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	format := fs.String("format", "human", "output format: human or json")
+	format := fs.String("format", "human", "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", false, "disable ANSI color output")
 	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
@@ -1759,7 +1761,7 @@ func runObjectVerify(binary string, args []string, stdout, stderr io.Writer) int
 		return ExitUserError
 	}
 	if *format != "human" && *format != "text" {
-		return writeVerifyError(binary, "OBJECT_VERIFY_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeVerifyError(binary, "OBJECT_VERIFY_INVALID", *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 	printObjectVerification(stdout, result)
 	if result.OK {
@@ -1800,7 +1802,7 @@ func runStatePath(binary string, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" state path "+pathKind, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	format := fs.String("format", "human", "output format: human or json")
+	format := fs.String("format", "human", "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", false, "disable ANSI color output")
 	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
@@ -1884,7 +1886,7 @@ func runStatePath(binary string, args []string, stdout, stderr io.Writer) int {
 		}
 		return ExitSuccess
 	default:
-		return writeStateError(binary, *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeStateError(binary, *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 

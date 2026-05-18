@@ -59,7 +59,7 @@ type clientFlagSet struct {
 
 func addClientFlags(fs *flag.FlagSet, root rootOptions) clientFlagSet {
 	return clientFlagSet{
-		format:                          fs.String("format", root.Format, "output format: human or json"),
+		format:                          fs.String("format", root.Format, "output format: human, json, or json-pretty"),
 		noColor:                         fs.Bool("no-color", root.NoColor, "disable ANSI color output"),
 		traceID:                         fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output"),
 		yes:                             fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation"),
@@ -183,7 +183,7 @@ func runStatus(binary string, args []string, root rootOptions, stdout, stderr io
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "status", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "status", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -223,7 +223,7 @@ func runStatusWatch(ctx context.Context, binary string, skiffClient client.Inter
 				return ExitInternalError
 			}
 		default:
-			return writeClientCommandError(binary, "status", format, traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+			return writeClientCommandError(binary, "status", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 		}
 		if !waitForStatusWatch(ctx) {
 			return ExitSuccess
@@ -291,8 +291,8 @@ func printStatusHuman(w io.Writer, status client.Status) {
 }
 
 func writeClientCommandError(binary, command, format, traceID string, err error, stdout, stderr io.Writer) int {
-	if format == "json" {
-		_ = json.NewEncoder(stdout).Encode(commandErrorOutput{
+	if isJSONFormat(format) {
+		_ = writeJSON(stdout, format, commandErrorOutput{
 			OK:      false,
 			Code:    strings.ToUpper(command) + "_INVALID",
 			Summary: err.Error(),

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -53,10 +52,13 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	args, defaultFormat, stdout := cli.PrepareJSONPrettyOutput(args, "human", false, stdout)
+	defer cli.FlushJSONPrettyOutput(stdout)
+
 	fs := flag.NewFlagSet("skiff-worker", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	format := fs.String("format", "human", "output format: human or json")
+	format := fs.String("format", defaultFormat, "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", false, "disable ANSI color output")
 	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
@@ -134,8 +136,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		return writeWorkerResult(*format, *traceID, *result, stdout, stderr)
 	}
-	if *format == "json" {
-		if err := json.NewEncoder(stdout).Encode(map[string]any{"ok": true, "trace_id": *traceID, "summary": "skiff-worker started"}); err != nil {
+	if cli.IsJSONFormat(*format) {
+		if err := cli.WriteJSONOutput(stdout, *format, map[string]any{"ok": true, "trace_id": *traceID, "summary": "skiff-worker started"}); err != nil {
 			return writeWorkerError(*format, *traceID, err, stdout, stderr)
 		}
 	} else {
@@ -157,20 +159,20 @@ func writeWorkerResult(format, traceID string, result worker.RunResult, stdout, 
 		fmt.Fprintf(stdout, "sagas resumed: %d\n", result.SagaResumed)
 		fmt.Fprintf(stdout, "sagas skipped: %d\n", result.SagaSkipped)
 		return cli.ExitSuccess
-	case "json":
-		if err := json.NewEncoder(stdout).Encode(workerOutput{OK: true, TraceID: traceID, Result: result}); err != nil {
+	case "json", "json-pretty":
+		if err := cli.WriteJSONOutput(stdout, format, workerOutput{OK: true, TraceID: traceID, Result: result}); err != nil {
 			fmt.Fprintf(stderr, "skiff-worker: %v\n", err)
 			return cli.ExitInternalError
 		}
 		return cli.ExitSuccess
 	default:
-		return writeWorkerError(format, traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeWorkerError(format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
 func writeWorkerError(format, traceID string, err error, stdout, stderr io.Writer) int {
-	if format == "json" {
-		_ = json.NewEncoder(stdout).Encode(workerErrorOutput{
+	if cli.IsJSONFormat(format) {
+		_ = cli.WriteJSONOutput(stdout, format, workerErrorOutput{
 			OK:      false,
 			Code:    "WORKER_FAILED",
 			Summary: err.Error(),

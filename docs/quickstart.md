@@ -2,7 +2,8 @@
 
 This quickstart deploys the `http-hello` service with local object state and the
 fake provider. It shows the normal operator loop without requiring AWS
-credentials.
+credentials. On Apple silicon, it also shows how to run the local VM-backed
+RustFS/Caddy path through Apple Container.
 
 ## Run The Scripted Demo
 
@@ -28,11 +29,14 @@ make demo-test
 On Apple silicon, you can also launch the optional RustFS/Caddy workload demo:
 
 ```bash
-make demo-apple-container
+make demo-apple-context
 ```
 
-That path pulls OCI images and starts local Linux VMs through Apple Container.
-Use the fake-provider demo first if you only want to learn the operator loop.
+That path pulls OCI images, starts local Linux VMs through Apple Container, and
+writes a filled-in `.skiffconfig` plus a sourceable `.env` file for the run. It
+leaves RustFS, Caddy, and `skiffd` running so you can inspect the live local
+state and open the TUI after the command exits. Use the fake-provider demo first
+if you only want to learn the operator loop.
 
 ## Create A Local Skiff Config
 
@@ -77,6 +81,98 @@ Select a context for one command without changing the file:
 ```bash
 SKIFF_CONTEXT=local-aws-plan skiff config show
 ```
+
+## Run Actual Local VMs On Apple Silicon
+
+The fake-provider context writes real Skiff state but does not start a workload
+process. To exercise the VM-local runner/workload path on an Apple silicon Mac,
+use the Apple Container demo:
+
+```bash
+container --version
+make demo-apple-context
+```
+
+Prerequisites:
+
+- Apple silicon Mac
+- Apple Container installed and running, with the `container` CLI on `PATH`
+- Network access to pull the RustFS and Caddy OCI images
+
+The demo starts RustFS as an S3-compatible object store and Caddy as the
+workload in local Linux VMs. It publishes signed release/runtime manifests,
+boots the runner lifecycle, rolls Caddy to a second release, starts a local
+`skiffd` against the same object state, and runs a rolling canary saga.
+
+The helper creates temporary ports and bucket names, writes the resolved values
+under `.skiff-demo-reports/apple-container/`, and uses those contexts for its
+Skiff CLI checks. At the end of the run it prints the exact files:
+
+```bash
+source .skiff-demo-reports/apple-container/<run>.env
+skiff config get-contexts
+SKIFF_CONTEXT=local-apple-vms skiff status caddy-web
+SKIFF_CONTEXT=local-apple-skiffd skiff tui caddy-web --read-only
+make demo-apple-down
+```
+
+The generated config has this shape, with the RustFS bucket and `skiffd` port
+already filled in:
+
+```yaml
+apiVersion: skiff.dev/v1alpha1
+kind: SkiffConfig
+current-context: local-apple-vms
+contexts:
+  - name: local-apple-vms
+    context:
+      mode: direct
+      env: prod
+      provider: fake
+      region: local
+      state: "s3://<rustfs-bucket>"
+  - name: local-apple-skiffd-server
+    context:
+      mode: skiffd
+      env: prod
+      provider: fake
+      region: local
+      state: "s3://<rustfs-bucket>"
+  - name: local-apple-skiffd
+    context:
+      mode: api
+      env: prod
+      provider: fake
+      region: local
+      state: "s3://<rustfs-bucket>"
+      apiURL: "http://127.0.0.1:<skiffd-port>"
+```
+
+The generated `.env` file contains the RustFS endpoint details for the same
+run:
+
+```bash
+export AWS_ACCESS_KEY_ID=skiffe2eaccess
+export AWS_SECRET_ACCESS_KEY=skiffe2esecret
+export AWS_REGION=us-east-1
+export AWS_DEFAULT_REGION=us-east-1
+export SKIFF_AWS_ENDPOINT="http://127.0.0.1:<rustfs-port>"
+export SKIFF_AWS_S3_PATH_STYLE=true
+export SKIFF_CONFIG=".skiff-demo-reports/apple-container/<run>.skiffconfig"
+export SKIFF_CONTEXT=local-apple-vms
+export SKIFF_APPLE_RUSTFS_CONTAINER="<rustfs-container>"
+export SKIFF_APPLE_RUSTFS_VOLUME="<rustfs-volume>"
+export SKIFF_APPLE_CADDY_CONTAINER="<caddy-container>"
+export SKIFF_APPLE_SKIFFD_URL="http://127.0.0.1:<skiffd-port>"
+export SKIFF_APPLE_SKIFFD_PID="<skiffd-pid>"
+export SKIFF_APPLE_SKIFFD_LOG=".skiff-demo-reports/apple-container/<run>-skiffd.log"
+```
+
+`make demo-apple-context` is the persistent path. Use `make demo-apple-down` to
+stop the `skiffd` process, Caddy VM, RustFS VM, and RustFS volume recorded in
+the latest generated `.env` file. If you want a cleanup-safe smoke run instead,
+use `make demo-apple-container`; it stops the Apple containers and in-process
+`skiffd` when the command exits.
 
 ## Start From A Spec
 
@@ -204,5 +300,5 @@ demos/test-local-demo.sh
 Launch the Apple Container/Caddy workload path when available:
 
 ```bash
-demos/apple-container-caddy.sh
+make demo-apple-context
 ```

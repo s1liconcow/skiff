@@ -36,7 +36,7 @@ func runAuthz(binary string, args []string, root rootOptions, stdout, stderr io.
 func runAuthzExplain(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" authz explain", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	format := fs.String("format", root.Format, "output format: human or json")
+	format := fs.String("format", root.Format, "output format: human, json, or json-pretty")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier")
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
@@ -103,7 +103,7 @@ func runAuthzExplain(binary string, args []string, root rootOptions, stdout, std
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "authz explain", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "authz explain", *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 

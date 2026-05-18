@@ -42,11 +42,36 @@ exits non-zero if any command fails.
 On Apple silicon with Apple Container available:
 
 ```bash
-demos/apple-container-caddy.sh
+make demo-apple-context
 ```
 
-This wraps `make e2e-apple-container`. It starts RustFS, launches Caddy in a
-local Linux VM, verifies signed OCI release/runtime manifests, rolls to a second
-release, starts a local `skiffd` against the RustFS state, and runs a rolling
-canary saga. It is slower and pulls OCI images, but it shows the runner/workload
-path rather than only the fake provider.
+This wraps the Apple Container e2e path in persistent mode. It starts RustFS,
+launches Caddy in a local Linux VM, verifies signed OCI release/runtime
+manifests, rolls to a second release, starts a local `skiffd` against the RustFS
+state, and runs a rolling canary saga. It is slower and pulls OCI images, but it
+shows the runner/workload path rather than only the fake provider.
+
+The run writes a filled-in context and environment file under
+`.skiff-demo-reports/apple-container/`, then uses those contexts for the CLI
+checks:
+
+```bash
+source .skiff-demo-reports/apple-container/<run>.env
+skiff config get-contexts
+SKIFF_CONTEXT=local-apple-vms skiff status caddy-web
+SKIFF_CONTEXT=local-apple-skiffd skiff tui caddy-web --read-only
+```
+
+The target leaves RustFS, Caddy, and `skiffd` running so the generated contexts
+remain live after the command exits. Stop them with:
+
+```bash
+make demo-apple-down
+```
+
+For a cleanup-safe smoke run that stops the Apple containers and in-process
+`skiffd` before it exits, use:
+
+```bash
+make demo-apple-container
+```

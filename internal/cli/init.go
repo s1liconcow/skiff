@@ -43,7 +43,7 @@ func runInitStack(binary string, args []string, root rootOptions, stdout, stderr
 
 	fs := flag.NewFlagSet(binary+" init stack api-database", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	format := fs.String("format", root.Format, "output format: human or json")
+	format := fs.String("format", root.Format, "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", root.Yes, "overwrite existing generated files")
@@ -103,7 +103,7 @@ func runInitStack(binary string, args []string, root rootOptions, stdout, stderr
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "init", *format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "init", *format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -112,7 +112,7 @@ func printInitUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "Generates an API service plus managed database stack template, example app, and CI workflow.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Flags:")
-	fmt.Fprintln(w, "  --dir <path> --env <env> --artifact <oci-ref> --overwrite --format human|json --no-color --yes --trace-id <id>")
+	fmt.Fprintln(w, "  --dir <path> --env <env> --artifact <oci-ref> --overwrite --format human|json|json-pretty --no-color --yes --trace-id <id>")
 }
 
 func splitInitStackArgs(args []string) ([]string, []string, error) {

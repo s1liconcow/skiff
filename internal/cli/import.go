@@ -90,7 +90,7 @@ func runImportKube(binary string, args []string, root rootOptions, stdout, stder
 			return ExitInternalError
 		}
 	default:
-		return writeImportError(binary, "import kube", *format, *traceID, errors.New(`unsupported format; expected "human", "yaml", "markdown", or "json"`), stdout, stderr)
+		return writeImportError(binary, "import kube", *format, *traceID, errors.New(`unsupported format; expected "human", "yaml", "markdown", "json", or "json-pretty"`), stdout, stderr)
 	}
 	return exit
 }

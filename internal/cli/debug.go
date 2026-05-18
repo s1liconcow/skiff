@@ -181,7 +181,7 @@ func runDebugSession(binary, command string, args []string, root rootOptions, mo
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "debug "+command, *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "debug "+command, *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -281,7 +281,7 @@ func runDebugCollect(binary string, args []string, root rootOptions, stdout, std
 		}
 		return ExitSuccess
 	default:
-		return writeClientCommandError(binary, "debug collect", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "debug collect", *flags.format, *flags.traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -453,7 +453,7 @@ func printDebugUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  --reason <summary>")
 	fmt.Fprintln(w, "  --approval-id <id>")
 	fmt.Fprintln(w, "  --out <path>")
-	fmt.Fprintln(w, "  --format human|json")
+	fmt.Fprintln(w, "  --format human|json|json-pretty")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Session flags:")
 	fmt.Fprintln(w, "  --instance <provider-instance-id>")
@@ -461,5 +461,5 @@ func printDebugUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  --exec <command>")
 	fmt.Fprintln(w, "  --reason <summary>")
 	fmt.Fprintln(w, "  --approval-id <id>")
-	fmt.Fprintln(w, "  --format human|json")
+	fmt.Fprintln(w, "  --format human|json|json-pretty")
 }

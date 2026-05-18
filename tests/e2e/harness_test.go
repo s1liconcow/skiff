@@ -18,6 +18,14 @@ type e2eReport struct {
 	TraceID                 string       `json:"trace_id"`
 	Service                 string       `json:"service,omitempty"`
 	Env                     string       `json:"env,omitempty"`
+	StateURI                string       `json:"state_uri,omitempty"`
+	APIURL                  string       `json:"api_url,omitempty"`
+	ConfigPath              string       `json:"config_path,omitempty"`
+	EnvPath                 string       `json:"env_path,omitempty"`
+	DirectContext           string       `json:"direct_context,omitempty"`
+	APIContext              string       `json:"api_context,omitempty"`
+	SkiffdPID               int          `json:"skiffd_pid,omitempty"`
+	SkiffdLogPath           string       `json:"skiffd_log_path,omitempty"`
 	StartedAt               string       `json:"started_at"`
 	FinishedAt              string       `json:"finished_at,omitempty"`
 	Facts                   []reportFact `json:"facts,omitempty"`
@@ -28,6 +36,7 @@ type e2eReport struct {
 	SagaIDs                 []string     `json:"saga_ids,omitempty"`
 	CleanupStatus           string       `json:"cleanup_status,omitempty"`
 	RecommendedNextCommands []string     `json:"recommended_next_commands,omitempty"`
+	reportDir               string
 }
 
 type reportFact struct {
@@ -45,6 +54,7 @@ func newE2EReport(t *testing.T, mode, service, env, traceID string) *e2eReport {
 		Service:   service,
 		Env:       env,
 		StartedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		reportDir: e2eReportDir(t),
 		RecommendedNextCommands: []string{
 			"skiff status " + service + " --direct --format json --trace-id " + traceID,
 			"skiff events --scope service --service " + service + " --direct --format json --trace-id " + traceID,
@@ -109,10 +119,7 @@ func writeE2EReport(t *testing.T, report *e2eReport) {
 		return
 	}
 	report.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	dir := strings.TrimSpace(os.Getenv("SKIFF_E2E_REPORT_DIR"))
-	if dir == "" {
-		dir = t.TempDir()
-	}
+	dir := report.reportDir
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("create e2e report dir: %v", err)
 	}
@@ -127,9 +134,20 @@ func writeE2EReport(t *testing.T, report *e2eReport) {
 	t.Logf("wrote e2e report %s", path)
 }
 
+func e2eReportDir(t *testing.T) string {
+	t.Helper()
+	dir := strings.TrimSpace(os.Getenv("SKIFF_E2E_REPORT_DIR"))
+	if dir == "" {
+		dir = t.TempDir()
+	}
+	return dir
+}
+
 func resetSkiffEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
+		"SKIFF_CONFIG",
+		"SKIFF_CONTEXT",
 		"SKIFF_ENV",
 		"SKIFF_PROVIDER",
 		"SKIFF_REGION",

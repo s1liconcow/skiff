@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -254,8 +253,8 @@ func (r rootOptions) configOverrides() map[string]string {
 }
 
 func writeRootError(binary, format, traceID string, err error, stdout, stderr io.Writer) int {
-	if format == "json" {
-		_ = json.NewEncoder(stdout).Encode(commandErrorOutput{
+	if isJSONFormat(format) {
+		_ = writeJSON(stdout, format, commandErrorOutput{
 			OK:      false,
 			Code:    string(skifferrors.ValidationFailed),
 			Summary: err.Error(),
@@ -273,8 +272,8 @@ func writeRootError(binary, format, traceID string, err error, stdout, stderr io
 func writeClientError(binary, command, format, traceID string, err error, stdout, stderr io.Writer) int {
 	code := string(skifferrors.FromClientCode(client.ErrorCode(err)))
 	exitCode := client.ExitCode(err)
-	if format == "json" {
-		_ = json.NewEncoder(stdout).Encode(commandErrorOutput{
+	if isJSONFormat(format) {
+		_ = writeJSON(stdout, format, commandErrorOutput{
 			OK:      false,
 			Code:    code,
 			Summary: client.ErrorSummary(err),

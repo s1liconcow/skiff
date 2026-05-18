@@ -2,7 +2,6 @@ package e2e_test
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -39,7 +38,60 @@ import (
 
 const containerReadyCommand = "./skiff-container-artifact-ready"
 
+const (
+	appleDirectContext      = "local-apple-vms"
+	appleSkiffdServeContext = "local-apple-skiffd-server"
+	appleAPIContext         = "local-apple-skiffd"
+)
+
+func TestAppleContextArtifactsRenderFilledConfigAndEnv(t *testing.T) {
+	resetSkiffEnv(t)
+	report := newE2EReport(t, "apple-container", "caddy-web", "prod", "tr_apple_context")
+	artifacts := writeAppleContextArtifacts(t, report, rustFSHarness{
+		endpoint:  "http://127.0.0.1:19000",
+		bucket:    "skiff-demo-bucket",
+		accessKey: "local-access",
+		secretKey: "local-secret",
+	}, "s3://skiff-demo-bucket", appleContextOptions{APIURL: "http://127.0.0.1:18080", CaddyContainer: "skiff-demo-caddy", SkiffdPID: 12345, SkiffdLogPath: "/tmp/skiffd.log"})
+	useAppleContext(t, artifacts, appleAPIContext)
+
+	configBody, err := os.ReadFile(artifacts.configPath)
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	envBody, err := os.ReadFile(artifacts.envPath)
+	if err != nil {
+		t.Fatalf("read generated env: %v", err)
+	}
+	for _, want := range []string{
+		"name: local-apple-vms",
+		"name: local-apple-skiffd-server",
+		"name: local-apple-skiffd",
+		"state: \"s3://skiff-demo-bucket\"",
+		"apiURL: \"http://127.0.0.1:18080\"",
+	} {
+		if !strings.Contains(string(configBody), want) {
+			t.Fatalf("generated config missing %q:\n%s", want, string(configBody))
+		}
+	}
+	for _, want := range []string{
+		"export SKIFF_AWS_ENDPOINT='http://127.0.0.1:19000'",
+		"export SKIFF_APPLE_CADDY_CONTAINER='skiff-demo-caddy'",
+		"export SKIFF_APPLE_SKIFFD_PID='12345'",
+		"export SKIFF_CONFIG='" + artifacts.configPath + "'",
+		"export SKIFF_CONTEXT='local-apple-vms'",
+	} {
+		if !strings.Contains(string(envBody), want) {
+			t.Fatalf("generated env missing %q:\n%s", want, string(envBody))
+		}
+	}
+	if report.ConfigPath != artifacts.configPath || report.EnvPath != artifacts.envPath || report.APIContext != appleAPIContext {
+		t.Fatalf("report did not record context artifacts: %+v", report)
+	}
+}
+
 func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
+	resetSkiffEnv(t)
 	if !appleContainerE2EEnabled() {
 		t.Skip("set SKIFF_APPLE_CONTAINER_E2E=1 to run the Apple container/RustFS/Caddy e2e")
 	}
@@ -60,10 +112,11 @@ func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 	}
 
 	cli := appleContainerCLI{path: containerPath}
+	persist := appleContainerPersistEnabled()
 	runID := fmt.Sprintf("skiff-e2e-%d-%d", os.Getpid(), time.Now().UnixNano())
 	rustfsPort := freePort(t)
 	caddyPort := freePort(t)
-	rustfs := startRustFSContainer(t, ctx, cli, runID, rustfsPort)
+	rustfs := startRustFSContainer(t, ctx, cli, runID, rustfsPort, persist)
 	configureRustFSEnv(t, rustfs)
 
 	store := rustfsObjectStore(t, ctx, rustfs)
@@ -83,7 +136,11 @@ func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 	verifier := verifierFor(t, signer)
 	actor := schema.Actor{ID: "e2e", Type: "agent"}
 	report := newE2EReport(t, "apple-container", service, env, traceID)
-	report.CleanupStatus = "Apple containers and RustFS volume registered with test cleanup"
+	if persist {
+		report.CleanupStatus = "Apple containers will be left running for demo inspection"
+	} else {
+		report.CleanupStatus = "Apple containers and RustFS volume registered with test cleanup"
+	}
 	defer writeE2EReport(t, report)
 
 	firstRuntime := caddyRuntimeManifest(service, env, releaseID, caddyPort, "2026-05-18T00:00:00Z")
@@ -115,10 +172,14 @@ func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 		hostPort:      caddyPort,
 		preparer:      preparer,
 	}
-	t.Cleanup(func() { systemd.cleanup(context.Background()) })
+	if !persist {
+		t.Cleanup(func() { systemd.cleanup(context.Background()) })
+	}
 	report.addProviderID(rustfs.name)
 	report.addProviderID(rustfs.volume)
 	report.addProviderID(systemd.containerName)
+	contexts := writeAppleContextArtifacts(t, report, rustfs, stateURI, appleContextOptions{CaddyContainer: systemd.containerName})
+	useAppleContext(t, contexts, appleDirectContext)
 
 	bootstrap := runBootstrap(t, ctx, store, verifier, statePath, service, env, stateURI, controlKey, traceID, objectEvents)
 	if bootstrap.ReleaseID != releaseID {
@@ -161,14 +222,18 @@ func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 	assertDirectDoctorViaRustFS(t, report, stateURI, service, env, traceID)
 	assertDirectOpsViaRustFS(t, report, stateURI, service, env, secondOperationID, traceID)
 
-	localSkiffd := startLocalSkiffd(t, ctx, store, stateURI, env, traceID)
+	localSkiffd := startLocalAppleSkiffd(t, ctx, store, report, rustfs, stateURI, env, traceID, systemd.containerName, persist)
+	contexts = writeAppleContextArtifacts(t, report, rustfs, stateURI, appleContextOptions{APIURL: localSkiffd.url, CaddyContainer: systemd.containerName, SkiffdPID: report.SkiffdPID, SkiffdLogPath: report.SkiffdLogPath})
+	useAppleContext(t, contexts, appleAPIContext)
 	assertSkiffdStatusViaAPI(t, report, localSkiffd.url, stateURI, service, env, nextReleaseID, secondOperationID, traceID)
 	createFakeCanaryResourceRecords(t, ctx, store, report, service, env)
+	useAppleContext(t, contexts, appleDirectContext)
 	canary := runRollingCanaryDeployViaDirectCLI(t, report, stateURI, service, env, secondImage, canaryReleaseID, canaryOperationID, traceID)
 	report.addOperationID(canary.Result.OperationID)
 	report.addSagaID(canary.Result.SagaID)
 	reportReleaseObjects(t, report, service, canaryReleaseID)
 	reportSagaObjects(t, report, canary.Result.SagaID)
+	useAppleContext(t, contexts, appleAPIContext)
 	assertSkiffdStatusViaAPI(t, report, localSkiffd.url, stateURI, service, env, canaryReleaseID, canaryOperationID, traceID)
 	assertSkiffdDoctorViaAPI(t, report, localSkiffd.url, stateURI, service, env, traceID)
 	assertSkiffdCanarySagaViaAPI(t, ctx, localSkiffd.url, canary.Result.SagaID, traceID)
@@ -180,6 +245,10 @@ func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 
 func appleContainerE2EEnabled() bool {
 	return os.Getenv("SKIFF_APPLE_CONTAINER_E2E") == "1" || os.Getenv("SKIFF_CONTAINER_E2E") == "1"
+}
+
+func appleContainerPersistEnabled() bool {
+	return os.Getenv("SKIFF_APPLE_CONTAINER_PERSIST") == "1" || os.Getenv("SKIFF_APPLE_CONTAINER_KEEPALIVE") == "1"
 }
 
 func pinnedImageForE2E(t *testing.T, ctx context.Context, name, fallback string) string {
@@ -203,7 +272,7 @@ func pinnedImageForE2E(t *testing.T, ctx context.Context, name, fallback string)
 	return pinned
 }
 
-func startRustFSContainer(t *testing.T, ctx context.Context, cli appleContainerCLI, runID string, port int) rustFSHarness {
+func startRustFSContainer(t *testing.T, ctx context.Context, cli appleContainerCLI, runID string, port int, persist bool) rustFSHarness {
 	t.Helper()
 	image := envDefault("SKIFF_E2E_RUSTFS_IMAGE", "docker.io/rustfs/rustfs:latest")
 	accessKey := envDefault("SKIFF_E2E_RUSTFS_ACCESS_KEY", "skiffe2eaccess")
@@ -223,7 +292,9 @@ func startRustFSContainer(t *testing.T, ctx context.Context, cli appleContainerC
 		accessKey: accessKey,
 		secretKey: secretKey,
 	}
-	t.Cleanup(func() { harness.cleanup(context.Background()) })
+	if !persist {
+		t.Cleanup(func() { harness.cleanup(context.Background()) })
+	}
 
 	if _, err := cli.run(ctx,
 		"run",
@@ -276,6 +347,132 @@ func configureRustFSEnv(t *testing.T, rustfs rustFSHarness) {
 	t.Setenv("AWS_DEFAULT_REGION", "us-east-1")
 	t.Setenv("SKIFF_AWS_ENDPOINT", rustfs.endpoint)
 	t.Setenv("SKIFF_AWS_S3_PATH_STYLE", "true")
+}
+
+type appleContextArtifacts struct {
+	configPath string
+	envPath    string
+}
+
+type appleContextOptions struct {
+	APIURL         string
+	CaddyContainer string
+	SkiffdPID      int
+	SkiffdLogPath  string
+}
+
+func writeAppleContextArtifacts(t *testing.T, report *e2eReport, rustfs rustFSHarness, stateURI string, opts appleContextOptions) appleContextArtifacts {
+	t.Helper()
+	if report == nil {
+		t.Fatal("report is required")
+	}
+	if err := os.MkdirAll(report.reportDir, 0o755); err != nil {
+		t.Fatalf("create e2e report dir: %v", err)
+	}
+	configPath := filepath.Join(report.reportDir, report.RunID+".skiffconfig")
+	envPath := filepath.Join(report.reportDir, report.RunID+".env")
+	if err := os.WriteFile(configPath, []byte(appleSkiffConfig(stateURI, opts.APIURL)), 0o600); err != nil {
+		t.Fatalf("write Apple Skiff config: %v", err)
+	}
+	if err := os.WriteFile(envPath, []byte(appleContextEnv(configPath, rustfs, opts)), 0o600); err != nil {
+		t.Fatalf("write Apple context env: %v", err)
+	}
+	report.StateURI = stateURI
+	report.APIURL = opts.APIURL
+	report.ConfigPath = configPath
+	report.EnvPath = envPath
+	report.DirectContext = appleDirectContext
+	if opts.APIURL != "" {
+		report.APIContext = appleAPIContext
+	}
+	report.SkiffdPID = opts.SkiffdPID
+	report.SkiffdLogPath = opts.SkiffdLogPath
+	report.RecommendedNextCommands = []string{
+		"source " + shellQuote(envPath),
+		"skiff config get-contexts",
+		"SKIFF_CONTEXT=" + appleDirectContext + " skiff status " + report.Service,
+		"SKIFF_CONTEXT=" + appleDirectContext + " skiff events --scope service --service " + report.Service,
+	}
+	if opts.APIURL != "" {
+		report.RecommendedNextCommands = append(report.RecommendedNextCommands,
+			"SKIFF_CONTEXT="+appleAPIContext+" skiff tui "+report.Service+" --read-only",
+			"make demo-apple-down",
+		)
+	}
+	report.fact("skiff_context", "wrote "+configPath+" and "+envPath)
+	return appleContextArtifacts{configPath: configPath, envPath: envPath}
+}
+
+func useAppleContext(t *testing.T, artifacts appleContextArtifacts, contextName string) {
+	t.Helper()
+	t.Setenv("SKIFF_CONFIG", artifacts.configPath)
+	t.Setenv("SKIFF_CONTEXT", contextName)
+}
+
+func appleSkiffConfig(stateURI, apiURL string) string {
+	body := fmt.Sprintf(`apiVersion: skiff.dev/v1alpha1
+kind: SkiffConfig
+current-context: %s
+contexts:
+  - name: %s
+    context:
+      mode: direct
+      env: prod
+      provider: fake
+      region: local
+      state: %s
+  - name: %s
+    context:
+      mode: skiffd
+      env: prod
+      provider: fake
+      region: local
+      state: %s
+`, appleDirectContext, appleDirectContext, strconv.Quote(stateURI), appleSkiffdServeContext, strconv.Quote(stateURI))
+	if apiURL != "" {
+		body += fmt.Sprintf(`  - name: %s
+    context:
+      mode: api
+      env: prod
+      provider: fake
+      region: local
+      state: %s
+      apiURL: %s
+`, appleAPIContext, strconv.Quote(stateURI), strconv.Quote(apiURL))
+	}
+	return body
+}
+
+func appleContextEnv(configPath string, rustfs rustFSHarness, opts appleContextOptions) string {
+	lines := []string{
+		"export AWS_ACCESS_KEY_ID=" + shellQuote(rustfs.accessKey),
+		"export AWS_SECRET_ACCESS_KEY=" + shellQuote(rustfs.secretKey),
+		"export AWS_REGION=us-east-1",
+		"export AWS_DEFAULT_REGION=us-east-1",
+		"export SKIFF_AWS_ENDPOINT=" + shellQuote(rustfs.endpoint),
+		"export SKIFF_AWS_S3_PATH_STYLE=true",
+		"export SKIFF_CONFIG=" + shellQuote(configPath),
+		"export SKIFF_CONTEXT=" + shellQuote(appleDirectContext),
+		"export SKIFF_APPLE_RUSTFS_CONTAINER=" + shellQuote(rustfs.name),
+		"export SKIFF_APPLE_RUSTFS_VOLUME=" + shellQuote(rustfs.volume),
+	}
+	if opts.CaddyContainer != "" {
+		lines = append(lines, "export SKIFF_APPLE_CADDY_CONTAINER="+shellQuote(opts.CaddyContainer))
+	}
+	if opts.APIURL != "" {
+		lines = append(lines, "export SKIFF_APPLE_SKIFFD_URL="+shellQuote(opts.APIURL))
+	}
+	if opts.SkiffdPID > 0 {
+		lines = append(lines, "export SKIFF_APPLE_SKIFFD_PID="+shellQuote(strconv.Itoa(opts.SkiffdPID)))
+	}
+	if opts.SkiffdLogPath != "" {
+		lines = append(lines, "export SKIFF_APPLE_SKIFFD_LOG="+shellQuote(opts.SkiffdLogPath))
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func waitForRustFSBucket(t *testing.T, ctx context.Context, rustfs rustFSHarness, client *s3store.HTTPClient, bucket string) {
@@ -962,11 +1159,6 @@ func assertDirectStatusViaRustFS(t *testing.T, report *e2eReport, stateURI, serv
 	var status appleStatusOutput
 	decodeCLIJSON(t, runSkiffCLI(t, report,
 		"status", service,
-		"--direct",
-		"--state", stateURI,
-		"--env", env,
-		"--provider", "aws",
-		"--region", "us-east-1",
 		"--format", "json",
 		"--trace-id", traceID,
 	), &status)
@@ -994,11 +1186,6 @@ func assertDirectEventsViaRustFS(t *testing.T, report *e2eReport, stateURI, serv
 		"events",
 		"--scope", "service",
 		"--service", service,
-		"--direct",
-		"--state", stateURI,
-		"--env", env,
-		"--provider", "aws",
-		"--region", "us-east-1",
 		"--format", "json",
 		"--trace-id", traceID,
 	), &listed)
@@ -1018,11 +1205,6 @@ func assertDirectDoctorViaRustFS(t *testing.T, report *e2eReport, stateURI, serv
 	var doctor appleDoctorOutput
 	decodeCLIJSON(t, runSkiffCLI(t, report,
 		"doctor", service,
-		"--direct",
-		"--state", stateURI,
-		"--env", env,
-		"--provider", "aws",
-		"--region", "us-east-1",
 		"--format", "json",
 		"--trace-id", traceID,
 	), &doctor)
@@ -1046,11 +1228,6 @@ func assertDirectOpsViaRustFS(t *testing.T, report *e2eReport, stateURI, service
 		"ops", "list",
 		"--all",
 		"--service", service,
-		"--direct",
-		"--state", stateURI,
-		"--env", env,
-		"--provider", "aws",
-		"--region", "us-east-1",
 		"--format", "json",
 		"--trace-id", traceID,
 	), &list)
@@ -1062,11 +1239,6 @@ func assertDirectOpsViaRustFS(t *testing.T, report *e2eReport, stateURI, service
 	decodeCLIJSON(t, runSkiffCLI(t, report,
 		"ops", "inspect", operationID,
 		"--service", service,
-		"--direct",
-		"--state", stateURI,
-		"--env", env,
-		"--provider", "aws",
-		"--region", "us-east-1",
 		"--format", "json",
 		"--trace-id", traceID,
 	), &inspect)
@@ -1129,6 +1301,79 @@ func startLocalSkiffd(t *testing.T, ctx context.Context, store objstore.ObjectSt
 	return harness
 }
 
+func startLocalAppleSkiffd(t *testing.T, ctx context.Context, store objstore.ObjectStore, report *e2eReport, rustfs rustFSHarness, stateURI, env, traceID, caddyContainer string, persist bool) localSkiffdHarness {
+	t.Helper()
+	if !persist {
+		report.CleanupStatus = "Apple containers and in-process skiffd stopped when test exits"
+		return startLocalSkiffd(t, ctx, store, stateURI, env, traceID)
+	}
+	return startPersistentAppleSkiffd(t, ctx, report, rustfs, stateURI, traceID, caddyContainer)
+}
+
+func startPersistentAppleSkiffd(t *testing.T, ctx context.Context, report *e2eReport, rustfs rustFSHarness, stateURI, traceID, caddyContainer string) localSkiffdHarness {
+	t.Helper()
+	addr := fmt.Sprintf("127.0.0.1:%d", freePort(t))
+	apiURL := "http://" + addr
+	artifacts := writeAppleContextArtifacts(t, report, rustfs, stateURI, appleContextOptions{
+		APIURL:         apiURL,
+		CaddyContainer: caddyContainer,
+	})
+	root := repoRootForTest(t)
+	binPath := filepath.Join(report.reportDir, report.RunID+"-skiffd")
+	build := exec.CommandContext(ctx, "go", "build", "-o", binPath, "./cmd/skiffd")
+	build.Dir = root
+	build.Env = os.Environ()
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build persistent skiffd: %v\n%s", err, strings.TrimSpace(string(output)))
+	}
+
+	logPath := filepath.Join(report.reportDir, report.RunID+"-skiffd.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		t.Fatalf("open persistent skiffd log: %v", err)
+	}
+	cmd := exec.Command(binPath,
+		"serve",
+		"--addr", addr,
+		"--config", artifacts.configPath,
+		"--context", appleSkiffdServeContext,
+		"--format", "json",
+		"--trace-id", traceID,
+	)
+	cmd.Dir = root
+	cmd.Env = os.Environ()
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		t.Fatalf("start persistent skiffd: %v", err)
+	}
+	_ = logFile.Close()
+	report.SkiffdPID = cmd.Process.Pid
+	report.SkiffdLogPath = logPath
+	report.CleanupStatus = "Apple containers and skiffd left running; stop them with make demo-apple-down"
+	waitForSkiffdReady(t, ctx, apiURL, traceID)
+	return localSkiffdHarness{url: apiURL}
+}
+
+func repoRootForTest(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("could not find repository root from %s", dir)
+		}
+		dir = parent
+	}
+}
+
 func waitForSkiffdReady(t *testing.T, ctx context.Context, baseURL, traceID string) {
 	t.Helper()
 	client := &http.Client{Timeout: time.Second}
@@ -1167,7 +1412,6 @@ func waitForSkiffdReady(t *testing.T, ctx context.Context, baseURL, traceID stri
 func runRollingCanaryDeployViaDirectCLI(t *testing.T, report *e2eReport, stateURI, service, env, image, releaseID, operationID, traceID string) localCanaryOutput {
 	t.Helper()
 	specPath := writeAppleCanarySpec(t, service, env, image)
-	signingSeed := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("C", ed25519.SeedSize)))
 	var canary localCanaryOutput
 	body := runSkiffCLI(t, report,
 		"deploy", specPath,
@@ -1176,15 +1420,9 @@ func runRollingCanaryDeployViaDirectCLI(t *testing.T, report *e2eReport, stateUR
 		"--canary-bake", "0s",
 		"--canary-metric", "request_count",
 		"--canary-threshold", "1",
-		"--direct",
-		"--state", stateURI,
-		"--env", env,
-		"--provider", fakeprovider.Name,
-		"--region", "local",
 		"--release-id", releaseID,
 		"--operation-id", operationID,
 		"--key-id", "apple-canary",
-		"--signing-seed-base64", signingSeed,
 		"--format", "json",
 		"--trace-id", traceID,
 	)
@@ -1242,13 +1480,7 @@ func assertSkiffdStatusViaAPI(t *testing.T, report *e2eReport, apiURL, stateURI,
 	var status appleStatusOutput
 	decodeCLIJSON(t, runSkiffCLI(t, report,
 		"status", service,
-		"--api",
-		"--api-url", apiURL,
 		"--fresh",
-		"--state", stateURI,
-		"--env", env,
-		"--provider", fakeprovider.Name,
-		"--region", "local",
 		"--format", "json",
 		"--trace-id", traceID,
 	), &status)
@@ -1269,13 +1501,7 @@ func assertSkiffdDoctorViaAPI(t *testing.T, report *e2eReport, apiURL, stateURI,
 	var doctor appleDoctorOutput
 	decodeCLIJSON(t, runSkiffCLI(t, report,
 		"doctor", service,
-		"--api",
-		"--api-url", apiURL,
 		"--fresh",
-		"--state", stateURI,
-		"--env", env,
-		"--provider", fakeprovider.Name,
-		"--region", "local",
 		"--format", "json",
 		"--trace-id", traceID,
 	), &doctor)

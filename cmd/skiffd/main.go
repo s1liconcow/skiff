@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,9 +18,14 @@ import (
 
 	"github.com/s1liconcow/skiff/internal/buildinfo"
 	"github.com/s1liconcow/skiff/internal/cli"
+	"github.com/s1liconcow/skiff/internal/client"
 	"github.com/s1liconcow/skiff/internal/config"
 	stateindex "github.com/s1liconcow/skiff/internal/index"
+	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/objstore/memory"
+	"github.com/s1liconcow/skiff/internal/provider"
+	"github.com/s1liconcow/skiff/internal/provider/aws"
+	fakeprovider "github.com/s1liconcow/skiff/internal/provider/fake"
 	"github.com/s1liconcow/skiff/internal/skiffd"
 )
 
@@ -47,11 +51,14 @@ type serveErrorOutput struct {
 }
 
 func runServe(args []string, stdout, stderr io.Writer) int {
+	args, defaultFormat, stdout := cli.PrepareJSONPrettyOutput(args, "human", false, stdout)
+	defer cli.FlushJSONPrettyOutput(stdout)
+
 	fs := flag.NewFlagSet("skiffd serve", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
 	addr := fs.String("addr", "127.0.0.1:8585", "listen address")
-	format := fs.String("format", "human", "startup output format: human or json")
+	format := fs.String("format", defaultFormat, "startup output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", false, "disable ANSI color output")
 	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
@@ -73,8 +80,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() != 0 {
 		return writeServeError(*format, *traceID, fmt.Errorf("unexpected argument %q", fs.Arg(0)), stdout, stderr)
 	}
-	if *format != "human" && *format != "text" && *format != "json" {
-		return writeServeError(*format, *traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+	if *format != "human" && *format != "text" && !cli.IsJSONFormat(*format) {
+		return writeServeError(*format, *traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 	_ = noColor
 	_ = yes
@@ -112,11 +119,11 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	if loaded.Config.Mode != config.ModeSkiffd {
 		return writeServeError(*format, *traceID, fmt.Errorf("mode %q cannot be served by skiffd; use mode skiffd", loaded.Config.Mode), stdout, stderr)
 	}
-	if !strings.HasPrefix(loaded.Config.StateBucket, "memory://") {
-		return writeServeError(*format, *traceID, errors.New("skiffd serve currently supports memory:// state buckets for local skeleton startup"), stdout, stderr)
-	}
 
-	store := memory.New()
+	store, err := openServeObjectStore(loaded.Config)
+	if err != nil {
+		return writeServeError(*format, *traceID, err, stdout, stderr)
+	}
 	idx, err := stateindex.New(store, stateindex.Options{Clock: func() time.Time { return time.Now().UTC() }})
 	if err != nil {
 		return writeServeError(*format, *traceID, err, stdout, stderr)
@@ -124,11 +131,16 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	if _, err := idx.Rebuild(context.Background()); err != nil {
 		return writeServeError(*format, *traceID, err, stdout, stderr)
 	}
+	cloud, err := newServeProvider(loaded.Config, store)
+	if err != nil {
+		return writeServeError(*format, *traceID, err, stdout, stderr)
+	}
 	logger := slog.New(slog.NewJSONHandler(stderr, nil))
 	server, err := skiffd.New(skiffd.Options{
 		Config:      loaded.Config,
 		ObjectStore: store,
 		Index:       idx,
+		Provider:    cloud,
 		BuildInfo:   buildinfo.Current("skiffd"),
 		Logger:      logger,
 	})
@@ -143,8 +155,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	publicAddr := "http://" + listener.Addr().String()
 	redacted := loaded.Redacted().Config
 	redacted.StateBucket = redactURI(redacted.StateBucket)
-	if *format == "json" {
-		if err := json.NewEncoder(stdout).Encode(serveStartOutput{
+	if cli.IsJSONFormat(*format) {
+		if err := cli.WriteJSONOutput(stdout, *format, serveStartOutput{
 			OK:      true,
 			TraceID: *traceID,
 			Addr:    publicAddr,
@@ -187,9 +199,23 @@ func applyLocalServeDefaults(loaded *config.Loaded) {
 	defaultString(config.FieldStateBucket, loaded.Config.StateBucket, func() { loaded.Config.StateBucket = "memory://skiffd-local" })
 }
 
+func openServeObjectStore(cfg config.Config) (objstore.ObjectStore, error) {
+	if strings.HasPrefix(cfg.StateBucket, "memory://") {
+		return memory.New(), nil
+	}
+	return client.OpenObjectStore(cfg)
+}
+
+func newServeProvider(cfg config.Config, store objstore.ObjectStore) (provider.Provider, error) {
+	if strings.EqualFold(strings.TrimSpace(cfg.Provider), fakeprovider.Name) {
+		return fakeprovider.New(fakeprovider.WithStateStore(store)), nil
+	}
+	return aws.NewFromConfig(cfg, aws.WithStateStore(store))
+}
+
 func writeServeError(format, traceID string, err error, stdout, stderr io.Writer) int {
-	if format == "json" {
-		_ = json.NewEncoder(stdout).Encode(serveErrorOutput{
+	if cli.IsJSONFormat(format) {
+		_ = cli.WriteJSONOutput(stdout, format, serveErrorOutput{
 			OK:      false,
 			Code:    "SKIFFD_SERVE_FAILED",
 			Summary: err.Error(),

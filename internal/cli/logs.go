@@ -126,7 +126,7 @@ func runLogsQuery(ctx context.Context, logProvider logsProvider, req provider.Lo
 		}
 		return ExitSuccess
 	default:
-		return writeSpecError(binary, "LOGS_INVALID", format, traceID, errors.New(`unsupported format; expected "human" or "json"`), nil, stdout, stderr)
+		return writeSpecError(binary, "LOGS_INVALID", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), nil, stdout, stderr)
 	}
 }
 
@@ -142,7 +142,7 @@ func writeLogsResult(binary, format, traceID string, entries []provider.LogEntry
 		}
 		return ExitSuccess
 	default:
-		return writeSpecError(binary, "LOGS_INVALID", format, traceID, errors.New(`unsupported format; expected "human" or "json"`), nil, stdout, stderr)
+		return writeSpecError(binary, "LOGS_INVALID", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), nil, stdout, stderr)
 	}
 }
 

@@ -182,7 +182,7 @@ func writeContractTestResult(binary, format, traceID string, result contractTest
 		}
 		return exitCode
 	default:
-		return writeClientCommandError(binary, "contract test", format, traceID, errors.New(`unsupported format; expected "human" or "json"`), stdout, stderr)
+		return writeClientCommandError(binary, "contract test", format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 	}
 }
 
@@ -218,5 +218,5 @@ func printContractUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "Test flags:")
 	fmt.Fprintln(w, "  --artifact-uri <uri>")
 	fmt.Fprintln(w, "  --artifact-digest sha256:<hex>")
-	fmt.Fprintln(w, "  --format human|json")
+	fmt.Fprintln(w, "  --format human|json|json-pretty")
 }
