@@ -2,14 +2,6 @@
 
 <div align="center">
 
-```text
-                 SKIFF
-
-        VM-native cloud operations
-     durable state in object storage
-        explicit, resumable sagas
-```
-
 [![CI](https://github.com/s1liconcow/skiff/actions/workflows/ci.yml/badge.svg)](https://github.com/s1liconcow/skiff/actions/workflows/ci.yml)
 [![E2E](https://github.com/s1liconcow/skiff/actions/workflows/e2e.yml/badge.svg)](https://github.com/s1liconcow/skiff/actions/workflows/e2e.yml)
 ![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white)
@@ -30,14 +22,17 @@ curl -fsSL https://raw.githubusercontent.com/s1liconcow/skiff/main/scripts/insta
 
 ### The Problem
 
-Many services need safe deploys, rollback, logs, metrics, cost visibility, secret rotation, database restore, failover, and debug workflows. They need Kubernetes-class operational leverage without Kubernetes-class cost. They do not always need Kubernetes, a custom operator framework, or another durable database to run those operations.
+Many services need safe canary deploys, rollbacks, logs, metrics, cost visibility, agent-first ux, and operational runbooks like database restores, secret rotations, stateful failover, debug workflows. They need Kubernetes-class operational leverage without Kubernetes-class cost.  
 
-Terraform is good at stable infrastructure shape. Kubernetes is good when you want a cluster scheduler and a broad ecosystem. Neither is a small, explicit ledger of operational journeys where a human or agent can resume from object storage after the facade is gone.
+Terraform is good at describing stable infrastructure shape. Kubernetes is a strong fit when the benefits of large-scale orchestration outweigh the cost and complexity of operating it. Skiff is meant to occupy a smaller space: a low-dependency, secure-by-default, well-lit path for running stateful and stateless services in the cloud.
+
+Skiff does not run a distributed control plane, bin-pack workloads, create overlay networks, manage its own load balancers, or keep durable state anywhere other than object storage. That restraint is intentional. Bin-packing makes sense for Google-scale companies running many clusters on bare metal. In ordinary cloud environments, it often adds little value while introducing a second security model on top of cloud IAM. Containers are useful packaging and isolation tools (Skiff uses OCI), but they are not a strong tenancy boundary, and the long history of container escape vulnerabilities has made that clear. 
 
 ### The Solution
 
-Skiff compiles simple service specs into cloud primitives, writes durable desired state and audit history to object storage, and runs explicit operations as typed sagas.
+Skiff compiles simple service specs into cloud primitives, writes desired state and audit history to object storage, and runs explicit operations such as deploys as typed sagas.
 
+Here is how Skiff maps to Kubernetes:
 ```text
 VM = pod
 cloud autoscaling group = deployment
@@ -47,6 +42,7 @@ object storage = durable desired state and audit history
 skiffd = stateless facade with rebuildable in-memory views
 skiff CLI direct mode = recovery path
 ```
+
 
 ### Why Use Skiff?
 
