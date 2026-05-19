@@ -76,6 +76,8 @@ func applyConfig(loaded *Loaded, cfg Config, source string) {
 		FieldReleaseID:                       cfg.ReleaseID,
 		FieldReleaseManifestKey:              cfg.ReleaseManifestKey,
 		FieldRuntimeManifestKey:              cfg.RuntimeManifestKey,
+		FieldReleaseSigningKeyID:             cfg.ReleaseSigningKeyID,
+		FieldReleaseSigningKeyRef:            cfg.ReleaseSigningKeyRef,
 		FieldAWSLiveApply:                    boolConfigValue(cfg.AWSLiveApply),
 		FieldAWSVPCID:                        cfg.AWSVPCID,
 		FieldAWSSubnetIDs:                    strings.Join(cfg.AWSSubnetIDs, ","),
@@ -155,6 +157,10 @@ func applyValues(loaded *Loaded, values map[string]string, source string) {
 			loaded.Config.ReleaseManifestKey = strings.TrimSpace(value)
 		case FieldRuntimeManifestKey:
 			loaded.Config.RuntimeManifestKey = strings.TrimSpace(value)
+		case FieldReleaseSigningKeyID:
+			loaded.Config.ReleaseSigningKeyID = strings.TrimSpace(value)
+		case FieldReleaseSigningKeyRef:
+			loaded.Config.ReleaseSigningKeyRef = strings.TrimSpace(value)
 		case FieldAWSLiveApply:
 			parsed, err := strconv.ParseBool(value)
 			if err == nil {
@@ -299,6 +305,10 @@ func normalizeFileField(key string) (string, error) {
 		return FieldReleaseManifestKey, nil
 	case "runtime_manifest_key", "runtimeManifestKey":
 		return FieldRuntimeManifestKey, nil
+	case "release_signing_key_id", "releaseSigningKeyID", "releaseSigningKeyId":
+		return FieldReleaseSigningKeyID, nil
+	case "release_signing_key_ref", "releaseSigningKeyRef":
+		return FieldReleaseSigningKeyRef, nil
 	case "stateful_group", "statefulGroup":
 		return FieldStatefulGroup, nil
 	case "stateful_member", "statefulMember":
@@ -344,6 +354,8 @@ func valuesFromEnv(env map[string]string) map[string]string {
 		FieldReleaseID:                       env["SKIFF_RELEASE_ID"],
 		FieldReleaseManifestKey:              env["SKIFF_RELEASE_MANIFEST_KEY"],
 		FieldRuntimeManifestKey:              env["SKIFF_RUNTIME_MANIFEST_KEY"],
+		FieldReleaseSigningKeyID:             env["SKIFF_RELEASE_SIGNING_KEY_ID"],
+		FieldReleaseSigningKeyRef:            env["SKIFF_RELEASE_SIGNING_KEY_REF"],
 		FieldStatefulGroup:                   env["SKIFF_STATEFUL_GROUP"],
 		FieldStatefulMember:                  env["SKIFF_STATEFUL_MEMBER"],
 		FieldStatefulGeneration:              env["SKIFF_STATEFUL_GENERATION"],

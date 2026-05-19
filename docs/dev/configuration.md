@@ -104,11 +104,38 @@ Mode-specific required fields:
 | `runner` | `env`, `provider`, `region`, `stateBucket`, `service`, `controlKey` |
 
 AWS live-apply inputs are provider configuration, not service-spec fields. Set
-`awsLiveApply: true` only when requesting SDK-backed live apply. `awsVpcId`,
-`awsSubnetIds`, and `awsAmiId` are required for live target groups, Auto
-Scaling Groups, and launch templates. `awsAlbListenerArn` is required only when
-the service has an ingress listener rule. `awsLoadBalancerSecurityGroupRef` is
-required when service VM ingress uses the `load-balancer` source.
+`awsLiveApply: true` only when requesting SDK-backed live apply. Without an
+environment root object, `awsVpcId`, `awsSubnetIds`, and `awsAmiId` are required
+for live target groups, Auto Scaling Groups, and launch templates. A managed
+`skiff bootstrap aws` environment root can supply those defaults from object
+state, including a runner AMI SSM parameter. When bootstrapped with
+`--ingress public` or `--ingress internal-http`, the environment root can also
+supply the ALB listener ARN and load-balancer security group. `awsAlbListenerArn`
+is required only when the service has an ingress listener rule and no
+bootstrapped ALB default exists. `awsLoadBalancerSecurityGroupRef` is required
+when service VM ingress uses the `load-balancer` source and no bootstrapped ALB
+security group default exists. Public bootstrap can also derive DNS and TLS:
+`--domain-name example.com` creates the environment base domain
+`<env>.example.com`, a wildcard service host alias for `*.<env>.example.com`,
+an ACM certificate validated through Route53, and an HTTPS listener;
+`--certificate-arn` reuses an existing ACM certificate. The environment root
+stores `base_domain`, `default_host_template`, the shared listener ARN, the
+certificate ARN, and the raw ALB `provider_dns_name`.
+
+Bootstrap-created human contexts also include release signing metadata:
+
+```yaml
+signing:
+  release:
+    keyID: skiff-prod-release-abc123def456
+    keyRef: aws-kms://alias/skiff-prod-release-signing?region=us-west-2
+```
+
+AWS bootstrap defaults to AWS KMS for release signing. The key reference points
+to KMS-held private signing material; object state stores only public release
+trust metadata in the environment root so runners can verify release manifests
+without access to the signing key. Use `skiff bootstrap aws --signing-backend
+keychain` for a local OS-keychain fallback.
 
 Runner user-data is strict JSON under a top-level `skiff` object:
 

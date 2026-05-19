@@ -69,13 +69,13 @@ func TestValidationDiagnosticsArePathSpecific(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decode returned error: %v", err)
 	}
-	doc.Network.Ingress.TLS = nil
+	doc.Network.Ingress.Host = "localhost"
 	result := spec.Validate(*doc)
 	if result.OK {
 		t.Fatal("Validate returned OK, want diagnostics")
 	}
 	assertDiagnostic(t, result.Diagnostics, "$.artifact.ref", "MUTABLE_ARTIFACT_REF")
-	assertDiagnostic(t, result.Diagnostics, "$.network.ingress.tls", "TLS_REQUIRED")
+	assertDiagnostic(t, result.Diagnostics, "$.network.ingress.host", "INVALID_HOST")
 }
 
 func TestSecretRefsRejectPlaintextValues(t *testing.T) {

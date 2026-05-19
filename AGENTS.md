@@ -281,6 +281,34 @@ skiff --direct --state s3://skiff-state-prod status payments-api
 skiff --direct --state s3://skiff-state-prod rollback payments-api --to previous-stable
 ```
 
+## Bootstrap and quickstart rules
+
+Bootstrap is the front door for real cloud use. Keep it convention-over-configuration:
+
+- Prefer `skiff bootstrap aws --env <env> --region <region> --network managed --ingress <private|public>` as the default shape.
+- Read stable defaults from environment and context when present, especially `SKIFF_ENV`, `AWS_REGION`, `AWS_DEFAULT_REGION`, `SKIFF_COMPANY_NAME`, and `SKIFF_DOMAIN_NAME`.
+- Do not require users to pass low-level cloud IDs such as VPC IDs, subnet IDs, security group IDs, load balancer names, listener ARNs, KMS key IDs, state URIs, trace IDs, operation IDs, key IDs, or run IDs on the happy path.
+- Keep explicit flags for recovery, import, advanced networking, pre-existing infrastructure, and automation.
+- Commands in docs shouldn't specify --format unless the output is intended for a robot.
+- Autogenerate non-secret identifiers when omitted. If bootstrapping needs signing or key material, create or reference it through the appropriate secure store; do not put plaintext secrets in object state, generated config, logs, or shell history.
+- For AWS bootstrap, default release signing to an asymmetric AWS KMS key (`aws-kms://...`) and write only the signer reference plus public trust metadata into config/object state. Keep `--signing-backend keychain` as the local OS-keychain fallback; never put plaintext signing seeds in object state, generated config, logs, or shell history.
+- A successful bootstrap should write or update a usable Skiff context for the user unless `--dry-run` or an explicit no-write mode is selected.
+- Provide both Terraform and non-Terraform teardown paths for AWS bootstrap resources, and require an explicit confirmation before destructive teardown.
+
+AWS bootstrap rules:
+
+- Direct Skiff-managed bootstrap and `--emit terraform` must have feature parity for all supported options. The durable environment root and provider resource graph are the contract; Terraform is one backend, not the product model.
+- Avoid backend-specific human wording such as "managed by Terraform" for resources Skiff conceptually owns. Say "Skiff-managed" unless describing the emitted Terraform file itself.
+- `--network managed` should create or discover the environment network substrate: VPC, public/private subnets, route tables, internet gateway, NAT where needed, and environment tags.
+- `--ingress private` should avoid public exposure by default.
+- `--ingress public` with a managed network should create a shared public ALB for the environment. Multiple services should share that ALB through per-service target groups and listener rules rather than creating one ALB per service by default.
+- If a domain is provided, bootstrap should derive a friendly environment base host such as `<env>.<domain>`, create or use an ACM certificate for the base and wildcard service hosts, and create Route53 validation and alias records when it can safely resolve the hosted zone.
+- If no domain is provided for public ingress, keep the raw AWS ALB DNS name visible in the environment root and human output.
+- State bucket defaults must prefer friendly names when possible: with a company name, use `skiff-<company-slug>-<env>-<region>-state`; without a company name, use `skiff-<generated-id>-<env>-<region>-state`. Always allow explicit override.
+- Release signing defaults should use `aws-kms://...` for AWS bootstrapped environments, `keychain://...` only when explicitly selected for local fallback, and `--signing-seed-base64` only as a compatibility or test escape hatch.
+- Use AWS public AMI SSM parameters for the quickstart runner path when a purpose-built Skiff AMI is not available. Track purpose-built AMI work as a separate bead, for example using Packer, rather than blocking the quickstart.
+- Bootstrap output should make billable resources visible, especially NAT gateways, ALBs, ACM certificates, hosted zones, ASGs, and state buckets.
+
 ## Saga rules
 
 Sagas are explicit, typed operational workflows.
@@ -662,10 +690,13 @@ For each task:
 ## Code style
 
 - Prefer small, explicit structs over untyped maps.
+- Keep files <= ~1k LoC.  If a file grows too big, refactor.
+- Shoot for 80-90% test coverage.
 - Prefer interfaces at package boundaries, not everywhere.
 - Keep provider-specific code out of core packages.
 - Keep CLI rendering out of business logic.
 - Keep object paths centralized.
+- Do not inline large templates in Go files. Put Terraform, shell, cloud-init, policy, and other substantial generated text in dedicated template files and embed them with `go:embed`; Go code should prepare typed data and execute the template.
 - Use context everywhere for I/O.
 - Preserve original cloud/provider error context.
 - Add structured Skiff error codes around provider errors.

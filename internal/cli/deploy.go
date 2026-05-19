@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/s1liconcow/skiff/internal/client"
@@ -46,6 +47,7 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 	operationID := fs.String("operation-id", "", "operation ID to use")
 	approvalID := fs.String("approval-id", "", "approval ID for policy-gated production operations")
 	keyID := fs.String("key-id", "local-deploy", "signing key ID")
+	signingKeyRef := fs.String("signing-key-ref", "", "release signing key reference")
 	signingSeed := fs.String("signing-seed-base64", "", "base64 Ed25519 seed for release signing; required for non-fake providers")
 	shadow := fs.Bool("shadow", false, "deploy Skiff infrastructure without attaching public or internal ingress listeners")
 	canary := fs.Bool("canary", false, "create and run a staged canary deployment saga")
@@ -119,7 +121,7 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 			return writeStatefulCommandError(binary, "deploy", *flags.format, *flags.traceID, fmt.Errorf("stateful deploy updates the release on existing named members; run %s stateful apply %s --direct --state <state> first if this group has not been applied: %w", binary, *filePath, err), stdout, stderr)
 		}
 		updateReq.Members = members
-		signer, err := signerForDeploy(loaded.Config, *keyID, *signingSeed)
+		signer, err := signerForDeploy(loaded.Config, *keyID, firstNonEmptyString(*signingKeyRef, loaded.Config.ReleaseSigningKeyRef), *signingSeed)
 		if err != nil {
 			return writeSpecError(binary, "DEPLOY_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 		}
@@ -190,7 +192,7 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 		if err != nil {
 			return writeClientError(binary, "deploy", *flags.format, *flags.traceID, err, stdout, stderr)
 		}
-		signer, err := signerForDeploy(loaded.Config, *keyID, *signingSeed)
+		signer, err := signerForDeploy(loaded.Config, *keyID, firstNonEmptyString(*signingKeyRef, loaded.Config.ReleaseSigningKeyRef), *signingSeed)
 		if err != nil {
 			return writeSpecError(binary, "DEPLOY_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 		}
@@ -213,10 +215,10 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 		return writeCanarySagaResult(binary, "deploy --canary", *flags.format, *flags.traceID, *result, stdout, stderr)
 	}
 
-	var storeNeeded = !*dryRun && !*planOnly
+	var mutating = !*dryRun && !*planOnly
 	var storeErr error
 	var store objstore.ObjectStore
-	if storeNeeded {
+	if mutating || loaded.Config.AWSLiveApply {
 		store, storeErr = client.OpenObjectStore(loaded.Config)
 		if storeErr != nil {
 			return writeClientError(binary, "deploy", *flags.format, *flags.traceID, storeErr, stdout, stderr)
@@ -227,8 +229,8 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 		return writeSpecError(binary, "DEPLOY_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 	}
 	var signer signing.Signer
-	if storeNeeded {
-		signer, err = signerForDeploy(loaded.Config, *keyID, *signingSeed)
+	if mutating {
+		signer, err = signerForDeploy(loaded.Config, *keyID, firstNonEmptyString(*signingKeyRef, loaded.Config.ReleaseSigningKeyRef), *signingSeed)
 		if err != nil {
 			return writeSpecError(binary, "DEPLOY_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 		}
@@ -308,6 +310,7 @@ func splitDeployArgs(args []string) ([]string, []string, error) {
 		"region":                               true,
 		"release-id":                           true,
 		"shadow":                               false,
+		"signing-key-ref":                      true,
 		"signing-seed-base64":                  true,
 		"state":                                true,
 		"state-bucket":                         true,
@@ -351,16 +354,34 @@ func statefulRecipeName(graph *ir.Graph) string {
 	return firstNonEmptyString(recipe.Name, recipe.Ref)
 }
 
-func signerForDeploy(cfg config.Config, keyID, seedValue string) (signing.Signer, error) {
+func signerForDeploy(cfg config.Config, keyID, keyRef, seedValue string) (signing.Signer, error) {
+	keyID = firstNonEmptyString(keyID, "skiff-cli-ephemeral")
+	keyRef = firstNonEmptyString(keyRef, cfg.ReleaseSigningKeyRef)
 	if seedValue == "" {
-		if isLocalEphemeralSignerProvider(cfg.Provider) {
+		if keyRef != "" {
+			store, err := signerStoreForKeyRef(nilContext(), cfg.Region, keyRef)
+			if err != nil {
+				return nil, err
+			}
+			return store.Signer(nilContext(), keyRef)
+		}
+		if isLocalEphemeralSignerProvider(cfg.Provider) || isEphemeralSignerEnv(cfg.Env) {
 			return signing.GenerateLocalSigner(keyID, nil)
 		}
-		return nil, fmt.Errorf("--signing-seed-base64 is required for deploy with provider %q", cfg.Provider)
+		return nil, fmt.Errorf("release signing key is required for deploy with provider %q; run skiff bootstrap aws to write a signer context or pass --signing-key-ref/--signing-seed-base64", cfg.Provider)
 	}
 	seed, err := base64.StdEncoding.DecodeString(seedValue)
 	if err != nil {
 		return nil, fmt.Errorf("--signing-seed-base64 must be base64: %w", err)
 	}
 	return signing.NewLocalSignerFromSeed(keyID, seed)
+}
+
+func isEphemeralSignerEnv(env string) bool {
+	switch strings.ToLower(strings.TrimSpace(env)) {
+	case "dev", "development", "test", "testing", "stage", "staging", "demo", "local":
+		return true
+	default:
+		return false
+	}
 }

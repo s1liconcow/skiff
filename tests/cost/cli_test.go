@@ -255,6 +255,34 @@ func TestCostPricingUpdateWritesConfigUsedByExplain(t *testing.T) {
 	}
 }
 
+func TestCostPricingUpdateUsesAWSRegionEnv(t *testing.T) {
+	rawPricingPath := writeAWSPricingFixture(t)
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+	t.Setenv("AWS_REGION", "us-east-1")
+
+	var stdout, stderr bytes.Buffer
+	code := cli.Run("skiff", []string{
+		"cost", "pricing", "update",
+		"--aws-pricing-file", rawPricingPath,
+		"--out", ".skiff-pricing.json",
+		"--format", "json",
+	}, &stdout, &stderr)
+	if code != cli.ExitSuccess {
+		t.Fatalf("update exit=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var updated struct {
+		OK     bool   `json:"ok"`
+		Region string `json:"region"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &updated); err != nil {
+		t.Fatalf("decode pricing update: %v\n%s", err, stdout.String())
+	}
+	if !updated.OK || updated.Region != "us-east-1" {
+		t.Fatalf("unexpected update envelope: %+v", updated)
+	}
+}
+
 func TestCostExplainStackIncludesManagedDatabasePricing(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {

@@ -218,7 +218,7 @@ func runCostExplain(binary string, args []string, root rootOptions, stdout, stde
 		return writeClientCommandError(binary, "cost explain", *format, *traceID, fmt.Errorf("service %q does not match spec metadata.name %q", service, doc.Metadata.Name), stdout, stderr)
 	}
 	resolvedProvider := firstNonEmptyCLI(*provider, doc.Metadata.Labels["provider"], aws.Name)
-	resolvedRegion := firstNonEmptyCLI(*region, doc.Metadata.Labels["region"])
+	resolvedRegion := firstNonEmptyCLI(*region, doc.Metadata.Labels["region"], defaultAWSRegionFromEnv())
 	graph, err := compiler.Compile(nilContext(), *doc, compiler.Options{})
 	if err != nil {
 		var validation spec.ValidationError
@@ -555,7 +555,7 @@ func runCostPricingUpdate(binary string, args []string, root rootOptions, stdout
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	provider := fs.String("provider", firstNonEmptyCLI(root.Provider, aws.Name), "cloud provider")
-	region := fs.String("region", root.Region, "AWS region to refresh")
+	region := fs.String("region", firstNonEmptyCLI(root.Region, defaultAWSRegionFromEnv()), "AWS region to refresh")
 	outPath := fs.String("out", skiffcost.DefaultPricingConfigPath, "pricing config file to write")
 	awsPricingFile := fs.String("aws-pricing-file", "", "read AWS EC2 Price List JSON from this file instead of fetching fresh data")
 	awsRDSPricingFile := fs.String("aws-rds-pricing-file", "", "read AWS RDS Price List JSON from this file instead of fetching fresh data")

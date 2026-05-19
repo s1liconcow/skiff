@@ -70,9 +70,9 @@ The test creates unique Apple container names and RustFS buckets and registers c
 - `SKIFF_AWS_E2E_REGION` or `AWS_REGION` selects the region.
 - `SKIFF_AWS_E2E_PREFIX` must be unique for the run and is recorded in reports.
 - `SKIFF_AWS_E2E_LIVE_APPLY=1` requests SDK-backed live apply after the non-mutating plan/explain gate passes.
-- `SKIFF_AWS_VPC_ID`, `SKIFF_AWS_SUBNET_IDS`, and `SKIFF_AWS_AMI_ID` are required live-shape inputs for target groups/security groups, ASGs, and launch templates.
-- `SKIFF_AWS_ALB_LISTENER_ARN` is required for services with listener rules.
-- `SKIFF_AWS_LOAD_BALANCER_SECURITY_GROUP_REF` is required when VM ingress uses the `load-balancer` source.
+- `SKIFF_AWS_VPC_ID`, `SKIFF_AWS_SUBNET_IDS`, and `SKIFF_AWS_AMI_ID` are required live-shape inputs for the legacy direct e2e harness. The quickstart bootstrap path can instead write those defaults to `envs/<env>/root.json`, using the AWS public AL2023 SSM AMI parameter when no custom runner AMI is supplied.
+- `SKIFF_AWS_ALB_LISTENER_ARN` is required for services with listener rules unless a bootstrap environment root supplies an ALB listener.
+- `SKIFF_AWS_LOAD_BALANCER_SECURITY_GROUP_REF` is required when VM ingress uses the `load-balancer` source unless a bootstrap environment root supplies an ALB security group.
 
 AWS tests must remain optional for PRs. Live runs use a prefix-derived service name, Skiff tags, and JSON reports with provider IDs, operation IDs, durable object paths, trace IDs, cleanup status, and follow-up cleanup/status commands. Automatic destructive cleanup is intentionally not performed by the current smoke test; cleanup status and tag-discovery commands are recorded so operators can remove isolated test resources explicitly.
 

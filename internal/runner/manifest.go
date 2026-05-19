@@ -2,6 +2,9 @@ package runner
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -26,6 +29,7 @@ const (
 	CodeInvalidServiceControl  = "INVALID_SERVICE_CONTROL"
 	CodeTargetMismatch         = "RUNNER_TARGET_MISMATCH"
 	CodeNoDesiredRelease       = "DESIRED_RELEASE_REQUIRED"
+	CodeReleaseTrustInvalid    = "RELEASE_TRUST_INVALID"
 	CodeStaleReleaseRejected   = "STALE_RELEASE_REJECTED"
 	CodeLocalStateWriteFailed  = "LOCAL_STATE_WRITE_FAILED"
 	CodeRunnerEventWriteFailed = "RUNNER_EVENT_WRITE_FAILED"
@@ -178,12 +182,16 @@ func Bootstrap(ctx context.Context, req BootstrapRequest) (*BootstrapResult, err
 	if err := emit(StateVerifyingRelease, control.DesiredRelease, "verifying desired release and runtime manifest", nil, &identity); err != nil {
 		return nil, err
 	}
+	verifier, err := verifierForReleaseTrust(ctx, req.Store, req.Config, req.Verifier)
+	if err != nil {
+		return fail(CodeReleaseTrustInvalid, "load release trust", err, nil, &identity, control.DesiredRelease)
+	}
 
 	fetched, err := release.Fetch(ctx, req.Store, release.FetchOptions{
 		Service:       req.Config.Service,
 		Env:           req.Config.Env,
 		ReleaseID:     control.DesiredRelease,
-		Verifier:      req.Verifier,
+		Verifier:      verifier,
 		Now:           now(),
 		RunnerVersion: buildinfo.Version,
 	})
@@ -229,6 +237,84 @@ func Bootstrap(ctx context.Context, req BootstrapRequest) (*BootstrapResult, err
 	return result, nil
 }
 
+func verifierForReleaseTrust(ctx context.Context, store objstore.ObjectStore, cfg config.Config, provided signing.Verifier) (signing.Verifier, error) {
+	if provided != nil {
+		return provided, nil
+	}
+	rootKey, err := paths.EnvironmentRoot(cfg.Env)
+	if err != nil {
+		return nil, err
+	}
+	obj, err := store.Get(ctx, rootKey)
+	if err != nil {
+		return nil, fmt.Errorf("read environment root %s: %w", rootKey, err)
+	}
+	var root schema.EnvironmentRoot
+	if err := json.Unmarshal(obj.Body, &root); err != nil {
+		return nil, fmt.Errorf("parse environment root %s: %w", rootKey, err)
+	}
+	if root.ReleaseTrust == nil {
+		return nil, errors.New("environment root does not contain release trust")
+	}
+	active := map[string]bool{}
+	for _, keyID := range root.ReleaseTrust.ActiveKeyIDs {
+		active[strings.TrimSpace(keyID)] = true
+	}
+	var publicKeys []signing.TrustedPublicKey
+	for _, key := range root.ReleaseTrust.Keys {
+		keyID := strings.TrimSpace(key.KeyID)
+		if keyID == "" || strings.TrimSpace(key.Status) != "active" {
+			continue
+		}
+		if len(active) > 0 && !active[keyID] {
+			continue
+		}
+		raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(key.PublicKey))
+		if err != nil {
+			return nil, fmt.Errorf("decode release trust public key %q: %w", keyID, err)
+		}
+		algorithm := releaseTrustAlgorithm(key)
+		encoding := releaseTrustEncoding(key)
+		if algorithm == signing.AlgorithmEd25519 && len(raw) != ed25519.PublicKeySize {
+			return nil, fmt.Errorf("release trust public key %q must be %d bytes", keyID, ed25519.PublicKeySize)
+		}
+		publicKeys = append(publicKeys, signing.TrustedPublicKey{
+			KeyID:     keyID,
+			Algorithm: algorithm,
+			Encoding:  encoding,
+			PublicKey: raw,
+		})
+	}
+	if len(publicKeys) == 0 {
+		return nil, errors.New("environment root release trust has no active public keys")
+	}
+	return signing.NewPublicKeyVerifier(publicKeys)
+}
+
+func releaseTrustAlgorithm(key schema.ReleaseTrustKey) string {
+	if strings.TrimSpace(key.Algorithm) != "" {
+		return strings.TrimSpace(key.Algorithm)
+	}
+	switch strings.TrimSpace(key.Backend) {
+	case signing.KeychainScheme:
+		return signing.AlgorithmEd25519
+	case "aws-kms":
+		return signing.AlgorithmECDSAP256SHA256
+	default:
+		return signing.AlgorithmEd25519
+	}
+}
+
+func releaseTrustEncoding(key schema.ReleaseTrustKey) string {
+	if strings.TrimSpace(key.Encoding) != "" {
+		return strings.TrimSpace(key.Encoding)
+	}
+	if releaseTrustAlgorithm(key) == signing.AlgorithmECDSAP256SHA256 {
+		return signing.PublicKeyEncodingPKIXDER
+	}
+	return signing.PublicKeyEncodingRaw
+}
+
 func bootstrapStateful(ctx context.Context, req BootstrapRequest, result *BootstrapResult, identity Identity, now func() time.Time, stateStore StateStore, emit func(State, string, string, error, *Identity) error, fail func(string, string, error, *release.VerificationResult, *Identity, string) (*BootstrapResult, error)) (*BootstrapResult, error) {
 	if req.Config.ReleaseID == "" {
 		return fail(CodeNoDesiredRelease, "stateful runner release_id is required", nil, nil, &identity, "")
@@ -255,12 +341,16 @@ func bootstrapStateful(ctx context.Context, req BootstrapRequest, result *Bootst
 	if err := emit(StateVerifyingRelease, req.Config.ReleaseID, "verifying stateful release and runtime manifest", nil, &identity); err != nil {
 		return nil, err
 	}
+	verifier, err := verifierForReleaseTrust(ctx, req.Store, req.Config, req.Verifier)
+	if err != nil {
+		return fail(CodeReleaseTrustInvalid, "load release trust", err, nil, &identity, req.Config.ReleaseID)
+	}
 	fetched, err := release.Fetch(ctx, req.Store, release.FetchOptions{
 		Service:       req.Config.Service,
 		Env:           req.Config.Env,
 		ReleaseID:     req.Config.ReleaseID,
 		ReleaseKey:    req.Config.ReleaseManifestKey,
-		Verifier:      req.Verifier,
+		Verifier:      verifier,
 		Now:           now(),
 		RunnerVersion: buildinfo.Version,
 	})

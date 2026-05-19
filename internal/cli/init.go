@@ -45,7 +45,7 @@ func runInitStack(binary string, args []string, root rootOptions, stdout, stderr
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", root.Yes, "overwrite existing generated files")
 	dir := fs.String("dir", "", "directory to create")
-	env := fs.String("env", firstNonEmptyCLI(root.Env, "prod"), "Skiff environment name")
+	env := fs.String("env", firstNonEmptyCLI(root.Env, defaultSkiffEnvFromEnv(), "prod"), "Skiff environment name")
 	artifact := fs.String("artifact", "", "OCI artifact reference for the API service")
 	objectStoreURI := fs.String("object-store-uri", "", "object store URI for api-slatedb")
 	overwrite := fs.Bool("overwrite", false, "overwrite existing generated files")

@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ENV_NAME="{{ .Plan.Env }}"
+REGION="{{ .Plan.Region }}"
+STATE_BUCKET="{{ .Plan.StateBucket }}"
+KMS_ALIAS="{{ .Plan.KMSAlias }}"
+
+export AWS_PAGER=""
+
+echo "This will delete Skiff quickstart AWS resources for env ${ENV_NAME} in ${REGION}."
+echo "State bucket: s3://${STATE_BUCKET}"
+echo "This is destructive and includes versioned object deletion for the state bucket."
+printf "Type %s to continue: " "${ENV_NAME}"
+read -r CONFIRM
+if [ "${CONFIRM}" != "${ENV_NAME}" ]; then
+  echo "aborted"
+  exit 1
+fi
+
+awsr() {
+  aws --region "${REGION}" "$@"
+}
+
+delete_bucket_versions() {
+  local bucket="$1"
+  while read -r key version; do
+    [ -n "${key}" ] || continue
+    awsr s3api delete-object --bucket "${bucket}" --key "${key}" --version-id "${version}" >/dev/null || true
+  done < <(awsr s3api list-object-versions --bucket "${bucket}" --query 'Versions[].{Key:Key,VersionId:VersionId}' --output text 2>/dev/null || true)
+  while read -r key version; do
+    [ -n "${key}" ] || continue
+    awsr s3api delete-object --bucket "${bucket}" --key "${key}" --version-id "${version}" >/dev/null || true
+  done < <(awsr s3api list-object-versions --bucket "${bucket}" --query 'DeleteMarkers[].{Key:Key,VersionId:VersionId}' --output text 2>/dev/null || true)
+}
+
+echo "Scaling down Skiff service Auto Scaling Groups tagged with this env..."
+for asg in $(aws autoscaling describe-auto-scaling-groups --query "AutoScalingGroups[?contains(Tags[?Key=='skiff.dev/env'].Value, '${ENV_NAME}')].AutoScalingGroupName" --output text); do
+  aws autoscaling update-auto-scaling-group --auto-scaling-group-name "${asg}" --min-size 0 --max-size 0 --desired-capacity 0 || true
+  aws autoscaling delete-auto-scaling-group --auto-scaling-group-name "${asg}" --force-delete || true
+done
+
+echo "Deleting launch templates tagged with this env..."
+for lt in $(awsr ec2 describe-launch-templates --filters "Name=tag:skiff.dev/env,Values=${ENV_NAME}" --query 'LaunchTemplates[].LaunchTemplateId' --output text 2>/dev/null || true); do
+  awsr ec2 delete-launch-template --launch-template-id "${lt}" >/dev/null || true
+done
+
+echo "Deleting CloudWatch log groups for this env..."
+for group in $(awsr logs describe-log-groups --log-group-name-prefix "/skiff/${ENV_NAME}/" --query 'logGroups[].logGroupName' --output text 2>/dev/null || true); do
+  awsr logs delete-log-group --log-group-name "${group}" || true
+done
+
+echo "Deleting target groups tagged with this env..."
+for arn in $(awsr resourcegroupstaggingapi get-resources --tag-filters "Key=skiff.dev/env,Values=${ENV_NAME}" --resource-type-filters elasticloadbalancing:targetgroup --query 'ResourceTagMappingList[].ResourceARN' --output text 2>/dev/null || true); do
+  awsr elbv2 delete-target-group --target-group-arn "${arn}" || true
+done
+
+echo "Deleting non-bootstrap IAM instance profiles and roles tagged with this env..."
+for profile in $(aws iam list-instance-profiles --query "InstanceProfiles[?starts_with(InstanceProfileName, 'skiff-${ENV_NAME}-')].InstanceProfileName" --output text 2>/dev/null || true); do
+  for role in $(aws iam get-instance-profile --instance-profile-name "${profile}" --query 'InstanceProfile.Roles[].RoleName' --output text 2>/dev/null || true); do
+    aws iam remove-role-from-instance-profile --instance-profile-name "${profile}" --role-name "${role}" || true
+  done
+  aws iam delete-instance-profile --instance-profile-name "${profile}" || true
+done
+for role in $(aws iam list-roles --query "Roles[?starts_with(RoleName, 'skiff-${ENV_NAME}-')].RoleName" --output text 2>/dev/null || true); do
+  for policy in $(aws iam list-role-policies --role-name "${role}" --query 'PolicyNames[]' --output text 2>/dev/null || true); do
+    aws iam delete-role-policy --role-name "${role}" --policy-name "${policy}" || true
+  done
+  aws iam delete-role --role-name "${role}" || true
+done
+
+{{ if .ManagedNetwork }}
+VPC_ID="$(awsr ec2 describe-vpcs --filters "Name=tag:skiff.dev/env,Values=${ENV_NAME}" "Name=tag:skiff.dev/graph,Values=environment/${ENV_NAME}" --query 'Vpcs[0].VpcId' --output text 2>/dev/null || true)"
+if [ -n "${VPC_ID}" ] && [ "${VPC_ID}" != "None" ]; then
+  echo "Deleting managed VPC resources in ${VPC_ID}..."
+  for lb in $(awsr elbv2 describe-load-balancers --query "LoadBalancers[?VpcId=='${VPC_ID}'].LoadBalancerArn" --output text 2>/dev/null || true); do
+    awsr elbv2 delete-load-balancer --load-balancer-arn "${lb}" || true
+    awsr elbv2 wait load-balancers-deleted --load-balancer-arns "${lb}" || true
+  done
+  for nat in $(awsr ec2 describe-nat-gateways --filter "Name=vpc-id,Values=${VPC_ID}" --query 'NatGateways[].NatGatewayId' --output text 2>/dev/null || true); do
+    awsr ec2 delete-nat-gateway --nat-gateway-id "${nat}" || true
+    awsr ec2 wait nat-gateway-deleted --nat-gateway-ids "${nat}" || true
+  done
+  for assoc in $(awsr ec2 describe-route-tables --filters "Name=vpc-id,Values=${VPC_ID}" "Name=association.main,Values=false" --query 'RouteTables[].Associations[].RouteTableAssociationId' --output text 2>/dev/null || true); do
+    awsr ec2 disassociate-route-table --association-id "${assoc}" || true
+  done
+  for rt in $(awsr ec2 describe-route-tables --filters "Name=vpc-id,Values=${VPC_ID}" "Name=association.main,Values=false" --query 'RouteTables[].RouteTableId' --output text 2>/dev/null || true); do
+    awsr ec2 delete-route-table --route-table-id "${rt}" || true
+  done
+  for sg in $(awsr ec2 describe-security-groups --filters "Name=vpc-id,Values=${VPC_ID}" "Name=tag:skiff.dev/env,Values=${ENV_NAME}" --query 'SecurityGroups[].GroupId' --output text 2>/dev/null || true); do
+    awsr ec2 delete-security-group --group-id "${sg}" || true
+  done
+  for subnet in $(awsr ec2 describe-subnets --filters "Name=vpc-id,Values=${VPC_ID}" --query 'Subnets[].SubnetId' --output text 2>/dev/null || true); do
+    awsr ec2 delete-subnet --subnet-id "${subnet}" || true
+  done
+  for igw in $(awsr ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=${VPC_ID}" --query 'InternetGateways[].InternetGatewayId' --output text 2>/dev/null || true); do
+    awsr ec2 detach-internet-gateway --internet-gateway-id "${igw}" --vpc-id "${VPC_ID}" || true
+    awsr ec2 delete-internet-gateway --internet-gateway-id "${igw}" || true
+  done
+  for alloc in $(awsr ec2 describe-addresses --filters "Name=tag:skiff.dev/env,Values=${ENV_NAME}" --query 'Addresses[].AllocationId' --output text 2>/dev/null || true); do
+    awsr ec2 release-address --allocation-id "${alloc}" || true
+  done
+  awsr ec2 delete-vpc --vpc-id "${VPC_ID}" || true
+fi
+{{ end }}
+
+echo "Deleting state bucket objects and bucket..."
+if awsr s3api head-bucket --bucket "${STATE_BUCKET}" 2>/dev/null; then
+  awsr s3api delete-bucket-policy --bucket "${STATE_BUCKET}" || true
+  delete_bucket_versions "${STATE_BUCKET}"
+  aws s3 rm "s3://${STATE_BUCKET}" --recursive || true
+  awsr s3api delete-bucket --bucket "${STATE_BUCKET}" || true
+fi
+
+echo "Deleting KMS alias and scheduling key deletion when possible..."
+KEY_ID="$(awsr kms describe-key --key-id "${KMS_ALIAS}" --query 'KeyMetadata.KeyId' --output text 2>/dev/null || true)"
+awsr kms delete-alias --alias-name "${KMS_ALIAS}" 2>/dev/null || true
+if [ -n "${KEY_ID}" ] && [ "${KEY_ID}" != "None" ]; then
+  awsr kms schedule-key-deletion --key-id "${KEY_ID}" --pending-window-in-days 7 || true
+fi
+
+echo "teardown requested for ${ENV_NAME}"

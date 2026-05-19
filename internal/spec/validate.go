@@ -270,18 +270,8 @@ func validateNetworkAt(diagnostics *[]Diagnostic, network Network, path string) 
 		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".ingress.type", Code: "UNSUPPORTED_INGRESS_TYPE", Severity: SeverityError, Message: "ingress type must be private, public-http, or internal-http"})
 	}
 	if ingress.Type == "public-http" {
-		if strings.TrimSpace(ingress.Host) == "" {
-			*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".ingress.host", Code: "REQUIRED", Severity: SeverityError, Message: "public ingress requires a host"})
-		} else if net.ParseIP(ingress.Host) != nil || !strings.Contains(ingress.Host, ".") {
+		if strings.TrimSpace(ingress.Host) != "" && (net.ParseIP(ingress.Host) != nil || !strings.Contains(ingress.Host, ".")) {
 			*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".ingress.host", Code: "INVALID_HOST", Severity: SeverityError, Message: "public ingress host must be a DNS hostname"})
-		}
-		tlsEnabled := ingress.TLS != nil && ingress.TLS.Enabled
-		certRef := ingress.CertRef
-		if ingress.TLS != nil && ingress.TLS.CertRef != "" {
-			certRef = ingress.TLS.CertRef
-		}
-		if !tlsEnabled || strings.TrimSpace(certRef) == "" {
-			*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".ingress.tls", Code: "TLS_REQUIRED", Severity: SeverityError, Message: "public ingress requires TLS and a certificate reference"})
 		}
 	}
 }

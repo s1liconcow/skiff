@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/s1liconcow/skiff/internal/ir"
@@ -36,6 +37,13 @@ type LowerOptions struct {
 	SubnetIDs                    []string
 	AMIID                        string
 	ALBListenerARN               string
+	IngressBaseDomain            string
+	IngressDefaultHostTemplate   string
+	IngressCertificateRef        string
+	RunnerInstallVersion         string
+	RunnerInstallBaseURL         string
+	RunnerInstallScriptURL       string
+	RunnerInstallPublicKeyRef    string
 }
 
 type ServiceResources struct {
@@ -351,6 +359,22 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 		if err != nil {
 			return nil, err
 		}
+		host := strings.TrimSpace(listener.Host)
+		certificateRef := strings.TrimSpace(listener.TLS.CertRef)
+		if listener.Visibility == "public" {
+			if host == "" {
+				host = defaultListenerHost(graph.Service, graph.Env, opts)
+			}
+			if certificateRef == "" {
+				certificateRef = strings.TrimSpace(opts.IngressCertificateRef)
+			}
+			if host == "" {
+				return nil, fmt.Errorf("public listener %s requires network.ingress.host or a bootstrapped public default host template", listener.Meta.LogicalID)
+			}
+			if certificateRef == "" {
+				return nil, fmt.Errorf("public listener %s requires network.ingress.tls.certRef, network.ingress.certRef, or a bootstrapped public certificate", listener.Meta.LogicalID)
+			}
+		}
 		rule := ListenerRule{
 			LogicalID:      listener.Meta.LogicalID,
 			Name:           name,
@@ -358,8 +382,8 @@ func LowerService(graph *ir.Graph, opts LowerOptions) (*ServiceResources, error)
 			Protocol:       listener.Protocol,
 			Port:           listener.Port,
 			ListenerARN:    strings.TrimSpace(opts.ALBListenerARN),
-			Host:           listener.Host,
-			CertificateRef: listener.TLS.CertRef,
+			Host:           host,
+			CertificateRef: certificateRef,
 			TargetGroupRef: listener.TargetGroupRef,
 			Tags:           TagsMap(listener.Meta, nil),
 			Source:         append([]ir.SourceRef(nil), listener.Meta.Source...),
@@ -886,7 +910,84 @@ func runnerUserData(graph *ir.Graph, opts LowerOptions, releaseID, controlKey st
 		),
 	}
 	body, _ := json.Marshal(map[string]any{"skiff": cfg})
-	return "#cloud-config\nwrite_files:\n  - path: /etc/skiff-runner/config.json\n    permissions: '0640'\n    content: |\n      " + string(body) + "\nruncmd:\n  - [ systemctl, enable, --now, skiff-runner ]\n"
+	return renderRunnerCloudInit(string(body), opts)
+}
+
+func renderRunnerCloudInit(configJSON string, opts LowerOptions) string {
+	var b strings.Builder
+	b.WriteString("#cloud-config\n")
+	b.WriteString("write_files:\n")
+	writeCloudInitFile(&b, "/etc/skiff/runner.json", "0640", configJSON)
+	writeCloudInitFile(&b, "/etc/systemd/system/skiff-runner.service", "0644", runnerServiceUnit())
+	b.WriteString("runcmd:\n")
+	if installCmd := runnerInstallCommand(opts); installCmd != "" {
+		writeCloudInitShellCommand(&b, "if command -v dnf >/dev/null 2>&1; then dnf install -y curl tar gzip; fi")
+		writeCloudInitShellCommand(&b, installCmd)
+	}
+	b.WriteString("  - [ systemctl, daemon-reload ]\n")
+	b.WriteString("  - [ systemctl, enable, --now, skiff-runner.service ]\n")
+	return b.String()
+}
+
+func writeCloudInitFile(b *strings.Builder, path, permissions, content string) {
+	fmt.Fprintf(b, "  - path: %s\n", path)
+	fmt.Fprintf(b, "    permissions: '%s'\n", permissions)
+	b.WriteString("    content: |\n")
+	for _, line := range strings.Split(strings.TrimRight(content, "\n"), "\n") {
+		b.WriteString("      ")
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+}
+
+func writeCloudInitShellCommand(b *strings.Builder, command string) {
+	b.WriteString("  - ")
+	b.WriteString(strconv.Quote(command))
+	b.WriteByte('\n')
+}
+
+func runnerInstallCommand(opts LowerOptions) string {
+	version := strings.TrimSpace(opts.RunnerInstallVersion)
+	if version == "" {
+		return ""
+	}
+	scriptURL := strings.TrimSpace(opts.RunnerInstallScriptURL)
+	if scriptURL == "" {
+		scriptURL = fmt.Sprintf("https://raw.githubusercontent.com/s1liconcow/skiff/%s/scripts/install.sh", version)
+	}
+	var env []string
+	env = append(env, "SKIFF_INSTALL_VERSION="+shellQuote(version))
+	if baseURL := strings.TrimSpace(opts.RunnerInstallBaseURL); baseURL != "" {
+		env = append(env, "SKIFF_INSTALL_BASE_URL="+shellQuote(baseURL))
+	}
+	if keyRef := strings.TrimSpace(opts.RunnerInstallPublicKeyRef); keyRef != "" {
+		env = append(env, "SKIFF_INSTALL_PUBLIC_KEY="+shellQuote(keyRef))
+	}
+	return "if ! command -v skiff-runner >/dev/null 2>&1; then curl -fsSL " + shellQuote(scriptURL) + " | " + strings.Join(env, " ") + " sh; fi"
+}
+
+func runnerServiceUnit() string {
+	return `[Unit]
+Description=Skiff runner
+Documentation=https://github.com/s1liconcow/skiff
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=SKIFF_RUNNER_USER_DATA=/etc/skiff/runner.json
+ExecStart=/usr/local/bin/skiff-runner bootstrap --user-data /etc/skiff/runner.json --format json
+ExecStart=/usr/local/bin/skiff-runner run --user-data /etc/skiff/runner.json --format json
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
+`
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func instanceTypeForMachine(machine ir.Machine) string {
@@ -911,6 +1012,23 @@ func healthCheckType(targetGroups []string) string {
 		return "EC2"
 	}
 	return "ELB"
+}
+
+func defaultListenerHost(service, env string, opts LowerOptions) string {
+	template := strings.TrimSpace(opts.IngressDefaultHostTemplate)
+	baseDomain := strings.TrimSpace(opts.IngressBaseDomain)
+	if template == "" && baseDomain != "" {
+		template = "{service}." + baseDomain
+	}
+	if template == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(
+		"{service}", strings.TrimSpace(service),
+		"{env}", strings.TrimSpace(env),
+		"{base_domain}", baseDomain,
+	)
+	return strings.TrimSpace(replacer.Replace(template))
 }
 
 func awsDatabaseEngine(engine string) string {

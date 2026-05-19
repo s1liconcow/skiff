@@ -8,9 +8,15 @@ import (
 
 	"github.com/s1liconcow/skiff/internal/compiler"
 	"github.com/s1liconcow/skiff/internal/ir"
+	"github.com/s1liconcow/skiff/internal/objstore"
+	"github.com/s1liconcow/skiff/internal/objstore/memory"
 	"github.com/s1liconcow/skiff/internal/provider"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
 	"github.com/s1liconcow/skiff/internal/spec"
+	"github.com/s1liconcow/skiff/internal/state/canonical"
+	"github.com/s1liconcow/skiff/internal/state/paths"
+	"github.com/s1liconcow/skiff/internal/state/schema"
+	"gopkg.in/yaml.v3"
 )
 
 func TestLowerServicePublicHTTPGoldenPrimitives(t *testing.T) {
@@ -62,6 +68,7 @@ func TestLowerServicePublicHTTPGoldenPrimitives(t *testing.T) {
 		`"group":"/skiff/prod/payments-api"`,
 		`"stream_template":"{service}/{release}/{instance}"`,
 		`"archive_prefix":"services/payments-api/log-archives/prod/"`,
+		"/etc/skiff/runner.json",
 		"skiff-runner",
 	} {
 		if !strings.Contains(userData, want) {
@@ -139,6 +146,212 @@ func TestLowerServiceCarriesAWSLiveShapeInputs(t *testing.T) {
 	}
 	if err := aws.ValidateLiveApplyInputs(lowered); err != nil {
 		t.Fatalf("live apply inputs should validate: %v", err)
+	}
+}
+
+func TestProviderPlanFillsLiveInputsFromEnvironmentRoot(t *testing.T) {
+	store := memory.New()
+	key, err := paths.EnvironmentRoot("dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := schema.EnvironmentRoot{
+		SchemaVersion: schema.EnvironmentRootSchemaVersion,
+		Env:           "dev",
+		Provider:      aws.Name,
+		Region:        "us-west-2",
+		StateBucket:   "memory://aws-env-root",
+		KMSAlias:      "alias/skiff-dev-state",
+		Network: &schema.EnvironmentNetwork{
+			Mode:             "managed",
+			VPCID:            "vpc-env",
+			PrivateSubnetIDs: []string{"subnet-private-a", "subnet-private-b"},
+		},
+		Runner: &schema.EnvironmentRunner{
+			AMISSMParameter:  "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64",
+			InstallVersion:   "v0.1.0",
+			InstallScriptURL: "https://raw.githubusercontent.com/s1liconcow/skiff/v0.1.0/scripts/install.sh",
+		},
+		CreatedAt: "2026-05-16T21:00:00Z",
+		UpdatedAt: "2026-05-16T21:00:00Z",
+	}
+	body, err := canonical.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(context.Background(), key, body, objstore.PutOptions{ContentType: "application/json"}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := aws.New(aws.Config{
+		Region:      "us-west-2",
+		StateBucket: "memory://aws-env-root",
+		LiveApply:   true,
+	}, aws.WithStateStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := p.Plan(context.Background(), compileSpec(t, minimalServiceSpec))
+	if err != nil {
+		t.Fatalf("plan with environment root defaults: %v", err)
+	}
+	targetGroup := desiredResource[aws.TargetGroupAWS](t, plan, aws.ResourceKindTargetGroup)
+	if targetGroup.VPCID != "vpc-env" {
+		t.Fatalf("target group VPC ID = %q", targetGroup.VPCID)
+	}
+	template := desiredResource[aws.LaunchTemplate](t, plan, aws.ResourceKindLaunchTemplate)
+	wantAMI := "resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
+	if template.AMIID != wantAMI {
+		t.Fatalf("launch template AMI ID = %q", template.AMIID)
+	}
+	for _, want := range []string{
+		"dnf install -y curl tar gzip",
+		"SKIFF_INSTALL_VERSION=",
+		"v0.1.0",
+		"https://raw.githubusercontent.com/s1liconcow/skiff/v0.1.0/scripts/install.sh",
+		"/etc/skiff/runner.json",
+	} {
+		if !strings.Contains(template.UserData, want) {
+			t.Fatalf("launch template user-data missing %q:\n%s", want, template.UserData)
+		}
+	}
+	var cloudInit any
+	if err := yaml.Unmarshal([]byte(template.UserData), &cloudInit); err != nil {
+		t.Fatalf("launch template user-data is not valid cloud-init YAML: %v\n%s", err, template.UserData)
+	}
+	asg := desiredResource[aws.AutoScalingGroup](t, plan, aws.ResourceKindAutoScalingGroup)
+	if strings.Join(asg.SubnetIDs, ",") != "subnet-private-a,subnet-private-b" {
+		t.Fatalf("ASG subnet IDs = %#v", asg.SubnetIDs)
+	}
+}
+
+func TestProviderPlanFillsPublicALBFromEnvironmentRoot(t *testing.T) {
+	store := memory.New()
+	key, err := paths.EnvironmentRoot("prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := schema.EnvironmentRoot{
+		SchemaVersion: schema.EnvironmentRootSchemaVersion,
+		Env:           "prod",
+		Provider:      aws.Name,
+		Region:        "us-west-2",
+		StateBucket:   "memory://aws-env-root",
+		KMSAlias:      "alias/skiff-prod-state",
+		Network: &schema.EnvironmentNetwork{
+			Mode:             "managed",
+			VPCID:            "vpc-public",
+			PrivateSubnetIDs: []string{"subnet-private-a", "subnet-private-b"},
+			PublicSubnetIDs:  []string{"subnet-public-a", "subnet-public-b"},
+		},
+		Ingress: &schema.EnvironmentIngress{
+			Type:                "public",
+			BaseDomain:          "quickstart.example.com",
+			DefaultHostTemplate: "{service}.quickstart.example.com",
+			LoadBalancer: &schema.EnvironmentLoadBalancerDefaults{
+				ARN:              "arn:aws:elasticloadbalancing:us-west-2:123456789012:loadbalancer/app/skiff-public/abc",
+				DNSName:          "quickstart.example.com",
+				ProviderDNSName:  "skiff-public.us-west-2.elb.amazonaws.com",
+				SecurityGroupID:  "sg-public-alb",
+				HTTPListenerARN:  "arn:aws:elasticloadbalancing:us-west-2:123456789012:listener/app/skiff-public/abc/http",
+				HTTPSListenerARN: "arn:aws:elasticloadbalancing:us-west-2:123456789012:listener/app/skiff-public/abc/https",
+				CertificateARN:   "arn:aws:acm:us-west-2:123456789012:certificate/env-shared",
+			},
+		},
+		Runner: &schema.EnvironmentRunner{
+			AMISSMParameter: "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64",
+		},
+		CreatedAt: "2026-05-16T21:00:00Z",
+		UpdatedAt: "2026-05-16T21:00:00Z",
+	}
+	body, err := canonical.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(context.Background(), key, body, objstore.PutOptions{ContentType: "application/json"}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := aws.New(aws.Config{
+		Region:      "us-west-2",
+		StateBucket: "memory://aws-env-root",
+		LiveApply:   true,
+	}, aws.WithStateStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := p.Plan(context.Background(), compileSpec(t, publicHTTPSpec))
+	if err != nil {
+		t.Fatalf("plan with public environment root defaults: %v", err)
+	}
+	listener := desiredResource[aws.ListenerRule](t, plan, aws.ResourceKindListenerRule)
+	if listener.ListenerARN != root.Ingress.LoadBalancer.HTTPSListenerARN {
+		t.Fatalf("listener ARN = %q, want %q", listener.ListenerARN, root.Ingress.LoadBalancer.HTTPSListenerARN)
+	}
+	group := desiredResource[aws.SecurityGroupAWS](t, plan, aws.ResourceKindSecurityGroup)
+	if len(group.Ingress) != 1 || group.Ingress[0].SourceSecurityGroupRef != "sg-public-alb" {
+		t.Fatalf("security group ingress did not use public ALB SG: %+v", group.Ingress)
+	}
+}
+
+func TestProviderPlanDefaultsPublicHostAndCertificateFromEnvironmentRoot(t *testing.T) {
+	store := memory.New()
+	key, err := paths.EnvironmentRoot("quickstart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := schema.EnvironmentRoot{
+		SchemaVersion: schema.EnvironmentRootSchemaVersion,
+		Env:           "quickstart",
+		Provider:      aws.Name,
+		Region:        "us-west-2",
+		StateBucket:   "memory://aws-env-root",
+		KMSAlias:      "alias/skiff-quickstart-state",
+		Network: &schema.EnvironmentNetwork{
+			Mode:             "managed",
+			VPCID:            "vpc-public",
+			PrivateSubnetIDs: []string{"subnet-private-a", "subnet-private-b"},
+		},
+		Ingress: &schema.EnvironmentIngress{
+			Type:                "public",
+			BaseDomain:          "quickstart.example.com",
+			DefaultHostTemplate: "{service}.quickstart.example.com",
+			LoadBalancer: &schema.EnvironmentLoadBalancerDefaults{
+				SecurityGroupID:  "sg-public-alb",
+				HTTPSListenerARN: "arn:aws:elasticloadbalancing:us-west-2:123456789012:listener/app/skiff-public/abc/https",
+				CertificateARN:   "arn:aws:acm:us-west-2:123456789012:certificate/env-shared",
+			},
+		},
+		Runner:    &schema.EnvironmentRunner{AMIID: "ami-123"},
+		CreatedAt: "2026-05-16T21:00:00Z",
+		UpdatedAt: "2026-05-16T21:00:00Z",
+	}
+	body, err := canonical.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(context.Background(), key, body, objstore.PutOptions{ContentType: "application/json"}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := aws.New(aws.Config{
+		Region:      "us-west-2",
+		StateBucket: "memory://aws-env-root",
+		LiveApply:   true,
+	}, aws.WithStateStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := p.Plan(context.Background(), compileSpec(t, publicHTTPWithoutHostSpec))
+	if err != nil {
+		t.Fatalf("plan with public environment root defaults: %v", err)
+	}
+	listener := desiredResource[aws.ListenerRule](t, plan, aws.ResourceKindListenerRule)
+	if listener.Host != "orders.quickstart.example.com" {
+		t.Fatalf("listener host = %q", listener.Host)
+	}
+	if listener.CertificateRef != root.Ingress.LoadBalancer.CertificateARN {
+		t.Fatalf("listener certificate = %q, want %q", listener.CertificateRef, root.Ingress.LoadBalancer.CertificateARN)
+	}
+	if listener.ListenerARN != root.Ingress.LoadBalancer.HTTPSListenerARN {
+		t.Fatalf("listener ARN = %q, want %q", listener.ListenerARN, root.Ingress.LoadBalancer.HTTPSListenerARN)
 	}
 }
 
@@ -406,6 +619,23 @@ func assertLen[T any](t *testing.T, name string, values []T, want int) {
 	}
 }
 
+func desiredResource[T any](t *testing.T, plan *provider.Plan, kind string) T {
+	t.Helper()
+	for _, resource := range plan.Resources {
+		if resource.Kind != kind {
+			continue
+		}
+		var out T
+		if err := canonical.UnmarshalStrict(resource.Desired, &out); err != nil {
+			t.Fatalf("unmarshal desired %s: %v", kind, err)
+		}
+		return out
+	}
+	t.Fatalf("resource kind %s not found in plan: %+v", kind, plan.Resources)
+	var zero T
+	return zero
+}
+
 func compileSpec(t *testing.T, body string) *ir.Graph {
 	t.Helper()
 	doc, result, err := spec.Parse([]byte(body), spec.DecodeOptions{})
@@ -452,6 +682,24 @@ secrets:
     ref: aws-secretsmanager://arn:aws:secretsmanager:us-west-2:123456789012:secret:payments/db-password
   - name: api-token
     ref: aws-ssm://arn:aws:ssm:us-west-2:123456789012:parameter/payments/api-token
+`
+
+const publicHTTPWithoutHostSpec = `
+apiVersion: skiff.dev/v1alpha1
+kind: Service
+metadata:
+  name: orders
+  env: quickstart
+artifact:
+  type: oci
+  ref: registry.example.com/orders@sha256:def456
+runtime:
+  port: 8080
+  health:
+    path: /healthz
+network:
+  ingress:
+    type: public-http
 `
 
 const statefulGroupSpec = `

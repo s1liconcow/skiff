@@ -31,7 +31,46 @@ EOF
   exit 1
 fi
 
-stop_skiffd() {
+skiffd_readyz() {
+  local url="${SKIFF_APPLE_SKIFFD_URL:-}"
+  if [[ -z "$url" ]] || ! command -v curl >/dev/null 2>&1; then
+    return 1
+  fi
+  curl -fsS --max-time 1 "$url/readyz?format=json" >/dev/null 2>&1
+}
+
+skiffd_port() {
+  local url="${SKIFF_APPLE_SKIFFD_URL:-}"
+  if [[ "$url" =~ ^https?://(\[[^]]+\]|[^/:]+):([0-9]+)(/.*)?$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[2]}"
+  fi
+}
+
+pid_is_skiffd() {
+  local pid="$1"
+  local command_line
+  command_line="$(ps -p "$pid" -o command= 2>/dev/null || ps -p "$pid" -o args= 2>/dev/null || true)"
+  [[ "$command_line" == *skiffd* ]]
+}
+
+terminate_pid() {
+  local pid="$1"
+  local label="$2"
+  if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! kill -0 "$pid" 2>/dev/null; then
+    return
+  fi
+  echo "Stopping skiffd ${label}: $pid"
+  kill "$pid" 2>/dev/null || true
+  for _ in {1..20}; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      return
+    fi
+    sleep 0.1
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+}
+
+stop_skiffd_by_pid() {
   local pid="${SKIFF_APPLE_SKIFFD_PID:-}"
   if [[ -z "$pid" ]]; then
     return
@@ -43,20 +82,37 @@ stop_skiffd() {
   if ! kill -0 "$pid" 2>/dev/null; then
     return
   fi
-  local command_line
-  command_line="$(ps -p "$pid" -o command= 2>/dev/null || ps -p "$pid" -o args= 2>/dev/null || true)"
-  if [[ "$command_line" != *skiffd* ]]; then
+  if ! pid_is_skiffd "$pid"; then
     echo "Skipping PID from env because it is not skiffd: $pid" >&2
     return
   fi
-  kill "$pid" 2>/dev/null || true
-  for _ in {1..20}; do
-    if ! kill -0 "$pid" 2>/dev/null; then
-      return
+  terminate_pid "$pid" "from env"
+}
+
+stop_skiffd_by_port() {
+  local port pids pid
+  port="$(skiffd_port)"
+  if [[ -z "$port" ]] || ! command -v lsof >/dev/null 2>&1; then
+    return
+  fi
+  pids="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | sort -u || true)"
+  while IFS= read -r pid; do
+    if [[ -z "$pid" ]]; then
+      continue
     fi
-    sleep 0.1
-  done
-  kill -KILL "$pid" 2>/dev/null || true
+    if pid_is_skiffd "$pid"; then
+      terminate_pid "$pid" "listening on port $port"
+    fi
+  done <<< "$pids"
+}
+
+stop_skiffd() {
+  stop_skiffd_by_pid
+  stop_skiffd_by_port
+  if skiffd_readyz; then
+    echo "skiffd is still responding at ${SKIFF_APPLE_SKIFFD_URL}; cleanup did not complete." >&2
+    return 1
+  fi
 }
 
 stop_container() {
@@ -86,6 +142,7 @@ cleanup_env_file() {
     unset SKIFF_APPLE_RUSTFS_CONTAINER
     unset SKIFF_APPLE_RUSTFS_VOLUME
     unset SKIFF_APPLE_SKIFFD_PID
+    unset SKIFF_APPLE_SKIFFD_URL
 
     # shellcheck source=/dev/null
     source "$path"

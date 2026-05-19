@@ -24,6 +24,7 @@ import (
 	skifferrors "github.com/s1liconcow/skiff/internal/errors"
 	"github.com/s1liconcow/skiff/internal/events"
 	"github.com/s1liconcow/skiff/internal/ir"
+	awsprovider "github.com/s1liconcow/skiff/internal/provider/aws"
 	"github.com/s1liconcow/skiff/internal/release"
 	securitypolicy "github.com/s1liconcow/skiff/internal/security/policy"
 	"github.com/s1liconcow/skiff/internal/security/signing"
@@ -44,6 +45,16 @@ const (
 	ExitTimeout       = 7
 	ExitInternalError = 8
 )
+
+var newAWSBootstrapClient = func(ctx context.Context, region string) (bootstrap.AWSBootstrapClient, error) {
+	return awsprovider.NewSDKBootstrapClient(ctx, awsprovider.Config{Region: region})
+}
+
+var newAWSReleaseSignerStore = func(ctx context.Context, region string) (signing.ReleaseSignerStore, error) {
+	return awsprovider.NewKMSReleaseSignerStore(ctx, awsprovider.Config{Region: region})
+}
+
+var releaseSignerStore signing.ReleaseSignerStore = signing.DefaultReleaseSignerStore()
 
 type versionOutput struct {
 	OK            bool             `json:"ok"`
@@ -544,11 +555,16 @@ type compileOutput struct {
 }
 
 type bootstrapAWSOutput struct {
-	OK        bool               `json:"ok"`
-	TraceID   string             `json:"trace_id,omitempty"`
-	DryRun    bool               `json:"dry_run"`
-	Terraform string             `json:"terraform,omitempty"`
-	Plan      *bootstrap.AWSPlan `json:"plan"`
+	OK            bool                      `json:"ok"`
+	TraceID       string                    `json:"trace_id,omitempty"`
+	DryRun        bool                      `json:"dry_run"`
+	Terraform     string                    `json:"terraform,omitempty"`
+	TerraformPath string                    `json:"terraform_path,omitempty"`
+	TeardownPath  string                    `json:"teardown_path,omitempty"`
+	ConfigPath    string                    `json:"config_path,omitempty"`
+	Context       string                    `json:"context,omitempty"`
+	Plan          *bootstrap.AWSPlan        `json:"plan"`
+	Apply         *bootstrap.AWSApplyResult `json:"apply,omitempty"`
 }
 
 type policyExplainOutput struct {
@@ -985,14 +1001,32 @@ func runBootstrapAWS(binary string, args []string, stdout, stderr io.Writer) int
 	yes := fs.Bool("yes", false, "apply bootstrap changes without prompting")
 	dryRun := fs.Bool("dry-run", false, "print the bootstrap plan without mutating cloud resources")
 	emitTerraform := fs.String("emit", "", "emit generated artifacts; supported value: terraform")
-	env := fs.String("env", "", "Skiff environment name")
-	region := fs.String("region", "", "AWS region")
+	outDir := fs.String("out", "", "directory for emitted bootstrap artifacts")
+	configPath := fs.String("config", "", "Skiff config file to create or update with the bootstrapped context")
+	contextName := fs.String("context", "", "Skiff context name to create or update")
+	noWriteConfig := fs.Bool("no-write-config", false, "do not create or update a Skiff config context")
+	env := fs.String("env", defaultSkiffEnvFromEnv(), "Skiff environment name")
+	region := fs.String("region", defaultAWSRegionFromEnv(), "AWS region")
 	bucket := fs.String("bucket", "", "S3 state bucket name")
-	stateBucket := fs.String("state-bucket", "", "S3 state bucket URI or name")
+	stateBucket := fs.String("state-bucket", strings.TrimSpace(os.Getenv("SKIFF_STATE_BUCKET")), "S3 state bucket URI or name")
 	kmsAlias := fs.String("kms-alias", "", "KMS alias for state bucket encryption")
 	deployerRole := fs.String("deployer-role", "", "IAM role name for deployers")
 	runnerRole := fs.String("runner-role", "", "IAM role name for runners")
 	skiffdRole := fs.String("skiffd-role", "", "IAM role name for skiffd")
+	network := fs.String("network", bootstrap.NetworkNone, "environment network mode: none or managed")
+	ingress := fs.String("ingress", bootstrap.IngressPrivate, "environment ingress default: private, public, or internal-http")
+	companyName := fs.String("company-name", defaultSkiffCompanyNameFromEnv(), "company name used in generated AWS names, state bucket, and tags")
+	domainName := fs.String("domain-name", defaultSkiffDomainNameFromEnv(), "public DNS zone name used to create <env>.<domain> and wildcard service hosts")
+	hostName := fs.String("host-name", defaultSkiffHostNameFromEnv(), "public ingress base hostname override")
+	hostedZoneID := fs.String("hosted-zone-id", strings.TrimSpace(os.Getenv("SKIFF_AWS_HOSTED_ZONE_ID")), "Route53 hosted zone ID for public ingress DNS")
+	certificateARN := fs.String("certificate-arn", strings.TrimSpace(os.Getenv("SKIFF_AWS_CERTIFICATE_ARN")), "existing ACM certificate ARN for public ingress HTTPS")
+	runnerAMIID := fs.String("runner-ami-id", "", "default AWS AMI ID for workload VMs")
+	runnerAMISSMParameter := fs.String("runner-ami-ssm-parameter", "", "AWS Systems Manager parameter for workload VM AMI when --runner-ami-id is omitted")
+	runnerInstallVersion := fs.String("runner-install-version", "", "Skiff release tag installed on generic runner AMIs")
+	runnerInstallBaseURL := fs.String("runner-install-base-url", "", "base URL for runner release archives")
+	runnerInstallScriptURL := fs.String("runner-install-script-url", "", "URL for the pinned runner install script")
+	signingBackend := fs.String("signing-backend", strings.TrimSpace(os.Getenv("SKIFF_RELEASE_SIGNING_BACKEND")), "release signing backend: aws-kms or keychain")
+	signingKeyRef := fs.String("signing-key-ref", strings.TrimSpace(os.Getenv("SKIFF_RELEASE_SIGNING_KEY_REF")), "release signing key reference; defaults to a managed AWS KMS key")
 
 	if handled, err := parseCommandFlags(fs, args, stdout); handled {
 		return ExitSuccess
@@ -1007,20 +1041,89 @@ func runBootstrapAWS(binary string, args []string, stdout, stderr io.Writer) int
 	if *bucket == "" && *stateBucket != "" {
 		*bucket = bucketNameFromStateBucket(*stateBucket)
 	}
+	var signerRecord *signing.ReleaseSignerRecord
+	releaseSigningKeyRef := ""
+	shouldWriteContext := !*dryRun && !*noWriteConfig && (*outDir != "" || (*emitTerraform == "" && *yes))
+	resolvedSigningBackend, err := normalizeReleaseSigningBackend(*signingBackend)
+	if err != nil {
+		return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+	}
+	explicitSigningKeyRef := strings.TrimSpace(*signingKeyRef)
+	if explicitSigningKeyRef != "" {
+		releaseSigningKeyRef = explicitSigningKeyRef
+	}
+	if releaseSigningKeyRef == "" && resolvedSigningBackend == awsprovider.KMSReleaseSigningScheme {
+		releaseSigningKeyRef = awsprovider.DefaultKMSReleaseSigningRef(*env, *region)
+	}
+	if !*dryRun {
+		switch {
+		case explicitSigningKeyRef != "":
+			if isAWSKMSReleaseSigningRef(explicitSigningKeyRef) && *emitTerraform == "terraform" {
+				break
+			}
+			store, err := signerStoreForKeyRef(context.Background(), *region, explicitSigningKeyRef)
+			if err != nil {
+				return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+			}
+			record, _, err := store.Resolve(context.Background(), explicitSigningKeyRef)
+			if err != nil {
+				return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+			}
+			signerRecord = record
+			releaseSigningKeyRef = record.KeyRef
+		case resolvedSigningBackend == "keychain" && (shouldWriteContext || (*emitTerraform == "" && *yes)):
+			record, _, err := releaseSignerStore.Ensure(context.Background(), *env)
+			if err != nil {
+				return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+			}
+			signerRecord = record
+			releaseSigningKeyRef = record.KeyRef
+		case resolvedSigningBackend == awsprovider.KMSReleaseSigningScheme && *emitTerraform == "" && *yes:
+			store, err := newAWSReleaseSignerStore(context.Background(), *region)
+			if err != nil {
+				return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+			}
+			record, _, err := store.Ensure(context.Background(), *env)
+			if err != nil {
+				return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+			}
+			signerRecord = record
+			releaseSigningKeyRef = record.KeyRef
+		}
+	}
 	plan, err := bootstrap.PlanAWS(bootstrap.AWSOptions{
-		Env:          *env,
-		Region:       *region,
-		StateBucket:  *bucket,
-		KMSAlias:     *kmsAlias,
-		DeployerRole: *deployerRole,
-		RunnerRole:   *runnerRole,
-		SkiffdRole:   *skiffdRole,
+		Env:                     *env,
+		Region:                  *region,
+		StateBucket:             *bucket,
+		KMSAlias:                *kmsAlias,
+		DeployerRole:            *deployerRole,
+		RunnerRole:              *runnerRole,
+		SkiffdRole:              *skiffdRole,
+		Network:                 *network,
+		Ingress:                 *ingress,
+		CompanyName:             *companyName,
+		DomainName:              *domainName,
+		HostName:                *hostName,
+		HostedZoneID:            *hostedZoneID,
+		CertificateARN:          *certificateARN,
+		RunnerAMIID:             *runnerAMIID,
+		RunnerAMISSMParameter:   *runnerAMISSMParameter,
+		RunnerInstallVersion:    *runnerInstallVersion,
+		RunnerInstallBaseURL:    *runnerInstallBaseURL,
+		RunnerInstallScriptURL:  *runnerInstallScriptURL,
+		ReleaseSigningKeyID:     releaseSignerRecordKeyID(signerRecord),
+		ReleaseSigningKeyRef:    firstNonEmptyString(releaseSignerRecordKeyRef(signerRecord), releaseSigningKeyRef),
+		ReleaseSigningAlgorithm: releaseSignerRecordAlgorithm(signerRecord),
+		ReleaseSigningEncoding:  releaseSignerRecordEncoding(signerRecord),
+		ReleaseSigningPublicKey: releaseSignerRecordPublicKey(signerRecord),
 	})
 	if err != nil {
 		return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
 	}
 
 	var terraform string
+	var terraformPath string
+	var teardownPath string
 	if *emitTerraform != "" {
 		if *emitTerraform != "terraform" {
 			return writeBootstrapError(binary, *format, *traceID, errors.New(`unsupported emit target; expected "terraform"`), stdout, stderr)
@@ -1029,12 +1132,72 @@ func runBootstrapAWS(binary string, args []string, stdout, stderr io.Writer) int
 		if err != nil {
 			return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
 		}
+		if *outDir != "" {
+			if err := os.MkdirAll(*outDir, 0o755); err != nil {
+				return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+			}
+			terraformPath = filepath.Join(*outDir, "main.tf")
+			if err := os.WriteFile(terraformPath, []byte(terraform), 0o644); err != nil {
+				return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+			}
+			teardown, err := bootstrap.AWSTeardownScript(plan)
+			if err != nil {
+				return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+			}
+			teardownPath = filepath.Join(*outDir, "teardown-aws-cli.sh")
+			if err := os.WriteFile(teardownPath, []byte(teardown), 0o755); err != nil {
+				return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+			}
+			terraform = ""
+		}
+	} else if *outDir != "" && !*dryRun && *yes {
+		if err := os.MkdirAll(*outDir, 0o755); err != nil {
+			return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+		}
+		teardown, err := bootstrap.AWSTeardownScript(plan)
+		if err != nil {
+			return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+		}
+		teardownPath = filepath.Join(*outDir, "teardown-aws-cli.sh")
+		if err := os.WriteFile(teardownPath, []byte(teardown), 0o755); err != nil {
+			return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+		}
 	}
+	var applyResult *bootstrap.AWSApplyResult
 	if !*dryRun && *emitTerraform == "" {
 		if !*yes {
 			return writeBootstrapError(binary, *format, *traceID, errors.New("bootstrap apply requires --yes; use --dry-run to inspect the plan"), stdout, stderr)
 		}
-		return writeBootstrapError(binary, *format, *traceID, errors.New("bootstrap apply requires an AWS bootstrap client; use --dry-run or --emit terraform in this build"), stdout, stderr)
+		client, err := newAWSBootstrapClient(context.Background(), plan.Region)
+		if err != nil {
+			return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+		}
+		applyResult, err = bootstrap.ApplyAWS(context.Background(), client, plan)
+		if err != nil {
+			return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+		}
+	}
+
+	writtenConfigPath := ""
+	writtenContext := ""
+	if shouldWriteContext {
+		writtenConfigPath = strings.TrimSpace(*configPath)
+		if writtenConfigPath == "" {
+			writtenConfigPath = config.DefaultConfigFilename
+		}
+		writtenContext = strings.TrimSpace(*contextName)
+		if writtenContext == "" {
+			writtenContext = plan.Env
+		}
+		if err := writeBootstrapAWSContext(writtenConfigPath, writtenContext, plan); err != nil {
+			return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+		}
+	}
+	outputPlan := plan
+	if applyResult != nil {
+		materialized := *plan
+		materialized.RootConfig = applyResult.RootConfig
+		outputPlan = &materialized
 	}
 
 	switch *format {
@@ -1043,16 +1206,27 @@ func runBootstrapAWS(binary string, args []string, stdout, stderr io.Writer) int
 			fmt.Fprint(stdout, terraform)
 			return ExitSuccess
 		}
-		printBootstrapAWSPlan(stdout, plan)
+		printBootstrapAWSPlan(stdout, outputPlan, bootstrapAWSLocalArtifacts{
+			TerraformPath: terraformPath,
+			TeardownPath:  teardownPath,
+			ConfigPath:    writtenConfigPath,
+			Context:       writtenContext,
+			Apply:         applyResult,
+		})
 		return ExitSuccess
 	case "json":
 		enc := json.NewEncoder(stdout)
 		if err := enc.Encode(bootstrapAWSOutput{
-			OK:        true,
-			TraceID:   *traceID,
-			DryRun:    *dryRun,
-			Terraform: terraform,
-			Plan:      plan,
+			OK:            true,
+			TraceID:       *traceID,
+			DryRun:        *dryRun,
+			Terraform:     terraform,
+			TerraformPath: terraformPath,
+			TeardownPath:  teardownPath,
+			ConfigPath:    writtenConfigPath,
+			Context:       writtenContext,
+			Plan:          outputPlan,
+			Apply:         applyResult,
 		}); err != nil {
 			fmt.Fprintf(stderr, "%s bootstrap aws: %v\n", binary, err)
 			return ExitUserError
@@ -1063,14 +1237,173 @@ func runBootstrapAWS(binary string, args []string, stdout, stderr io.Writer) int
 	}
 }
 
-func printBootstrapAWSPlan(w io.Writer, plan *bootstrap.AWSPlan) {
+type bootstrapAWSLocalArtifacts struct {
+	TerraformPath string
+	TeardownPath  string
+	ConfigPath    string
+	Context       string
+	Apply         *bootstrap.AWSApplyResult
+}
+
+func printBootstrapAWSPlan(w io.Writer, plan *bootstrap.AWSPlan, artifacts bootstrapAWSLocalArtifacts) {
 	fmt.Fprintf(w, "AWS bootstrap plan for %s in %s\n", plan.Env, plan.Region)
 	fmt.Fprintf(w, "state_bucket: %s\n", plan.StateBucketURI)
 	fmt.Fprintf(w, "kms_alias: %s\n", plan.KMSAlias)
 	fmt.Fprintf(w, "root_object: %s\n", plan.RootObjectKey)
+	if plan.CompanyName != "" {
+		fmt.Fprintf(w, "company_name: %s\n", plan.CompanyName)
+	}
+	if plan.PublicBaseDomain != "" {
+		fmt.Fprintf(w, "public_base_domain: %s\n", plan.PublicBaseDomain)
+		fmt.Fprintf(w, "default_service_host: %s\n", strings.ReplaceAll(plan.DefaultHostTemplate, "{service}", "<service>"))
+	} else if plan.RootConfig.Ingress != nil && plan.RootConfig.Ingress.Type == bootstrap.IngressPublic {
+		fmt.Fprintln(w, "public_base_domain: AWS ALB DNS name after apply")
+	}
+	if plan.CertificateARN != "" {
+		fmt.Fprintf(w, "certificate: %s\n", plan.CertificateARN)
+	} else if plan.PublicBaseDomain != "" {
+		fmt.Fprintln(w, "certificate: Skiff-managed ACM DNS-validated certificate for base and wildcard service hosts")
+	}
+	if plan.ReleaseSigningKeyID != "" {
+		fmt.Fprintf(w, "release_signing_key: %s\n", plan.ReleaseSigningKeyID)
+	} else if plan.ReleaseSigningKeyRef != "" {
+		fmt.Fprintf(w, "release_signing_key_ref: %s\n", plan.ReleaseSigningKeyRef)
+	}
+	if artifacts.TerraformPath != "" {
+		fmt.Fprintf(w, "terraform: %s\n", artifacts.TerraformPath)
+	}
+	if artifacts.TeardownPath != "" {
+		fmt.Fprintf(w, "aws_cli_teardown: %s\n", artifacts.TeardownPath)
+	}
+	if artifacts.ConfigPath != "" {
+		fmt.Fprintf(w, "config: %s#%s\n", artifacts.ConfigPath, artifacts.Context)
+	}
+	if artifacts.Apply != nil {
+		fmt.Fprintf(w, "applied: %d actions\n", len(artifacts.Apply.Actions))
+		for _, action := range artifacts.Apply.Actions {
+			if action.ProviderID != "" {
+				fmt.Fprintf(w, "  %s %s: %s (%s)\n", action.Kind, action.Name, action.Action, action.ProviderID)
+			} else {
+				fmt.Fprintf(w, "  %s %s: %s\n", action.Kind, action.Name, action.Action)
+			}
+		}
+	}
 	for _, resource := range plan.Resources {
 		fmt.Fprintf(w, "- %s %s: %s\n", resource.Kind, resource.Name, resource.Summary)
 	}
+}
+
+func writeBootstrapAWSContext(path, contextName string, plan *bootstrap.AWSPlan) error {
+	if plan == nil {
+		return errors.New("aws bootstrap plan is required")
+	}
+	if strings.TrimSpace(path) == "" {
+		return errors.New("config path is required")
+	}
+	if strings.TrimSpace(contextName) == "" {
+		return errors.New("context name is required")
+	}
+	file := &config.SkiffConfigFile{
+		CurrentContext: contextName,
+		Contexts:       []config.NamedContext{},
+	}
+	if existing, err := config.LoadSkiffConfigFile(path); err == nil {
+		file = existing
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	next := config.NamedContext{
+		Name: contextName,
+		Context: config.ContextConfig{
+			Mode:         config.ModeDirect,
+			Env:          plan.Env,
+			Provider:     bootstrap.ProviderAWS,
+			Region:       plan.Region,
+			State:        plan.StateBucketURI,
+			AWSLiveApply: true,
+		},
+	}
+	if plan.ReleaseSigningKeyID != "" || plan.ReleaseSigningKeyRef != "" {
+		next.Context.Signing = &config.SigningConfig{Release: &config.ReleaseSigningConfig{
+			KeyID:  plan.ReleaseSigningKeyID,
+			KeyRef: plan.ReleaseSigningKeyRef,
+		}}
+	}
+	replaced := false
+	for i := range file.Contexts {
+		if file.Contexts[i].Name == contextName {
+			file.Contexts[i] = next
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		file.Contexts = append(file.Contexts, next)
+	}
+	file.CurrentContext = contextName
+	file.CurrentContextCamel = ""
+	file.CurrentContextSnake = ""
+	return config.WriteSkiffConfigFile(path, file)
+}
+
+func releaseSignerRecordKeyID(record *signing.ReleaseSignerRecord) string {
+	if record == nil {
+		return ""
+	}
+	return record.KeyID
+}
+
+func releaseSignerRecordKeyRef(record *signing.ReleaseSignerRecord) string {
+	if record == nil {
+		return ""
+	}
+	return record.KeyRef
+}
+
+func releaseSignerRecordPublicKey(record *signing.ReleaseSignerRecord) string {
+	if record == nil {
+		return ""
+	}
+	return record.PublicKey
+}
+
+func releaseSignerRecordAlgorithm(record *signing.ReleaseSignerRecord) string {
+	if record == nil {
+		return ""
+	}
+	return record.Algorithm
+}
+
+func releaseSignerRecordEncoding(record *signing.ReleaseSignerRecord) string {
+	if record == nil {
+		return ""
+	}
+	return record.Encoding
+}
+
+func normalizeReleaseSigningBackend(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", awsprovider.KMSReleaseSigningScheme:
+		return awsprovider.KMSReleaseSigningScheme, nil
+	case "keychain":
+		return "keychain", nil
+	default:
+		return "", fmt.Errorf("signing backend must be %q or %q", awsprovider.KMSReleaseSigningScheme, "keychain")
+	}
+}
+
+func signerStoreForKeyRef(ctx context.Context, region, keyRef string) (signing.ReleaseSignerStore, error) {
+	if isAWSKMSReleaseSigningRef(keyRef) {
+		if refRegion := awsprovider.KMSReleaseSigningRegion(keyRef); refRegion != "" {
+			region = refRegion
+		}
+		return newAWSReleaseSignerStore(ctx, region)
+	}
+	return releaseSignerStore, nil
+}
+
+func isAWSKMSReleaseSigningRef(keyRef string) bool {
+	return strings.HasPrefix(strings.TrimSpace(keyRef), awsprovider.KMSReleaseSigningScheme+"://")
 }
 
 func writeBootstrapError(binary, format, traceID string, err error, stdout, stderr io.Writer) int {
@@ -1084,7 +1417,7 @@ func writeBootstrapError(binary, format, traceID string, err error, stdout, stde
 			RecommendedActions: []recommendedAction{
 				{
 					ID:       "dry_run",
-					Command:  binary + " bootstrap aws --env <env> --region <region> --bucket <bucket> --dry-run --format json",
+					Command:  binary + " bootstrap aws --env <env> --region <region> --network managed --ingress private --dry-run --format json",
 					Mutating: false,
 				},
 			},
@@ -1107,6 +1440,39 @@ func bucketNameFromStateBucket(value string) string {
 		return withoutScheme
 	}
 	return value
+}
+
+func defaultSkiffEnvFromEnv() string {
+	return strings.TrimSpace(os.Getenv("SKIFF_ENV"))
+}
+
+func defaultSkiffCompanyNameFromEnv() string {
+	return firstNonEmptyCLI(
+		strings.TrimSpace(os.Getenv("SKIFF_COMPANY_NAME")),
+		strings.TrimSpace(os.Getenv("SKIFF_COMPANY")),
+	)
+}
+
+func defaultSkiffDomainNameFromEnv() string {
+	return firstNonEmptyCLI(
+		strings.TrimSpace(os.Getenv("SKIFF_DOMAIN_NAME")),
+		strings.TrimSpace(os.Getenv("SKIFF_DOMAIN")),
+	)
+}
+
+func defaultSkiffHostNameFromEnv() string {
+	return firstNonEmptyCLI(
+		strings.TrimSpace(os.Getenv("SKIFF_HOST_NAME")),
+		strings.TrimSpace(os.Getenv("SKIFF_HOSTNAME")),
+	)
+}
+
+func defaultAWSRegionFromEnv() string {
+	return firstNonEmptyCLI(
+		strings.TrimSpace(os.Getenv("AWS_REGION")),
+		strings.TrimSpace(os.Getenv("AWS_DEFAULT_REGION")),
+		strings.TrimSpace(os.Getenv("SKIFF_REGION")),
+	)
 }
 
 func runPolicy(binary string, args []string, stdout, stderr io.Writer) int {
@@ -1712,9 +2078,23 @@ func printBootstrapUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "AWS flags:")
 	fmt.Fprintln(w, "  --env <env>")
 	fmt.Fprintln(w, "  --region <region>")
-	fmt.Fprintln(w, "  --bucket <bucket>")
+	fmt.Fprintln(w, "  --bucket <bucket>      Optional; autogenerated when omitted")
+	fmt.Fprintln(w, "  --network none|managed")
+	fmt.Fprintln(w, "  --ingress private|public|internal-http")
+	fmt.Fprintln(w, "  --company-name <name>             Optional; defaults from SKIFF_COMPANY_NAME")
+	fmt.Fprintln(w, "  --domain-name <domain>            Optional; public ingress creates <env>.<domain> and wildcard service hosts")
+	fmt.Fprintln(w, "  --host-name <hostname>            Optional; public ingress base hostname override")
+	fmt.Fprintln(w, "  --hosted-zone-id <zone>           Optional; Route53 zone override")
+	fmt.Fprintln(w, "  --certificate-arn <arn>           Optional; reuse an ACM cert instead of creating one")
+	fmt.Fprintln(w, "  --runner-ami-id <ami>              Optional; custom runner AMI")
+	fmt.Fprintln(w, "  --runner-ami-ssm-parameter <path>  Optional; defaults to AL2023 x86_64")
+	fmt.Fprintln(w, "  --runner-install-version <tag>     Optional; defaults to v0.1.0 with the public AL2023 AMI")
 	fmt.Fprintln(w, "  --dry-run")
 	fmt.Fprintln(w, "  --emit terraform")
+	fmt.Fprintln(w, "  --out <dir>                       Write generated artifacts and teardown script")
+	fmt.Fprintln(w, "  --config <path>                   Config file to update when --out is set")
+	fmt.Fprintln(w, "  --context <name>                  Context name to update; defaults to env")
+	fmt.Fprintln(w, "  --no-write-config")
 	fmt.Fprintln(w, "  --format human|json|json-pretty")
 }
 
@@ -2507,6 +2887,10 @@ func configValue(cfg config.Config, field string) string {
 		return cfg.Service
 	case config.FieldControlKey:
 		return cfg.ControlKey
+	case config.FieldReleaseSigningKeyID:
+		return cfg.ReleaseSigningKeyID
+	case config.FieldReleaseSigningKeyRef:
+		return cfg.ReleaseSigningKeyRef
 	case config.FieldAWSLiveApply:
 		if cfg.AWSLiveApply {
 			return "true"

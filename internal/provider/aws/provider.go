@@ -147,7 +147,17 @@ func (p *Provider) Plan(ctx context.Context, graph *ir.Graph) (*provider.Plan, e
 		}
 	}
 
-	resources, err := LowerService(graph, p.lowerOptions())
+	lowerOpts, err := p.lowerOptionsWithEnvironmentRoot(ctx, graph.Env, p.lowerOptions())
+	if err != nil {
+		return nil, &provider.Error{
+			Code:     provider.CodeValidation,
+			Provider: Name,
+			Op:       "plan",
+			Summary:  err.Error(),
+			Cause:    err,
+		}
+	}
+	resources, err := LowerService(graph, lowerOpts)
 	if err != nil {
 		return nil, &provider.Error{
 			Code:     provider.CodeValidation,

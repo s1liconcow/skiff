@@ -48,6 +48,7 @@ func reasonForStatement(role Role, sid string) string {
 		"EmergencyCreateOnlyState":      "Allow emergency creation of immutable state objects with create-if-absent protection.",
 		"EmergencyCASControlState":      "Allow emergency compare-and-swap updates to control documents.",
 		"UseStateKMSKey":                "Allow use of the configured KMS alias for encrypted state object access.",
+		"UseReleaseSigningKMSKey":       "Allow release signing with the configured asymmetric KMS key.",
 	}
 	if reason := reasons[sid]; reason != "" {
 		return reason

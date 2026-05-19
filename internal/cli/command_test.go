@@ -2,12 +2,16 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/s1liconcow/skiff/internal/bootstrap"
+	"github.com/s1liconcow/skiff/internal/config"
 )
 
 var ansiEscapeRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -533,6 +537,7 @@ func TestBootstrapAWSDryRunJSON(t *testing.T) {
 			Provider       string `json:"provider"`
 			StateBucketURI string `json:"state_bucket_uri"`
 			KMSAlias       string `json:"kms_alias"`
+			SigningKeyRef  string `json:"release_signing_key_ref"`
 			RootObjectKey  string `json:"root_object_key"`
 			Resources      []struct {
 				Kind   string `json:"kind"`
@@ -554,14 +559,156 @@ func TestBootstrapAWSDryRunJSON(t *testing.T) {
 	if got.Plan.Provider != "aws" || got.Plan.StateBucketURI != "s3://skiff-state-prod" || got.Plan.KMSAlias == "" {
 		t.Fatalf("unexpected plan: %+v", got.Plan)
 	}
+	if got.Plan.SigningKeyRef != "aws-kms://alias/skiff-prod-release-signing?region=us-west-2" {
+		t.Fatalf("release signing key ref = %q", got.Plan.SigningKeyRef)
+	}
 	if got.Plan.RootObjectKey != "envs/prod/root.json" {
 		t.Fatalf("root object key = %q", got.Plan.RootObjectKey)
 	}
-	if len(got.Plan.Resources) != 7 {
-		t.Fatalf("resource count = %d, want 7", len(got.Plan.Resources))
+	if len(got.Plan.Resources) != 8 {
+		t.Fatalf("resource count = %d, want 8", len(got.Plan.Resources))
 	}
 	if len(got.Plan.BucketPolicy.Statement) != 5 {
 		t.Fatalf("bucket policy statements = %d, want 5", len(got.Plan.BucketPolicy.Statement))
+	}
+}
+
+func TestBootstrapAWSManagedNetworkDryRunJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"bootstrap", "aws",
+		"--env", "dev",
+		"--region", "us-west-2",
+		"--network", "managed",
+		"--ingress", "private",
+		"--dry-run",
+		"--format", "json",
+		"--trace-id", "tr_bootstrap_network",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	var got struct {
+		OK   bool `json:"ok"`
+		Plan struct {
+			StateBucketURI string `json:"state_bucket_uri"`
+			RootConfig     struct {
+				Network *struct {
+					Mode string `json:"mode"`
+				} `json:"network"`
+				Ingress *struct {
+					Type string `json:"type"`
+				} `json:"ingress"`
+				Runner *struct {
+					AMISSMParameter string `json:"ami_ssm_parameter"`
+					InstallVersion  string `json:"install_version"`
+				} `json:"runner"`
+			} `json:"root_config"`
+			Resources []struct {
+				Kind string `json:"kind"`
+			} `json:"resources"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("bootstrap output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || !strings.HasPrefix(got.Plan.StateBucketURI, "s3://skiff-") || !strings.HasSuffix(got.Plan.StateBucketURI, "-dev-us-west-2-state") {
+		t.Fatalf("unexpected plan: %+v", got.Plan)
+	}
+	if got.Plan.RootConfig.Network == nil || got.Plan.RootConfig.Network.Mode != "managed" {
+		t.Fatalf("managed network missing from root config: %+v", got.Plan.RootConfig)
+	}
+	if got.Plan.RootConfig.Ingress == nil || got.Plan.RootConfig.Ingress.Type != "private" {
+		t.Fatalf("private ingress missing from root config: %+v", got.Plan.RootConfig)
+	}
+	if got.Plan.RootConfig.Runner == nil || got.Plan.RootConfig.Runner.AMISSMParameter == "" || got.Plan.RootConfig.Runner.InstallVersion == "" {
+		t.Fatalf("runner defaults missing from root config: %+v", got.Plan.RootConfig.Runner)
+	}
+	hasVPC := false
+	hasNAT := false
+	hasSigningKMS := false
+	for _, resource := range got.Plan.Resources {
+		hasVPC = hasVPC || resource.Kind == "vpc"
+		hasNAT = hasNAT || resource.Kind == "nat-gateway"
+		hasSigningKMS = hasSigningKMS || resource.Kind == "kms-key"
+	}
+	if !hasVPC || !hasNAT || !hasSigningKMS {
+		t.Fatalf("managed network resources missing: %+v", got.Plan.Resources)
+	}
+}
+
+func TestBootstrapAWSUsesEnvironmentDefaults(t *testing.T) {
+	clearSkiffEnv(t)
+	t.Setenv("SKIFF_ENV", "quickstart")
+	t.Setenv("AWS_REGION", "us-west-2")
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"bootstrap", "aws",
+		"--network", "managed",
+		"--ingress", "private",
+		"--dry-run",
+		"--format", "json",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var got struct {
+		OK   bool `json:"ok"`
+		Plan struct {
+			Env            string `json:"env"`
+			Region         string `json:"region"`
+			StateBucketURI string `json:"state_bucket_uri"`
+			RootObjectKey  string `json:"root_object_key"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("bootstrap output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.Plan.Env != "quickstart" || got.Plan.Region != "us-west-2" {
+		t.Fatalf("unexpected env-derived plan: %+v", got.Plan)
+	}
+	if got.Plan.RootObjectKey != "envs/quickstart/root.json" {
+		t.Fatalf("root object key = %q", got.Plan.RootObjectKey)
+	}
+	if !strings.HasPrefix(got.Plan.StateBucketURI, "s3://skiff-") || !strings.HasSuffix(got.Plan.StateBucketURI, "-quickstart-us-west-2-state") {
+		t.Fatalf("unexpected generated state bucket: %q", got.Plan.StateBucketURI)
+	}
+}
+
+func TestBootstrapAWSPublicDomainHumanSummaryIsBackendNeutral(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"bootstrap", "aws",
+		"--env", "quickstart",
+		"--region", "us-west-2",
+		"--network", "managed",
+		"--ingress", "public",
+		"--domain-name", "example.com",
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "certificate: Skiff-managed ACM DNS-validated certificate for base and wildcard service hosts") {
+		t.Fatalf("human output missing backend-neutral certificate summary:\n%s", got)
+	}
+	if !strings.Contains(got, "- kms-key alias/skiff-quickstart-release-signing: asymmetric AWS KMS key for release signing") {
+		t.Fatalf("human output missing release signing KMS key:\n%s", got)
+	}
+	if strings.Contains(got, "managed by "+"Terraform") {
+		t.Fatalf("human output should not describe Skiff-owned ingress as managed by the Terraform backend:\n%s", got)
 	}
 }
 
@@ -642,12 +789,332 @@ func TestBootstrapAWSEmitTerraform(t *testing.T) {
 	for _, want := range []string{
 		`resource "aws_s3_bucket" "skiff_state"`,
 		`resource "aws_kms_key" "skiff_state"`,
+		`resource "aws_kms_key" "skiff_release_signing"`,
+		`data "aws_kms_public_key" "skiff_release_signing"`,
+		`release_trust = {`,
 		`DenyUnconditionalStateWrites`,
+		`UseReleaseSigningKMSKey`,
 		`skiff-prod-runner`,
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("terraform output missing %q:\n%s", want, stdout.String())
 		}
+	}
+}
+
+func TestBootstrapAWSManagedNetworkEmitTerraform(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"bootstrap", "aws",
+		"--env", "dev",
+		"--region", "us-west-2",
+		"--network", "managed",
+		"--ingress", "private",
+		"--emit", "terraform",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	for _, want := range []string{
+		`resource "aws_vpc" "skiff"`,
+		`resource "aws_nat_gateway" "skiff"`,
+		`resource "aws_s3_object" "skiff_env_root"`,
+		`private_subnet_ids = aws_subnet.skiff_private[*].id`,
+		`ami_ssm_parameter = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"`,
+		`install_version = "v0.1.0"`,
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("terraform output missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestBootstrapAWSPublicIngressEmitTerraform(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"bootstrap", "aws",
+		"--env", "quickstart",
+		"--region", "us-west-2",
+		"--network", "managed",
+		"--ingress", "public",
+		"--emit", "terraform",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	for _, want := range []string{
+		`resource "aws_security_group" "skiff_public_lb"`,
+		`resource "aws_lb" "skiff_public"`,
+		`internal           = false`,
+		`subnets            = aws_subnet.skiff_public[*].id`,
+		`resource "aws_lb_listener" "skiff_public_http"`,
+		`security_group_id = aws_security_group.skiff_public_lb.id`,
+		`http_listener_arn = aws_lb_listener.skiff_public_http.arn`,
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("terraform output missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestBootstrapAWSPublicIngressWithDomainEmitTerraform(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"bootstrap", "aws",
+		"--env", "quickstart",
+		"--region", "us-west-2",
+		"--network", "managed",
+		"--ingress", "public",
+		"--company-name", "Acme Corp",
+		"--domain-name", "example.com",
+		"--emit", "terraform",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	for _, want := range []string{
+		`data "aws_route53_zone" "skiff_public"`,
+		`name         = "example.com."`,
+		`resource "aws_acm_certificate" "skiff_public"`,
+		`domain_name               = "quickstart.example.com"`,
+		`subject_alternative_names = ["*.quickstart.example.com"]`,
+		`resource "aws_acm_certificate_validation" "skiff_public"`,
+		`resource "aws_lb_listener" "skiff_public_https"`,
+		`certificate_arn   = aws_acm_certificate_validation.skiff_public.certificate_arn`,
+		`resource "aws_route53_record" "skiff_public_alias"`,
+		`name    = "quickstart.example.com"`,
+		`resource "aws_route53_record" "skiff_public_wildcard_alias"`,
+		`name    = "*.quickstart.example.com"`,
+		`bucket = "skiff-acme-corp-quickstart-us-west-2-state"`,
+		`base_domain           = "quickstart.example.com"`,
+		`default_host_template = "{service}.quickstart.example.com"`,
+		`dns_name          = "quickstart.example.com"`,
+		`provider_dns_name = aws_lb.skiff_public.dns_name`,
+		`https_listener_arn = aws_lb_listener.skiff_public_https.arn`,
+		`"skiff.dev/company" = "acme-corp"`,
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("terraform output missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestBootstrapAWSPublicIngressWithExistingCertificateEmitTerraform(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"bootstrap", "aws",
+		"--env", "quickstart",
+		"--region", "us-west-2",
+		"--network", "managed",
+		"--ingress", "public",
+		"--certificate-arn", "arn:aws:acm:us-west-2:123456789012:certificate/abc123",
+		"--emit", "terraform",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	got := stdout.String()
+	for _, want := range []string{
+		`resource "aws_lb_listener" "skiff_public_https"`,
+		`certificate_arn   = "arn:aws:acm:us-west-2:123456789012:certificate/abc123"`,
+		`https_listener_arn = aws_lb_listener.skiff_public_https.arn`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("terraform output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `resource "aws_acm_certificate" "skiff_public"`) {
+		t.Fatalf("terraform output should not create an ACM certificate when --certificate-arn is supplied:\n%s", got)
+	}
+}
+
+func TestBootstrapAWSDirectApplyUsesBootstrapClientAndWritesContext(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".skiffconfig")
+	outDir := filepath.Join(dir, "bootstrap")
+	withFakeAWSReleaseSignerStore(t, "us-west-2")
+	fake := newCLIFakeAWSBootstrapClient()
+	oldFactory := newAWSBootstrapClient
+	t.Cleanup(func() { newAWSBootstrapClient = oldFactory })
+	var factoryRegion string
+	newAWSBootstrapClient = func(ctx context.Context, region string) (bootstrap.AWSBootstrapClient, error) {
+		factoryRegion = region
+		return fake, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"bootstrap", "aws",
+		"--env", "quickstart",
+		"--region", "us-west-2",
+		"--network", "managed",
+		"--ingress", "public",
+		"--domain-name", "example.com",
+		"--yes",
+		"--out", outDir,
+		"--format", "json",
+		"--config", configPath,
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	if factoryRegion != "us-west-2" {
+		t.Fatalf("bootstrap client region = %q", factoryRegion)
+	}
+	var got bootstrapAWSOutput
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("bootstrap output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.DryRun || got.Apply == nil {
+		t.Fatalf("unexpected bootstrap output: %+v", got)
+	}
+	if got.Plan.RootConfig.ReleaseTrust == nil || len(got.Plan.RootConfig.ReleaseTrust.Keys) != 1 {
+		t.Fatalf("bootstrap plan missing release trust: %+v", got.Plan.RootConfig.ReleaseTrust)
+	}
+	if got.Plan.RootConfig.ReleaseTrust.Keys[0].Backend != "aws-kms" {
+		t.Fatalf("bootstrap plan should default to AWS KMS signing trust: %+v", got.Plan.RootConfig.ReleaseTrust.Keys[0])
+	}
+	lb := got.Apply.RootConfig.Ingress.LoadBalancer
+	if lb == nil || lb.ProviderDNSName != "skiff-cli-public.elb.amazonaws.com" || lb.CertificateARN != "arn:aws:acm:us-west-2:123456789012:certificate/quickstart.example.com" {
+		t.Fatalf("direct apply did not return materialized public ingress root: %+v", got.Apply.RootConfig.Ingress)
+	}
+	if strings.Contains(string(stdout.Bytes()), "${") {
+		t.Fatalf("direct apply output should not contain Terraform expressions:\n%s", stdout.String())
+	}
+	if !fake.seen["dns-record/quickstart.example.com"] || !fake.seen["dns-record/*.quickstart.example.com"] {
+		t.Fatalf("direct apply did not upsert base and wildcard DNS aliases: %+v", fake.seen)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "teardown-aws-cli.sh")); err != nil {
+		t.Fatalf("direct apply should write AWS CLI teardown script when --out is set: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "main.tf")); !os.IsNotExist(err) {
+		t.Fatalf("direct apply should not write Terraform when --emit is omitted: %v", err)
+	}
+	file, err := config.LoadSkiffConfigFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, values, err := file.SelectContext("quickstart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "quickstart" || values[config.FieldAWSLiveApply] != "true" || values[config.FieldStateBucket] != got.Plan.StateBucketURI {
+		t.Fatalf("unexpected written context %q: %+v", name, values)
+	}
+	if values[config.FieldReleaseSigningKeyRef] == "" || values[config.FieldReleaseSigningKeyID] == "" {
+		t.Fatalf("written context missing signing key ref: %+v", values)
+	}
+}
+
+func TestBootstrapAWSEmitTerraformOutWritesContextAndTeardown(t *testing.T) {
+	dir := t.TempDir()
+	outDir := filepath.Join(dir, "bootstrap")
+	configPath := filepath.Join(dir, ".skiffconfig")
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"bootstrap", "aws",
+		"--env", "quickstart",
+		"--region", "us-west-2",
+		"--network", "managed",
+		"--ingress", "private",
+		"--emit", "terraform",
+		"--out", outDir,
+		"--config", configPath,
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	if strings.Contains(stdout.String(), `resource "aws_s3_bucket"`) {
+		t.Fatalf("human output should summarize paths, not dump Terraform:\n%s", stdout.String())
+	}
+	for _, path := range []string{filepath.Join(outDir, "main.tf"), filepath.Join(outDir, "teardown-aws-cli.sh"), configPath} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected %s to be written: %v", path, err)
+		}
+	}
+	if body, err := os.ReadFile(filepath.Join(outDir, "teardown-aws-cli.sh")); err != nil || !strings.Contains(string(body), "Type %s to continue") {
+		t.Fatalf("teardown script missing confirmation: err=%v body=%s", err, string(body))
+	}
+	if body, err := os.ReadFile(filepath.Join(outDir, "main.tf")); err != nil || !strings.Contains(string(body), `resource "aws_kms_key" "skiff_release_signing"`) || !strings.Contains(string(body), `release_trust = {`) {
+		t.Fatalf("terraform output missing release signing KMS resources: err=%v body=%s", err, string(body))
+	}
+	file, err := config.LoadSkiffConfigFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, values, err := file.SelectContext("quickstart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "quickstart" || values[config.FieldEnv] != "quickstart" || values[config.FieldProvider] != "aws" || values[config.FieldAWSLiveApply] != "true" {
+		t.Fatalf("unexpected written context %q: %+v", name, values)
+	}
+	if !strings.HasPrefix(values[config.FieldStateBucket], "s3://skiff-") || !strings.HasSuffix(values[config.FieldStateBucket], "-quickstart-us-west-2-state") {
+		t.Fatalf("unexpected generated state bucket: %q", values[config.FieldStateBucket])
+	}
+	if !strings.HasPrefix(values[config.FieldReleaseSigningKeyRef], "aws-kms://alias/skiff-quickstart-release-signing") {
+		t.Fatalf("written context missing AWS KMS signing key ref: %+v", values)
+	}
+	if values[config.FieldReleaseSigningKeyID] != "" {
+		t.Fatalf("terraform-managed signing key ID should be resolved by Terraform, got context: %+v", values)
+	}
+}
+
+func TestBootstrapAWSCanUseKeychainSigningBackend(t *testing.T) {
+	dir := t.TempDir()
+	outDir := filepath.Join(dir, "bootstrap")
+	configPath := filepath.Join(dir, ".skiffconfig")
+	withFakeReleaseSignerStore(t)
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"bootstrap", "aws",
+		"--env", "quickstart",
+		"--region", "us-west-2",
+		"--signing-backend", "keychain",
+		"--emit", "terraform",
+		"--out", outDir,
+		"--config", configPath,
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	body, err := os.ReadFile(filepath.Join(outDir, "main.tf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), `resource "aws_kms_key" "skiff_release_signing"`) {
+		t.Fatalf("keychain signing backend should not emit release signing KMS resources:\n%s", string(body))
+	}
+	file, err := config.LoadSkiffConfigFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, values, err := file.SelectContext("quickstart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(values[config.FieldReleaseSigningKeyRef], "keychain://") || values[config.FieldReleaseSigningKeyID] == "" {
+		t.Fatalf("written context should use keychain signing metadata: %+v", values)
 	}
 }
 
@@ -936,7 +1403,7 @@ runtime:
 network:
   ingress:
     type: public-http
-    host: payments.example.com
+    host: localhost
 `)
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatalf("write temp spec: %v", err)
@@ -969,8 +1436,8 @@ network:
 	if !hasPathCode(got.Fields, "$.artifact.ref", "MUTABLE_ARTIFACT_REF") {
 		t.Fatalf("missing mutable artifact diagnostic: %+v", got.Fields)
 	}
-	if !hasPathCode(got.Fields, "$.network.ingress.tls", "TLS_REQUIRED") {
-		t.Fatalf("missing TLS diagnostic: %+v", got.Fields)
+	if !hasPathCode(got.Fields, "$.network.ingress.host", "INVALID_HOST") {
+		t.Fatalf("missing invalid host diagnostic: %+v", got.Fields)
 	}
 }
 
@@ -1129,9 +1596,13 @@ func clearSkiffEnv(t *testing.T) {
 		"SKIFF_CONFIG",
 		"SKIFF_CONTEXT",
 		"SKIFF_ENV",
+		"AWS_REGION",
+		"AWS_DEFAULT_REGION",
 		"SKIFF_PROVIDER",
 		"SKIFF_REGION",
 		"SKIFF_STATE_BUCKET",
+		"SKIFF_RELEASE_SIGNING_KEY_ID",
+		"SKIFF_RELEASE_SIGNING_KEY_REF",
 		"SKIFF_KMS_KEY",
 		"SKIFF_AUTH_MODE",
 		"SKIFF_LOG_LEVEL",
@@ -1142,4 +1613,98 @@ func clearSkiffEnv(t *testing.T) {
 	} {
 		t.Setenv(key, "")
 	}
+}
+
+type cliFakeAWSBootstrapClient struct {
+	seen map[string]bool
+}
+
+func newCLIFakeAWSBootstrapClient() *cliFakeAWSBootstrapClient {
+	return &cliFakeAWSBootstrapClient{seen: map[string]bool{}}
+}
+
+func (f *cliFakeAWSBootstrapClient) EnsureKMSKey(ctx context.Context, spec bootstrap.KMSKeySpec) (bootstrap.ApplyAction, error) {
+	return f.ensure("kms-key", spec.Alias), nil
+}
+
+func (f *cliFakeAWSBootstrapClient) EnsureStateBucket(ctx context.Context, spec bootstrap.StateBucketSpec) (bootstrap.ApplyAction, error) {
+	return f.ensure("s3-bucket", spec.Name), nil
+}
+
+func (f *cliFakeAWSBootstrapClient) EnsureIAMRole(ctx context.Context, spec bootstrap.IAMRoleSpec) (bootstrap.ApplyAction, error) {
+	action := f.ensure("iam-role", spec.Name)
+	action.ProviderID = "arn:aws:iam::123456789012:role/" + spec.Name
+	return action, nil
+}
+
+func (f *cliFakeAWSBootstrapClient) PutBucketPolicy(ctx context.Context, spec bootstrap.BucketPolicySpec) (bootstrap.ApplyAction, error) {
+	return f.ensure("s3-bucket-policy", spec.Bucket), nil
+}
+
+func (f *cliFakeAWSBootstrapClient) EnsureManagedNetwork(ctx context.Context, spec bootstrap.ManagedNetworkSpec) (*bootstrap.ManagedNetworkResult, error) {
+	return &bootstrap.ManagedNetworkResult{
+		Actions: []bootstrap.ApplyAction{
+			f.ensure("vpc", spec.NamePrefix),
+			f.ensure("subnet", spec.NamePrefix+"-public"),
+			f.ensure("subnet", spec.NamePrefix+"-private"),
+			f.ensure("internet-gateway", spec.NamePrefix),
+			f.ensure("nat-gateway", spec.NamePrefix),
+			f.ensure("route-table", spec.NamePrefix),
+		},
+		VPCID:            "vpc-cli",
+		PublicSubnetIDs:  []string{"subnet-public-a", "subnet-public-b"},
+		PrivateSubnetIDs: []string{"subnet-private-a", "subnet-private-b"},
+	}, nil
+}
+
+func (f *cliFakeAWSBootstrapClient) ResolveHostedZone(ctx context.Context, spec bootstrap.HostedZoneSpec) (*bootstrap.HostedZoneResult, error) {
+	return &bootstrap.HostedZoneResult{
+		Action:       f.ensure("hosted-zone", "ZCLI"),
+		HostedZoneID: "ZCLI",
+		Name:         spec.DomainName,
+	}, nil
+}
+
+func (f *cliFakeAWSBootstrapClient) EnsureCertificate(ctx context.Context, spec bootstrap.CertificateSpec) (*bootstrap.CertificateResult, error) {
+	return &bootstrap.CertificateResult{
+		Action:         f.ensure("certificate", spec.DomainName),
+		CertificateARN: "arn:aws:acm:us-west-2:123456789012:certificate/" + spec.DomainName,
+	}, nil
+}
+
+func (f *cliFakeAWSBootstrapClient) EnsureLoadBalancerSecurityGroup(ctx context.Context, spec bootstrap.LoadBalancerSecurityGroupSpec) (*bootstrap.SecurityGroupResult, error) {
+	return &bootstrap.SecurityGroupResult{Action: f.ensure("security-group", spec.Name), GroupID: "sg-cli"}, nil
+}
+
+func (f *cliFakeAWSBootstrapClient) EnsureLoadBalancer(ctx context.Context, spec bootstrap.LoadBalancerSpec) (*bootstrap.LoadBalancerResult, error) {
+	return &bootstrap.LoadBalancerResult{
+		Action:       f.ensure("load-balancer", spec.Name),
+		ARN:          "arn:aws:elasticloadbalancing:us-west-2:123456789012:loadbalancer/app/skiff-cli/abc",
+		DNSName:      "skiff-cli-public.elb.amazonaws.com",
+		HostedZoneID: "ZALBCLI",
+	}, nil
+}
+
+func (f *cliFakeAWSBootstrapClient) EnsureListener(ctx context.Context, spec bootstrap.ListenerSpec) (*bootstrap.ListenerResult, error) {
+	return &bootstrap.ListenerResult{
+		Action: f.ensure("listener", spec.Name),
+		ARN:    "arn:aws:elasticloadbalancing:us-west-2:123456789012:listener/app/skiff-cli/abc/" + spec.Name,
+	}, nil
+}
+
+func (f *cliFakeAWSBootstrapClient) EnsureDNSAlias(ctx context.Context, spec bootstrap.DNSAliasSpec) (bootstrap.ApplyAction, error) {
+	return f.ensure("dns-record", spec.Name), nil
+}
+
+func (f *cliFakeAWSBootstrapClient) PutEnvironmentRoot(ctx context.Context, spec bootstrap.EnvironmentRootSpec) (bootstrap.ApplyAction, error) {
+	return f.ensure("environment-root", spec.Key), nil
+}
+
+func (f *cliFakeAWSBootstrapClient) ensure(kind, name string) bootstrap.ApplyAction {
+	key := kind + "/" + name
+	if f.seen[key] {
+		return bootstrap.ApplyAction{Kind: kind, Name: name, Action: "unchanged", ProviderID: key}
+	}
+	f.seen[key] = true
+	return bootstrap.ApplyAction{Kind: kind, Name: name, Action: "created", ProviderID: key}
 }

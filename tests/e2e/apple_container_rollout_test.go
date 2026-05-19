@@ -103,6 +103,51 @@ func TestAppleContextArtifactsRenderFilledConfigAndEnv(t *testing.T) {
 	}
 }
 
+func TestAppleContextArtifactsRenderSigningContext(t *testing.T) {
+	resetSkiffEnv(t)
+	report := newE2EReport(t, "apple-container", "caddy-web", "prod", "tr_apple_context_signing")
+	artifacts := writeAppleContextArtifacts(t, report, rustFSHarness{
+		endpoint:  "http://127.0.0.1:19000",
+		bucket:    "skiff-demo-bucket",
+		accessKey: "local-access",
+		secretKey: "local-secret",
+	}, "s3://skiff-demo-bucket", appleContextOptions{
+		ReleaseSigning: &signing.ReleaseSignerRecord{
+			KeyID:  "skiff-apple-prod-release-test",
+			KeyRef: "keychain://dev.skiff.release-signing/apple-container-prod/release",
+		},
+	})
+
+	configBody, err := os.ReadFile(artifacts.configPath)
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	for _, want := range []string{
+		"signing:",
+		"release:",
+		"keyID: \"skiff-apple-prod-release-test\"",
+		"keyRef: \"keychain://dev.skiff.release-signing/apple-container-prod/release\"",
+	} {
+		if !strings.Contains(string(configBody), want) {
+			t.Fatalf("generated config missing signing field %q:\n%s", want, string(configBody))
+		}
+	}
+	envBody, err := os.ReadFile(artifacts.envPath)
+	if err != nil {
+		t.Fatalf("read generated env: %v", err)
+	}
+	for _, want := range []string{
+		"export SKIFF_APPLE_RELEASE_SIGNING_KEY_ID='skiff-apple-prod-release-test'",
+		"export SKIFF_APPLE_RELEASE_SIGNING_KEY_REF='keychain://dev.skiff.release-signing/apple-container-prod/release'",
+		"export SKIFF_APPLE_RELEASE_SIGNING_KEYCHAIN_SERVICE='dev.skiff.release-signing'",
+		"export SKIFF_APPLE_RELEASE_SIGNING_KEYCHAIN_ACCOUNT='apple-container-prod/release'",
+	} {
+		if !strings.Contains(string(envBody), want) {
+			t.Fatalf("generated env missing signing field %q:\n%s", want, string(envBody))
+		}
+	}
+}
+
 func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 	resetSkiffEnv(t)
 	if !appleContainerE2EEnabled() {
@@ -150,6 +195,11 @@ func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 	verifier := verifierFor(t, signer)
 	actor := schema.Actor{ID: "e2e", Type: "agent"}
 	report := newE2EReport(t, "apple-container", service, env, traceID)
+	var releaseSigning *signing.ReleaseSignerRecord
+	if appleDemoKeychainSigningEnabled() {
+		releaseSigning = appleDemoReleaseSigner(t, ctx, env)
+		report.fact("release_signing", "using OS keychain release signer "+releaseSigning.KeyRef)
+	}
 	quickstart := writeAppleQuickstartArtifacts(t, report, service, env)
 	workloadRoot := filepath.Join(report.reportDir, report.RunID+"-workloads")
 	if persist {
@@ -200,6 +250,7 @@ func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 		CaddyImage:     firstImage,
 		WorkloadRoot:   workloadRoot,
 		Quickstart:     quickstart,
+		ReleaseSigning: releaseSigning,
 	})
 	useAppleContext(t, contexts, appleDirectContext)
 
@@ -244,7 +295,7 @@ func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 	assertDirectDoctorViaRustFS(t, report, stateURI, service, env, traceID)
 	assertDirectOpsViaRustFS(t, report, stateURI, service, env, secondOperationID, traceID)
 
-	localSkiffd := startLocalAppleSkiffd(t, ctx, store, report, rustfs, stateURI, env, traceID, systemd.containerName, persist)
+	localSkiffd := startLocalAppleSkiffd(t, ctx, store, report, rustfs, stateURI, env, traceID, systemd.containerName, persist, releaseSigning)
 	contexts = writeAppleContextArtifacts(t, report, rustfs, stateURI, appleContextOptions{
 		APIURL:         localSkiffd.url,
 		CaddyContainer: systemd.containerName,
@@ -254,6 +305,7 @@ func TestAppleContainerRustFSCaddyRollout(t *testing.T) {
 		Quickstart:     quickstart,
 		SkiffdPID:      report.SkiffdPID,
 		SkiffdLogPath:  report.SkiffdLogPath,
+		ReleaseSigning: releaseSigning,
 	})
 	useAppleContext(t, contexts, appleAPIContext)
 	assertSkiffdStatusViaAPI(t, report, localSkiffd.url, stateURI, service, env, nextReleaseID, secondOperationID, traceID)
@@ -280,6 +332,19 @@ func appleContainerE2EEnabled() bool {
 
 func appleContainerPersistEnabled() bool {
 	return os.Getenv("SKIFF_APPLE_CONTAINER_PERSIST") == "1" || os.Getenv("SKIFF_APPLE_CONTAINER_KEEPALIVE") == "1"
+}
+
+func appleDemoKeychainSigningEnabled() bool {
+	return os.Getenv("SKIFF_APPLE_DEMO_KEYCHAIN_SIGNING") == "1"
+}
+
+func appleDemoReleaseSigner(t *testing.T, ctx context.Context, env string) *signing.ReleaseSignerRecord {
+	t.Helper()
+	record, _, err := signing.DefaultReleaseSignerStore().Ensure(ctx, "apple-container-"+env)
+	if err != nil {
+		t.Fatalf("create Apple demo OS keychain release signer: %v", err)
+	}
+	return record
 }
 
 func pinnedImageForE2E(t *testing.T, ctx context.Context, name, fallback string) string {
@@ -392,6 +457,7 @@ type appleContextOptions struct {
 	CaddyImage     string
 	WorkloadRoot   string
 	Quickstart     appleQuickstartArtifacts
+	ReleaseSigning *signing.ReleaseSignerRecord
 	SkiffdPID      int
 	SkiffdLogPath  string
 }
@@ -413,7 +479,7 @@ func writeAppleContextArtifacts(t *testing.T, report *e2eReport, rustfs rustFSHa
 	}
 	configPath := filepath.Join(report.reportDir, report.RunID+".skiffconfig")
 	envPath := filepath.Join(report.reportDir, report.RunID+".env")
-	if err := os.WriteFile(configPath, []byte(appleSkiffConfig(stateURI, opts.APIURL)), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(appleSkiffConfig(stateURI, opts)), 0o600); err != nil {
 		t.Fatalf("write Apple Skiff config: %v", err)
 	}
 	if err := os.WriteFile(envPath, []byte(appleContextEnv(configPath, rustfs, opts)), 0o600); err != nil {
@@ -505,7 +571,8 @@ func useAppleContext(t *testing.T, artifacts appleContextArtifacts, contextName 
 	t.Setenv("SKIFF_CONTEXT", contextName)
 }
 
-func appleSkiffConfig(stateURI, apiURL string) string {
+func appleSkiffConfig(stateURI string, opts appleContextOptions) string {
+	signingYAML := appleReleaseSigningYAML(opts.ReleaseSigning)
 	body := fmt.Sprintf(`apiVersion: skiff.dev/v1alpha1
 kind: SkiffConfig
 current-context: %s
@@ -517,6 +584,7 @@ contexts:
       provider: %s
       region: local
       state: %s
+%s
   - name: %s
     context:
       mode: skiffd
@@ -524,8 +592,9 @@ contexts:
       provider: %s
       region: local
       state: %s
-`, appleDirectContext, appleDirectContext, applecontainer.Name, strconv.Quote(stateURI), appleSkiffdServeContext, applecontainer.Name, strconv.Quote(stateURI))
-	if apiURL != "" {
+%s
+`, appleDirectContext, appleDirectContext, applecontainer.Name, strconv.Quote(stateURI), signingYAML, appleSkiffdServeContext, applecontainer.Name, strconv.Quote(stateURI), signingYAML)
+	if opts.APIURL != "" {
 		body += fmt.Sprintf(`  - name: %s
     context:
       mode: api
@@ -534,9 +603,22 @@ contexts:
       region: local
       state: %s
       apiURL: %s
-`, appleAPIContext, applecontainer.Name, strconv.Quote(stateURI), strconv.Quote(apiURL))
+%s
+`, appleAPIContext, applecontainer.Name, strconv.Quote(stateURI), strconv.Quote(opts.APIURL), signingYAML)
 	}
 	return body
+}
+
+func appleReleaseSigningYAML(record *signing.ReleaseSignerRecord) string {
+	if record == nil || strings.TrimSpace(record.KeyRef) == "" {
+		return ""
+	}
+	keyID := strings.TrimSpace(record.KeyID)
+	keyRef := strings.TrimSpace(record.KeyRef)
+	return fmt.Sprintf(`      signing:
+        release:
+          keyID: %s
+          keyRef: %s`, strconv.Quote(keyID), strconv.Quote(keyRef))
 }
 
 func appleContextEnv(configPath string, rustfs rustFSHarness, opts appleContextOptions) string {
@@ -560,6 +642,20 @@ func appleContextEnv(configPath string, rustfs rustFSHarness, opts appleContextO
 	}
 	if opts.CaddyImage != "" {
 		lines = append(lines, "export SKIFF_APPLE_CADDY_IMAGE="+shellQuote(opts.CaddyImage))
+	}
+	if opts.ReleaseSigning != nil {
+		if keyID := strings.TrimSpace(opts.ReleaseSigning.KeyID); keyID != "" {
+			lines = append(lines, "export SKIFF_APPLE_RELEASE_SIGNING_KEY_ID="+shellQuote(keyID))
+		}
+		if keyRef := strings.TrimSpace(opts.ReleaseSigning.KeyRef); keyRef != "" {
+			lines = append(lines, "export SKIFF_APPLE_RELEASE_SIGNING_KEY_REF="+shellQuote(keyRef))
+			if service, account, err := signing.ParseKeychainRef(keyRef); err == nil {
+				lines = append(lines,
+					"export SKIFF_APPLE_RELEASE_SIGNING_KEYCHAIN_SERVICE="+shellQuote(service),
+					"export SKIFF_APPLE_RELEASE_SIGNING_KEYCHAIN_ACCOUNT="+shellQuote(account),
+				)
+			}
+		}
 	}
 	if opts.WorkloadRoot != "" {
 		lines = append(lines, "export SKIFF_APPLE_WORKLOAD_ROOT="+shellQuote(opts.WorkloadRoot))
@@ -1534,22 +1630,23 @@ func startLocalSkiffd(t *testing.T, ctx context.Context, store objstore.ObjectSt
 	return harness
 }
 
-func startLocalAppleSkiffd(t *testing.T, ctx context.Context, store objstore.ObjectStore, report *e2eReport, rustfs rustFSHarness, stateURI, env, traceID, caddyContainer string, persist bool) localSkiffdHarness {
+func startLocalAppleSkiffd(t *testing.T, ctx context.Context, store objstore.ObjectStore, report *e2eReport, rustfs rustFSHarness, stateURI, env, traceID, caddyContainer string, persist bool, releaseSigning *signing.ReleaseSignerRecord) localSkiffdHarness {
 	t.Helper()
 	if !persist {
 		report.CleanupStatus = "Apple containers and in-process skiffd stopped when test exits"
 		return startLocalSkiffd(t, ctx, store, stateURI, env, traceID)
 	}
-	return startPersistentAppleSkiffd(t, ctx, report, rustfs, stateURI, traceID, caddyContainer)
+	return startPersistentAppleSkiffd(t, ctx, report, rustfs, stateURI, traceID, caddyContainer, releaseSigning)
 }
 
-func startPersistentAppleSkiffd(t *testing.T, ctx context.Context, report *e2eReport, rustfs rustFSHarness, stateURI, traceID, caddyContainer string) localSkiffdHarness {
+func startPersistentAppleSkiffd(t *testing.T, ctx context.Context, report *e2eReport, rustfs rustFSHarness, stateURI, traceID, caddyContainer string, releaseSigning *signing.ReleaseSignerRecord) localSkiffdHarness {
 	t.Helper()
 	addr := fmt.Sprintf("127.0.0.1:%d", freePort(t))
 	apiURL := "http://" + addr
 	artifacts := writeAppleContextArtifacts(t, report, rustfs, stateURI, appleContextOptions{
 		APIURL:         apiURL,
 		CaddyContainer: caddyContainer,
+		ReleaseSigning: releaseSigning,
 	})
 	binPath, err := exec.LookPath("skiffd")
 	if err != nil {
@@ -1561,12 +1658,11 @@ func startPersistentAppleSkiffd(t *testing.T, ctx context.Context, report *e2eRe
 	if err != nil {
 		t.Fatalf("open persistent skiffd log: %v", err)
 	}
-	cmd := exec.CommandContext(ctx, binPath,
+	cmd := exec.Command(binPath,
 		"serve",
 		"--addr", addr,
 		"--config", artifacts.configPath,
 		"--context", appleSkiffdServeContext,
-		"--format", "json",
 		"--trace-id", traceID,
 	)
 	cmd.Env = os.Environ()
@@ -1580,7 +1676,15 @@ func startPersistentAppleSkiffd(t *testing.T, ctx context.Context, report *e2eRe
 	report.SkiffdPID = cmd.Process.Pid
 	report.SkiffdLogPath = logPath
 	report.CleanupStatus = "Apple containers and skiffd left running; stop them with make demo-apple-down"
+	ready := false
+	defer func() {
+		if !ready {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	}()
 	waitForSkiffdReady(t, ctx, apiURL, traceID)
+	ready = true
 	return localSkiffdHarness{url: apiURL}
 }
 

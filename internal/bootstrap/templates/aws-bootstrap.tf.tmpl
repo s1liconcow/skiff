@@ -1,0 +1,561 @@
+resource "aws_kms_key" "skiff_state" {
+  description         = "Skiff state encryption key for {{ .Plan.Env }}"
+  enable_key_rotation = true
+}
+
+resource "aws_kms_alias" "skiff_state" {
+  name          = "{{ .Plan.KMSAlias }}"
+  target_key_id = aws_kms_key.skiff_state.key_id
+}
+{{ if .TerraformManagedReleaseSigner }}
+resource "aws_kms_key" "skiff_release_signing" {
+  description              = "Skiff release signing key for {{ .Plan.Env }}"
+  customer_master_key_spec = "ECC_NIST_P256"
+  key_usage                = "SIGN_VERIFY"
+  tags = {
+    Name                = "{{ .Plan.NamePrefix }}-release-signing"
+    "skiff.dev/env"     = "{{ .Plan.Env }}"
+    "skiff.dev/managed" = "true"
+    "skiff.dev/graph"   = "environment/{{ .Plan.Env }}"
+{{ if .Plan.CompanySlug }}    "skiff.dev/company" = "{{ .Plan.CompanySlug }}"
+{{ end }}
+  }
+}
+
+resource "aws_kms_alias" "skiff_release_signing" {
+  name          = "{{ .ReleaseSigningKMSAlias }}"
+  target_key_id = aws_kms_key.skiff_release_signing.key_id
+}
+
+data "aws_kms_public_key" "skiff_release_signing" {
+  key_id = aws_kms_key.skiff_release_signing.key_id
+}
+{{ end }}
+
+resource "aws_s3_bucket" "skiff_state" {
+  bucket = "{{ .Plan.StateBucket }}"
+}
+
+resource "aws_s3_bucket_versioning" "skiff_state" {
+  bucket = aws_s3_bucket.skiff_state.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "skiff_state" {
+  bucket                  = aws_s3_bucket.skiff_state.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "skiff_state" {
+  bucket = aws_s3_bucket.skiff_state.id
+  rule {
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = aws_kms_alias.skiff_state.arn
+      sse_algorithm     = "aws:kms"
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "skiff_state" {
+  bucket = aws_s3_bucket.skiff_state.id
+  policy = <<POLICY
+{{ .BucketPolicy }}
+POLICY
+}
+{{ if .ManagedNetwork }}
+data "aws_availability_zones" "skiff_available" {
+  state = "available"
+}
+
+resource "aws_vpc" "skiff" {
+  cidr_block           = "10.76.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+  tags = {
+    Name                = "{{ .Plan.NamePrefix }}"
+    "skiff.dev/env"     = "{{ .Plan.Env }}"
+    "skiff.dev/managed" = "true"
+    "skiff.dev/graph"   = "environment/{{ .Plan.Env }}"
+{{ if .Plan.CompanySlug }}    "skiff.dev/company" = "{{ .Plan.CompanySlug }}"
+{{ end }}
+  }
+}
+
+resource "aws_internet_gateway" "skiff" {
+  vpc_id = aws_vpc.skiff.id
+  tags = {
+    Name                = "{{ .Plan.NamePrefix }}"
+    "skiff.dev/env"     = "{{ .Plan.Env }}"
+    "skiff.dev/managed" = "true"
+    "skiff.dev/graph"   = "environment/{{ .Plan.Env }}"
+{{ if .Plan.CompanySlug }}    "skiff.dev/company" = "{{ .Plan.CompanySlug }}"
+{{ end }}
+  }
+}
+
+resource "aws_subnet" "skiff_public" {
+  count                   = 2
+  vpc_id                  = aws_vpc.skiff.id
+  cidr_block              = cidrsubnet(aws_vpc.skiff.cidr_block, 8, count.index)
+  availability_zone       = data.aws_availability_zones.skiff_available.names[count.index]
+  map_public_ip_on_launch = true
+  tags = {
+    Name                = "{{ .Plan.NamePrefix }}-public-${count.index + 1}"
+    "skiff.dev/env"     = "{{ .Plan.Env }}"
+    "skiff.dev/managed" = "true"
+    "skiff.dev/graph"   = "environment/{{ .Plan.Env }}"
+{{ if .Plan.CompanySlug }}    "skiff.dev/company" = "{{ .Plan.CompanySlug }}"
+{{ end }}
+  }
+}
+
+resource "aws_subnet" "skiff_private" {
+  count             = 2
+  vpc_id            = aws_vpc.skiff.id
+  cidr_block        = cidrsubnet(aws_vpc.skiff.cidr_block, 8, count.index + 10)
+  availability_zone = data.aws_availability_zones.skiff_available.names[count.index]
+  tags = {
+    Name                = "{{ .Plan.NamePrefix }}-private-${count.index + 1}"
+    "skiff.dev/env"     = "{{ .Plan.Env }}"
+    "skiff.dev/managed" = "true"
+    "skiff.dev/graph"   = "environment/{{ .Plan.Env }}"
+{{ if .Plan.CompanySlug }}    "skiff.dev/company" = "{{ .Plan.CompanySlug }}"
+{{ end }}
+  }
+}
+
+resource "aws_eip" "skiff_nat" {
+  domain     = "vpc"
+  depends_on = [aws_internet_gateway.skiff]
+  tags = {
+    Name                = "{{ .Plan.NamePrefix }}-nat"
+    "skiff.dev/env"     = "{{ .Plan.Env }}"
+    "skiff.dev/managed" = "true"
+    "skiff.dev/graph"   = "environment/{{ .Plan.Env }}"
+{{ if .Plan.CompanySlug }}    "skiff.dev/company" = "{{ .Plan.CompanySlug }}"
+{{ end }}
+  }
+}
+
+resource "aws_nat_gateway" "skiff" {
+  allocation_id = aws_eip.skiff_nat.id
+  subnet_id     = aws_subnet.skiff_public[0].id
+  tags = {
+    Name                = "{{ .Plan.NamePrefix }}"
+    "skiff.dev/env"     = "{{ .Plan.Env }}"
+    "skiff.dev/managed" = "true"
+    "skiff.dev/graph"   = "environment/{{ .Plan.Env }}"
+{{ if .Plan.CompanySlug }}    "skiff.dev/company" = "{{ .Plan.CompanySlug }}"
+{{ end }}
+  }
+}
+
+resource "aws_route_table" "skiff_public" {
+  vpc_id = aws_vpc.skiff.id
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.skiff.id
+  }
+  tags = {
+    Name                = "{{ .Plan.NamePrefix }}-public"
+    "skiff.dev/env"     = "{{ .Plan.Env }}"
+    "skiff.dev/managed" = "true"
+    "skiff.dev/graph"   = "environment/{{ .Plan.Env }}"
+{{ if .Plan.CompanySlug }}    "skiff.dev/company" = "{{ .Plan.CompanySlug }}"
+{{ end }}
+  }
+}
+
+resource "aws_route_table_association" "skiff_public" {
+  count          = 2
+  subnet_id      = aws_subnet.skiff_public[count.index].id
+  route_table_id = aws_route_table.skiff_public.id
+}
+
+resource "aws_route_table" "skiff_private" {
+  vpc_id = aws_vpc.skiff.id
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.skiff.id
+  }
+  tags = {
+    Name                = "{{ .Plan.NamePrefix }}-private"
+    "skiff.dev/env"     = "{{ .Plan.Env }}"
+    "skiff.dev/managed" = "true"
+    "skiff.dev/graph"   = "environment/{{ .Plan.Env }}"
+{{ if .Plan.CompanySlug }}    "skiff.dev/company" = "{{ .Plan.CompanySlug }}"
+{{ end }}
+  }
+}
+
+resource "aws_route_table_association" "skiff_private" {
+  count          = 2
+  subnet_id      = aws_subnet.skiff_private[count.index].id
+  route_table_id = aws_route_table.skiff_private.id
+}
+{{ if .InternalIngress }}
+resource "aws_security_group" "skiff_internal_lb" {
+  name        = "{{ .Plan.NamePrefix }}-internal-lb"
+  description = "Skiff managed internal load balancer"
+  vpc_id      = aws_vpc.skiff.id
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.skiff.cidr_block]
+  }
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  tags = {
+    Name                = "{{ .Plan.NamePrefix }}-internal-lb"
+    "skiff.dev/env"     = "{{ .Plan.Env }}"
+    "skiff.dev/managed" = "true"
+    "skiff.dev/graph"   = "environment/{{ .Plan.Env }}"
+{{ if .Plan.CompanySlug }}    "skiff.dev/company" = "{{ .Plan.CompanySlug }}"
+{{ end }}
+  }
+}
+
+resource "aws_lb" "skiff_internal" {
+  name               = "{{ .Plan.InternalLBName }}"
+  internal           = true
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.skiff_internal_lb.id]
+  subnets            = aws_subnet.skiff_private[*].id
+  tags = {
+    Name                = "{{ .Plan.InternalLBName }}"
+    "skiff.dev/env"     = "{{ .Plan.Env }}"
+    "skiff.dev/managed" = "true"
+    "skiff.dev/graph"   = "environment/{{ .Plan.Env }}"
+{{ if .Plan.CompanySlug }}    "skiff.dev/company" = "{{ .Plan.CompanySlug }}"
+{{ end }}
+  }
+}
+
+resource "aws_lb_listener" "skiff_internal_http" {
+  load_balancer_arn = aws_lb.skiff_internal.arn
+  port              = 80
+  protocol          = "HTTP"
+  default_action {
+    type = "fixed-response"
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "skiff"
+      status_code  = "404"
+    }
+  }
+}
+{{ end }}
+{{ if .PublicIngress }}
+{{ if .PublicDNS }}
+data "aws_route53_zone" "skiff_public" {
+{{ if .Plan.HostedZoneID }}
+  zone_id = "{{ .Plan.HostedZoneID }}"
+{{ else }}
+  name         = "{{ .Plan.DomainName }}."
+  private_zone = false
+{{ end }}
+}
+{{ end }}
+{{ if .PublicManagedCertificate }}
+resource "aws_acm_certificate" "skiff_public" {
+  domain_name               = "{{ .Plan.PublicBaseDomain }}"
+  subject_alternative_names = ["*.{{ .Plan.PublicBaseDomain }}"]
+  validation_method         = "DNS"
+  tags = {
+    Name                = "{{ .Plan.PublicBaseDomain }}"
+    "skiff.dev/env"     = "{{ .Plan.Env }}"
+    "skiff.dev/managed" = "true"
+    "skiff.dev/graph"   = "environment/{{ .Plan.Env }}"
+{{ if .Plan.CompanySlug }}    "skiff.dev/company" = "{{ .Plan.CompanySlug }}"
+{{ end }}
+  }
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_route53_record" "skiff_public_cert_validation" {
+  for_each = {
+    for option in aws_acm_certificate.skiff_public.domain_validation_options : option.domain_name => {
+      name   = option.resource_record_name
+      record = option.resource_record_value
+      type   = option.resource_record_type
+    }
+  }
+
+  zone_id         = data.aws_route53_zone.skiff_public.zone_id
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+}
+
+resource "aws_acm_certificate_validation" "skiff_public" {
+  certificate_arn         = aws_acm_certificate.skiff_public.arn
+  validation_record_fqdns = [for record in aws_route53_record.skiff_public_cert_validation : record.fqdn]
+}
+{{ end }}
+resource "aws_security_group" "skiff_public_lb" {
+  name        = "{{ .Plan.NamePrefix }}-public-lb"
+  description = "Skiff managed public load balancer"
+  vpc_id      = aws_vpc.skiff.id
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+{{ if .PublicHTTPS }}
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+{{ end }}
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  tags = {
+    Name                = "{{ .Plan.NamePrefix }}-public-lb"
+    "skiff.dev/env"     = "{{ .Plan.Env }}"
+    "skiff.dev/managed" = "true"
+    "skiff.dev/graph"   = "environment/{{ .Plan.Env }}"
+{{ if .Plan.CompanySlug }}    "skiff.dev/company" = "{{ .Plan.CompanySlug }}"
+{{ end }}
+  }
+}
+
+resource "aws_lb" "skiff_public" {
+  name               = "{{ .Plan.PublicLBName }}"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.skiff_public_lb.id]
+  subnets            = aws_subnet.skiff_public[*].id
+  tags = {
+    Name                = "{{ .Plan.PublicLBName }}"
+    "skiff.dev/env"     = "{{ .Plan.Env }}"
+    "skiff.dev/managed" = "true"
+    "skiff.dev/graph"   = "environment/{{ .Plan.Env }}"
+{{ if .Plan.CompanySlug }}    "skiff.dev/company" = "{{ .Plan.CompanySlug }}"
+{{ end }}
+  }
+}
+
+resource "aws_lb_listener" "skiff_public_http" {
+  load_balancer_arn = aws_lb.skiff_public.arn
+  port              = 80
+  protocol          = "HTTP"
+  default_action {
+{{ if .PublicHTTPS }}
+    type = "redirect"
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+{{ else }}
+    type = "fixed-response"
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "skiff"
+      status_code  = "404"
+    }
+{{ end }}
+  }
+}
+{{ if .PublicHTTPS }}
+resource "aws_lb_listener" "skiff_public_https" {
+  load_balancer_arn = aws_lb.skiff_public.arn
+  port              = 443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn   = {{ .PublicCertificateARNExpression }}
+
+  default_action {
+    type = "fixed-response"
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "skiff"
+      status_code  = "404"
+    }
+  }
+}
+{{ end }}
+{{ if .PublicDNS }}
+resource "aws_route53_record" "skiff_public_alias" {
+  zone_id = data.aws_route53_zone.skiff_public.zone_id
+  name    = "{{ .Plan.PublicBaseDomain }}"
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.skiff_public.dns_name
+    zone_id                = aws_lb.skiff_public.zone_id
+    evaluate_target_health = true
+  }
+}
+
+resource "aws_route53_record" "skiff_public_wildcard_alias" {
+  zone_id = data.aws_route53_zone.skiff_public.zone_id
+  name    = "*.{{ .Plan.PublicBaseDomain }}"
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.skiff_public.dns_name
+    zone_id                = aws_lb.skiff_public.zone_id
+    evaluate_target_health = true
+  }
+}
+{{ end }}
+{{ end }}
+{{ end }}
+{{ range .Policies }}
+resource "aws_iam_role" "skiff_{{ .Name }}" {
+  name = "{{ index $.Plan.RootConfig.Roles .Name }}"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = { AWS = "*" }
+      Action = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "skiff_{{ .Name }}" {
+  name   = "skiff-{{ $.Plan.Env }}-{{ .Name }}"
+  role   = aws_iam_role.skiff_{{ .Name }}.id
+  policy = <<POLICY
+{{ .JSON }}
+POLICY
+}
+{{ end }}
+resource "aws_s3_object" "skiff_env_root" {
+  bucket       = aws_s3_bucket.skiff_state.id
+  key          = "{{ .Plan.RootObjectKey }}"
+  content_type = "application/json"
+{{ if or .ManagedNetwork .TerraformManagedReleaseSigner }}
+  content = jsonencode({
+    schema_version = "{{ .Plan.RootConfig.SchemaVersion }}"
+    env            = "{{ .Plan.Env }}"
+    provider       = "{{ .Plan.Provider }}"
+    region         = "{{ .Plan.Region }}"
+    state_bucket   = "{{ .Plan.StateBucketURI }}"
+    kms_alias      = "{{ .Plan.KMSAlias }}"
+    roles = {
+      deployer = aws_iam_role.skiff_deployer.arn
+      runner   = aws_iam_role.skiff_runner.arn
+      skiffd   = aws_iam_role.skiff_skiffd.arn
+    }
+{{ if .ManagedNetwork }}
+    network = {
+      mode               = "managed"
+      vpc_id             = aws_vpc.skiff.id
+      public_subnet_ids  = aws_subnet.skiff_public[*].id
+      private_subnet_ids = aws_subnet.skiff_private[*].id
+    }
+    ingress = {
+      type = "{{ .Plan.RootConfig.Ingress.Type }}"
+{{ if .InternalIngress }}
+      load_balancer = {
+        arn               = aws_lb.skiff_internal.arn
+        dns_name          = aws_lb.skiff_internal.dns_name
+        provider_dns_name = aws_lb.skiff_internal.dns_name
+        hosted_zone_id    = aws_lb.skiff_internal.zone_id
+        security_group_id = aws_security_group.skiff_internal_lb.id
+        http_listener_arn = aws_lb_listener.skiff_internal_http.arn
+      }
+{{ end }}
+{{ if .PublicIngress }}
+{{ if .Plan.PublicBaseDomain }}
+      host                  = "{{ .Plan.PublicBaseDomain }}"
+      base_domain           = "{{ .Plan.PublicBaseDomain }}"
+      default_host_template = "{{ .Plan.DefaultHostTemplate }}"
+      domain_name           = "{{ .Plan.DomainName }}"
+{{ if .Plan.HostedZoneID }}
+      route53_zone_id       = "{{ .Plan.HostedZoneID }}"
+{{ end }}
+{{ end }}
+      load_balancer = {
+        arn               = aws_lb.skiff_public.arn
+{{ if .Plan.PublicBaseDomain }}
+        dns_name          = "{{ .Plan.PublicBaseDomain }}"
+{{ else }}
+        dns_name          = aws_lb.skiff_public.dns_name
+{{ end }}
+        provider_dns_name = aws_lb.skiff_public.dns_name
+        hosted_zone_id    = aws_lb.skiff_public.zone_id
+        security_group_id = aws_security_group.skiff_public_lb.id
+        http_listener_arn = aws_lb_listener.skiff_public_http.arn
+{{ if .PublicHTTPS }}
+        https_listener_arn = aws_lb_listener.skiff_public_https.arn
+{{ end }}
+{{ if .PublicManagedCertificate }}
+        certificate_arn   = aws_acm_certificate_validation.skiff_public.certificate_arn
+{{ else if .Plan.CertificateARN }}
+        certificate_arn   = "{{ .Plan.CertificateARN }}"
+{{ end }}
+      }
+{{ end }}
+    }
+{{ end }}
+{{ if .TerraformManagedReleaseSigner }}
+    release_trust = {
+      active_key_ids = ["skiff-{{ .Plan.Env }}-release-${substr(aws_kms_key.skiff_release_signing.key_id, 0, 12)}"]
+      keys = [{
+        key_id     = "skiff-{{ .Plan.Env }}-release-${substr(aws_kms_key.skiff_release_signing.key_id, 0, 12)}"
+        backend    = "aws-kms"
+        algorithm  = "ecdsa-p256-sha256"
+        encoding   = "pkix-der"
+        key_ref    = "{{ .Plan.ReleaseSigningKeyRef }}"
+        public_key = data.aws_kms_public_key.skiff_release_signing.public_key
+        status     = "active"
+        created_at = "{{ .Plan.RootConfig.CreatedAt }}"
+      }]
+    }
+{{ end }}
+{{ if .Plan.RootConfig.Runner }}
+    runner = {
+{{ if .Plan.RootConfig.Runner.AMIID }}
+      ami_id = "{{ .Plan.RootConfig.Runner.AMIID }}"
+{{ end }}
+{{ if .Plan.RootConfig.Runner.AMISSMParameter }}
+      ami_ssm_parameter = "{{ .Plan.RootConfig.Runner.AMISSMParameter }}"
+{{ end }}
+{{ if .Plan.RootConfig.Runner.InstallVersion }}
+      install_version = "{{ .Plan.RootConfig.Runner.InstallVersion }}"
+{{ end }}
+{{ if .Plan.RootConfig.Runner.InstallBaseURL }}
+      install_base_url = "{{ .Plan.RootConfig.Runner.InstallBaseURL }}"
+{{ end }}
+{{ if .Plan.RootConfig.Runner.InstallScriptURL }}
+      install_script_url = "{{ .Plan.RootConfig.Runner.InstallScriptURL }}"
+{{ end }}
+{{ if .Plan.RootConfig.Runner.InstallPublicKeyRef }}
+      install_public_key_ref = "{{ .Plan.RootConfig.Runner.InstallPublicKeyRef }}"
+{{ end }}
+    }
+{{ end }}
+    created_at = "{{ .Plan.RootConfig.CreatedAt }}"
+    updated_at = "{{ .Plan.RootConfig.UpdatedAt }}"
+  })
+{{ else }}
+  content = <<JSON
+{{ .RootConfigJSON }}
+JSON
+{{ end }}
+}

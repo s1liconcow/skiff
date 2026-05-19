@@ -2,7 +2,9 @@ package bootstrap
 
 import (
 	"bytes"
+	_ "embed"
 	"fmt"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -49,6 +51,10 @@ func TerraformAWS(plan *AWSPlan) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	rootConfig, err := canonical.Marshal(plan.RootConfig)
+	if err != nil {
+		return "", err
+	}
 	var policyVars []terraformPolicy
 	for _, name := range sortedPolicyNames(plan.IAMPolicies) {
 		body, err := PolicyJSON(plan.IAMPolicies[name])
@@ -58,16 +64,60 @@ func TerraformAWS(plan *AWSPlan) (string, error) {
 		policyVars = append(policyVars, terraformPolicy{Name: name, JSON: body})
 	}
 	data := struct {
-		Plan         *AWSPlan
-		BucketPolicy string
-		Policies     []terraformPolicy
+		Plan                           *AWSPlan
+		BucketPolicy                   string
+		RootConfigJSON                 string
+		Policies                       []terraformPolicy
+		ManagedNetwork                 bool
+		InternalIngress                bool
+		PublicIngress                  bool
+		PublicDNS                      bool
+		PublicHTTPS                    bool
+		PublicManagedCertificate       bool
+		PublicCertificateARNExpression string
+		TerraformManagedReleaseSigner  bool
+		ReleaseSigningKMSAlias         string
 	}{
-		Plan:         plan,
-		BucketPolicy: bucketPolicy,
-		Policies:     policyVars,
+		Plan:                     plan,
+		BucketPolicy:             bucketPolicy,
+		RootConfigJSON:           string(rootConfig),
+		Policies:                 policyVars,
+		ManagedNetwork:           plan.RootConfig.Network != nil && plan.RootConfig.Network.Mode == NetworkManaged,
+		InternalIngress:          plan.RootConfig.Ingress != nil && plan.RootConfig.Ingress.Type == IngressInternalHTTP,
+		PublicIngress:            plan.RootConfig.Ingress != nil && plan.RootConfig.Ingress.Type == IngressPublic,
+		PublicDNS:                plan.PublicBaseDomain != "",
+		PublicHTTPS:              plan.PublicBaseDomain != "" || plan.CertificateARN != "",
+		PublicManagedCertificate: plan.PublicBaseDomain != "" && plan.CertificateARN == "",
+	}
+	data.ReleaseSigningKMSAlias = releaseSigningKMSAlias(plan.ReleaseSigningKeyRef)
+	data.TerraformManagedReleaseSigner = data.ReleaseSigningKMSAlias != "" && plan.RootConfig.ReleaseTrust == nil
+	switch {
+	case data.PublicManagedCertificate:
+		data.PublicCertificateARNExpression = "aws_acm_certificate_validation.skiff_public.certificate_arn"
+	case plan.CertificateARN != "":
+		data.PublicCertificateARNExpression = strconv.Quote(plan.CertificateARN)
 	}
 	var buf bytes.Buffer
 	tmpl := template.Must(template.New("terraform").Parse(terraformTemplate))
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(buf.String()) + "\n", nil
+}
+
+func AWSTeardownScript(plan *AWSPlan) (string, error) {
+	if plan == nil {
+		return "", fmt.Errorf("aws bootstrap plan is required")
+	}
+	data := struct {
+		Plan           *AWSPlan
+		ManagedNetwork bool
+	}{
+		Plan:           plan,
+		ManagedNetwork: plan.RootConfig.Network != nil && plan.RootConfig.Network.Mode == NetworkManaged,
+	}
+	var buf bytes.Buffer
+	tmpl := template.Must(template.New("aws-teardown").Parse(awsTeardownTemplate))
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return "", err
 	}
@@ -79,70 +129,8 @@ type terraformPolicy struct {
 	JSON string
 }
 
-const terraformTemplate = `
-resource "aws_kms_key" "skiff_state" {
-  description         = "Skiff state encryption key for {{ .Plan.Env }}"
-  enable_key_rotation = true
-}
+//go:embed templates/aws-bootstrap.tf.tmpl
+var terraformTemplate string
 
-resource "aws_kms_alias" "skiff_state" {
-  name          = "{{ .Plan.KMSAlias }}"
-  target_key_id = aws_kms_key.skiff_state.key_id
-}
-
-resource "aws_s3_bucket" "skiff_state" {
-  bucket = "{{ .Plan.StateBucket }}"
-}
-
-resource "aws_s3_bucket_versioning" "skiff_state" {
-  bucket = aws_s3_bucket.skiff_state.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "skiff_state" {
-  bucket                  = aws_s3_bucket.skiff_state.id
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "skiff_state" {
-  bucket = aws_s3_bucket.skiff_state.id
-  rule {
-    apply_server_side_encryption_by_default {
-      kms_master_key_id = aws_kms_alias.skiff_state.arn
-      sse_algorithm     = "aws:kms"
-    }
-  }
-}
-
-resource "aws_s3_bucket_policy" "skiff_state" {
-  bucket = aws_s3_bucket.skiff_state.id
-  policy = <<POLICY
-{{ .BucketPolicy }}
-POLICY
-}
-{{ range .Policies }}
-resource "aws_iam_role" "skiff_{{ .Name }}" {
-  name = "{{ index $.Plan.RootConfig.Roles .Name }}"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = { AWS = "*" }
-      Action = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "skiff_{{ .Name }}" {
-  name   = "skiff-{{ $.Plan.Env }}-{{ .Name }}"
-  role   = aws_iam_role.skiff_{{ .Name }}.id
-  policy = <<POLICY
-{{ .JSON }}
-POLICY
-}
-{{ end }}`
+//go:embed templates/aws-teardown.sh.tmpl
+var awsTeardownTemplate string

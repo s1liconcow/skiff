@@ -37,6 +37,8 @@ const (
 	FieldStatefulRecipe                  = "stateful_recipe"
 	FieldReleaseManifestKey              = "release_manifest_key"
 	FieldRuntimeManifestKey              = "runtime_manifest_key"
+	FieldReleaseSigningKeyID             = "release_signing_key_id"
+	FieldReleaseSigningKeyRef            = "release_signing_key_ref"
 	FieldAWSLiveApply                    = "aws_live_apply"
 	FieldAWSVPCID                        = "aws_vpc_id"
 	FieldAWSSubnetIDs                    = "aws_subnet_ids"
@@ -67,6 +69,8 @@ type Config struct {
 	StatefulRecipe                  string   `json:"stateful_recipe,omitempty"`
 	ReleaseManifestKey              string   `json:"release_manifest_key,omitempty"`
 	RuntimeManifestKey              string   `json:"runtime_manifest_key,omitempty"`
+	ReleaseSigningKeyID             string   `json:"release_signing_key_id,omitempty"`
+	ReleaseSigningKeyRef            string   `json:"release_signing_key_ref,omitempty"`
 	AWSLiveApply                    bool     `json:"aws_live_apply,omitempty"`
 	AWSVPCID                        string   `json:"aws_vpc_id,omitempty"`
 	AWSSubnetIDs                    []string `json:"aws_subnet_ids,omitempty"`

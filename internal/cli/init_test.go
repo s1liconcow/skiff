@@ -67,6 +67,27 @@ func TestInitStackAPIDatabaseGeneratesGoldenTemplate(t *testing.T) {
 	}
 }
 
+func TestInitStackUsesSkiffEnvDefault(t *testing.T) {
+	clearSkiffEnv(t)
+	t.Setenv("SKIFF_ENV", "quickstart")
+	dir := filepath.Join(t.TempDir(), "orders")
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"init", "stack", "api-database", "orders",
+		"--dir", dir,
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	doc, err := spec.LoadFile(filepath.Join(dir, "skiff.yaml"), spec.DecodeOptions{})
+	if err != nil {
+		t.Fatalf("generated spec did not decode: %v", err)
+	}
+	if doc.Metadata.Env != "quickstart" {
+		t.Fatalf("generated env = %q, want quickstart", doc.Metadata.Env)
+	}
+}
+
 func TestInitStackAPISQLiteGeneratesStatefulTemplate(t *testing.T) {
 	clearSkiffEnv(t)
 	dir := filepath.Join(t.TempDir(), "orders")

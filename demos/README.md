@@ -64,8 +64,17 @@ The run writes a filled-in context and environment file under
 `.skiff-demo-reports/apple-container/`, then uses those contexts for the CLI
 checks:
 
+The generated Apple contexts include a `keychain://...` release signing key
+reference. The demo creates or reuses that OS-keychain signer automatically; set
+`SKIFF_APPLE_DEMO_KEYCHAIN_SIGNING=0` only if you are debugging the older
+ephemeral local signer path. macOS may not prompt when the login keychain is
+already unlocked; the generated `.env` exports the signing key ref plus the
+Keychain service/account so you can verify the item without printing the
+secret.
+
 ```bash
 source .skiff-demo-reports/apple-container/<run>.env
+security find-generic-password -s "$SKIFF_APPLE_RELEASE_SIGNING_KEYCHAIN_SERVICE" -a "$SKIFF_APPLE_RELEASE_SIGNING_KEYCHAIN_ACCOUNT" >/dev/null && echo "keychain signer found"
 skiff config get-contexts
 SKIFF_CONTEXT=local-apple-vms skiff status caddy-web
 skiff deploy "$SKIFF_APPLE_GREEN_SPEC" --canary --canary-bake 0s --canary-metric request_count --canary-threshold 1

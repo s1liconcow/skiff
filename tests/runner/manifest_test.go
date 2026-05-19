@@ -3,6 +3,7 @@ package runner_test
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
 	"errors"
 	"path/filepath"
 	"reflect"
@@ -80,6 +81,44 @@ func TestBootstrapFetchesVerifiesAndPersistsRelease(t *testing.T) {
 	}
 	if got := eventStates(events.events); !reflect.DeepEqual(got, wantStates) {
 		t.Fatalf("event states = %v, want %v", got, wantStates)
+	}
+}
+
+func TestBootstrapBuildsVerifierFromEnvironmentReleaseTrust(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	signer := testSigner(t, "local-test", "A")
+	cfg := parseRunnerConfig(t)
+
+	putEnvironmentRoot(t, ctx, store, cfg, signer)
+	putServiceControl(t, ctx, store, cfg.Service, cfg.Env, "rel_01JNEW", "rel_01JOLD")
+	putSignedRelease(t, ctx, store, signer, releaseFixture{
+		service:   cfg.Service,
+		env:       cfg.Env,
+		releaseID: "rel_01JNEW",
+		createdAt: "2026-05-17T00:00:00Z",
+		expiresAt: "2026-06-17T00:00:00Z",
+	})
+
+	result, err := runner.Bootstrap(ctx, runner.BootstrapRequest{
+		Config: cfg,
+		Store:  store,
+		MetadataProvider: runner.StaticMetadataProvider{Value: runner.Identity{
+			Provider:   "aws",
+			Region:     "us-west-2",
+			InstanceID: "i-abc123",
+			AccountID:  "123456789012",
+			Zone:       "us-west-2a",
+		}},
+		StateStore: runner.FileStateStore{Path: filepath.Join(t.TempDir(), "state.json")},
+		TraceID:    "tr_boot",
+		Now:        fixedNow,
+	})
+	if err != nil {
+		t.Fatalf("Bootstrap returned error: %v", err)
+	}
+	if !result.Verification.OK || result.Verification.VerifiedSignature == nil || result.Verification.VerifiedSignature.KeyID != "local-test" {
+		t.Fatalf("unexpected verification: %+v", result.Verification)
 	}
 }
 
@@ -320,6 +359,35 @@ func putServiceControl(t *testing.T, ctx context.Context, store objstore.ObjectS
 		t.Fatalf("ServiceControl path returned error: %v", err)
 	}
 	putJSON(t, ctx, store, key, control)
+}
+
+func putEnvironmentRoot(t *testing.T, ctx context.Context, store objstore.ObjectStore, cfg config.Config, signer *signing.LocalSigner) {
+	t.Helper()
+	key, err := paths.EnvironmentRoot(cfg.Env)
+	if err != nil {
+		t.Fatalf("EnvironmentRoot path returned error: %v", err)
+	}
+	root := schema.EnvironmentRoot{
+		SchemaVersion: schema.EnvironmentRootSchemaVersion,
+		Env:           cfg.Env,
+		Provider:      cfg.Provider,
+		Region:        cfg.Region,
+		StateBucket:   cfg.StateBucket,
+		Roles:         map[string]string{},
+		ReleaseTrust: &schema.ReleaseTrust{
+			ActiveKeyIDs: []string{signer.KeyID()},
+			Keys: []schema.ReleaseTrustKey{{
+				KeyID:     signer.KeyID(),
+				Backend:   signing.KeychainScheme,
+				PublicKey: base64.StdEncoding.EncodeToString(signer.PublicKey()),
+				Status:    "active",
+				CreatedAt: "2026-05-16T17:00:00Z",
+			}},
+		},
+		CreatedAt: "2026-05-16T17:00:00Z",
+		UpdatedAt: "2026-05-16T17:00:00Z",
+	}
+	putJSON(t, ctx, store, key, root)
 }
 
 type releaseFixture struct {

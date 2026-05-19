@@ -55,12 +55,23 @@ fi
 
 mkdir -p "$report_dir"
 export SKIFF_E2E_REPORT_DIR="$report_dir"
+export SKIFF_APPLE_DEMO_KEYCHAIN_SIGNING="${SKIFF_APPLE_DEMO_KEYCHAIN_SIGNING:-1}"
 make -C "$repo_root" e2e-apple-container
 
 latest_env="$(ls -t "$report_dir"/*.env 2>/dev/null || true)"
 latest_env="${latest_env%%$'\n'*}"
 latest_config="$(ls -t "$report_dir"/*.skiffconfig 2>/dev/null || true)"
 latest_config="${latest_config%%$'\n'*}"
+signing_key_id_line=""
+signing_key_ref_line=""
+signing_keychain_service_line=""
+signing_keychain_account_line=""
+if [[ -n "$latest_env" ]]; then
+  signing_key_id_line="$(grep -m1 '^export SKIFF_APPLE_RELEASE_SIGNING_KEY_ID=' "$latest_env" || true)"
+  signing_key_ref_line="$(grep -m1 '^export SKIFF_APPLE_RELEASE_SIGNING_KEY_REF=' "$latest_env" || true)"
+  signing_keychain_service_line="$(grep -m1 '^export SKIFF_APPLE_RELEASE_SIGNING_KEYCHAIN_SERVICE=' "$latest_env" || true)"
+  signing_keychain_account_line="$(grep -m1 '^export SKIFF_APPLE_RELEASE_SIGNING_KEYCHAIN_ACCOUNT=' "$latest_env" || true)"
+fi
 
 if [[ -n "$latest_env" && -n "$latest_config" ]]; then
   cat <<EOF
@@ -76,6 +87,22 @@ The demo used these contexts during the run:
   SKIFF_CONTEXT=local-apple-skiffd skiff tui caddy-web --read-only
 
 EOF
+  if [[ -n "$signing_key_ref_line" ]]; then
+    cat <<EOF
+Release signing:
+  ${signing_key_id_line#export }
+  ${signing_key_ref_line#export }
+  ${signing_keychain_service_line#export }
+  ${signing_keychain_account_line#export }
+
+Verify without printing the secret:
+  source "$latest_env"
+  security find-generic-password -s "\$SKIFF_APPLE_RELEASE_SIGNING_KEYCHAIN_SERVICE" -a "\$SKIFF_APPLE_RELEASE_SIGNING_KEYCHAIN_ACCOUNT" >/dev/null && echo "keychain signer found"
+  skiff config show
+  skiff release list caddy-web --limit 1
+
+EOF
+  fi
   if [[ "$persist" == "1" ]]; then
     cat <<EOF
 RustFS, Caddy, and skiffd are still running. Stop them with:

@@ -4,6 +4,77 @@ import "encoding/json"
 
 const Version = "skiff.state/v1"
 
+const EnvironmentRootSchemaVersion = "skiff.environment-root/v1"
+
+type EnvironmentRoot struct {
+	SchemaVersion string              `json:"schema_version"`
+	Env           string              `json:"env"`
+	Provider      string              `json:"provider"`
+	Region        string              `json:"region"`
+	StateBucket   string              `json:"state_bucket"`
+	KMSAlias      string              `json:"kms_alias"`
+	Roles         map[string]string   `json:"roles"`
+	Network       *EnvironmentNetwork `json:"network,omitempty"`
+	Ingress       *EnvironmentIngress `json:"ingress,omitempty"`
+	Runner        *EnvironmentRunner  `json:"runner,omitempty"`
+	ReleaseTrust  *ReleaseTrust       `json:"release_trust,omitempty"`
+	CreatedAt     string              `json:"created_at"`
+	UpdatedAt     string              `json:"updated_at"`
+}
+
+type EnvironmentNetwork struct {
+	Mode             string   `json:"mode"`
+	VPCID            string   `json:"vpc_id,omitempty"`
+	PrivateSubnetIDs []string `json:"private_subnet_ids,omitempty"`
+	PublicSubnetIDs  []string `json:"public_subnet_ids,omitempty"`
+}
+
+type EnvironmentIngress struct {
+	Type                string                           `json:"type"`
+	Host                string                           `json:"host,omitempty"`
+	BaseDomain          string                           `json:"base_domain,omitempty"`
+	DefaultHostTemplate string                           `json:"default_host_template,omitempty"`
+	DomainName          string                           `json:"domain_name,omitempty"`
+	Route53ZoneID       string                           `json:"route53_zone_id,omitempty"`
+	LoadBalancer        *EnvironmentLoadBalancerDefaults `json:"load_balancer,omitempty"`
+}
+
+type EnvironmentLoadBalancerDefaults struct {
+	ARN              string `json:"arn,omitempty"`
+	DNSName          string `json:"dns_name,omitempty"`
+	ProviderDNSName  string `json:"provider_dns_name,omitempty"`
+	HostedZoneID     string `json:"hosted_zone_id,omitempty"`
+	SecurityGroupID  string `json:"security_group_id,omitempty"`
+	HTTPListenerARN  string `json:"http_listener_arn,omitempty"`
+	HTTPSListenerARN string `json:"https_listener_arn,omitempty"`
+	CertificateARN   string `json:"certificate_arn,omitempty"`
+}
+
+type EnvironmentRunner struct {
+	AMIID               string `json:"ami_id,omitempty"`
+	AMISSMParameter     string `json:"ami_ssm_parameter,omitempty"`
+	InstallVersion      string `json:"install_version,omitempty"`
+	InstallBaseURL      string `json:"install_base_url,omitempty"`
+	InstallScriptURL    string `json:"install_script_url,omitempty"`
+	InstallPublicKeyRef string `json:"install_public_key_ref,omitempty"`
+}
+
+type ReleaseTrust struct {
+	ActiveKeyIDs []string          `json:"active_key_ids,omitempty"`
+	Keys         []ReleaseTrustKey `json:"keys,omitempty"`
+}
+
+type ReleaseTrustKey struct {
+	KeyID     string `json:"key_id"`
+	Backend   string `json:"backend"`
+	Algorithm string `json:"algorithm,omitempty"`
+	Encoding  string `json:"encoding,omitempty"`
+	KeyRef    string `json:"key_ref,omitempty"`
+	PublicKey string `json:"public_key"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
+}
+
 type Actor struct {
 	ID   string `json:"id"`
 	Type string `json:"type"`

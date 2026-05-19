@@ -230,11 +230,17 @@ skiff plan examples/service/skiff.yaml --format json --trace-id tr_plan
 
 ## Deploy
 
-`skiff deploy` is direct-mode first. `--dry-run` and `--plan-only` render the deploy plan and write no object state. A mutating deploy signs release manifests before service control is updated. The fake provider may use an ephemeral local signer for demos; real providers require an explicit signing seed or future configured signer so runners can verify releases against trusted public keys.
+`skiff deploy` is direct-mode first. `--dry-run` and `--plan-only` render the
+deploy plan and write no object state. A mutating deploy signs release manifests
+before service control is updated. Bootstrap-created contexts use a persistent
+release signing key reference. AWS bootstrap defaults to `aws-kms://...`;
+`--signing-backend keychain` creates a local OS-keychain fallback. The fake
+provider may use an ephemeral local signer for demos. `--signing-seed-base64` is
+retained for tests and legacy automation.
 
 ```bash
 skiff deploy examples/service/skiff.yaml --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --dry-run --format json
-skiff deploy examples/service/skiff.yaml --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --release-id rel_01J... --signing-seed-base64 <seed>
+skiff deploy examples/service/skiff.yaml --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --release-id rel_01J... --signing-key-ref aws-kms://alias/skiff-prod-release-signing?region=us-west-2
 ```
 
 ## Release Candidates And Promotion
