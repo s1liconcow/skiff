@@ -99,7 +99,7 @@ func normalizeOptions(opts Options) Options {
 	opts.StagingEnv = firstNonEmpty(opts.StagingEnv, "staging")
 	opts.ProductionEnv = firstNonEmpty(opts.ProductionEnv, "prod")
 	opts.ImageRepository = firstNonEmpty(opts.ImageRepository, "registry.example.com/"+opts.Service)
-	opts.InstallCommand = firstNonEmpty(opts.InstallCommand, "curl -fsSL https://get.skiff.dev | sh")
+	opts.InstallCommand = firstNonEmpty(opts.InstallCommand, "curl -fsSL https://get.skiff.dev | bash")
 	opts.SkiffBinary = firstNonEmpty(opts.SkiffBinary, "skiff")
 	return opts
 }

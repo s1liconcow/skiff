@@ -57,7 +57,7 @@ func runCIGenerate(binary string, args []string, root rootOptions, stdout, stder
 	stagingEnv := fs.String("staging-env", "staging", "staging environment name")
 	prodEnv := fs.String("prod-env", "prod", "production environment name")
 	imageRepo := fs.String("image-repo", "", "OCI image repository")
-	installCommand := fs.String("install-command", "curl -fsSL https://get.skiff.dev | sh", "command that installs skiff in CI")
+	installCommand := fs.String("install-command", "curl -fsSL https://get.skiff.dev | bash", "command that installs skiff in CI")
 	skiffBinary := fs.String("skiff-binary", binary, "skiff binary command name")
 
 	flagArgs, positionals, err := splitCIGenerateArgs(args)

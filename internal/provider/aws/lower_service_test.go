@@ -204,7 +204,7 @@ func TestProviderPlanFillsLiveInputsFromEnvironmentRoot(t *testing.T) {
 		t.Fatalf("launch template AMI ID = %q", template.AMIID)
 	}
 	for _, want := range []string{
-		"dnf install -y curl tar gzip",
+		"dnf install -y bash curl tar gzip",
 		"SKIFF_INSTALL_VERSION=",
 		"v0.1.0",
 		"https://raw.githubusercontent.com/s1liconcow/skiff/v0.1.0/scripts/install.sh",

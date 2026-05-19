@@ -1,8 +1,42 @@
 # Skiff
 
-**Skiff is a clusterless deployment and operations platform for cloud-native VM workloads.**
+<div align="center">
 
-Skiff’s core model is intentionally simple:
+```text
+                 SKIFF
+
+        VM-native cloud operations
+     durable state in object storage
+        explicit, resumable sagas
+```
+
+[![CI](https://github.com/s1liconcow/skiff/actions/workflows/ci.yml/badge.svg)](https://github.com/s1liconcow/skiff/actions/workflows/ci.yml)
+[![E2E](https://github.com/s1liconcow/skiff/actions/workflows/e2e.yml/badge.svg)](https://github.com/s1liconcow/skiff/actions/workflows/e2e.yml)
+![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white)
+![Status](https://img.shields.io/badge/status-active%20development-2ea44f)
+
+**Kubernetes-class operational leverage without Kubernetes-class cost.**
+
+Skiff deploys and operates cloud-native VM workloads without a cluster control plane.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/s1liconcow/skiff/main/scripts/install.sh | \
+  SKIFF_INSTALL_VERSION=0.2 SKIFF_INSTALL_DIR="$HOME/.local/bin" bash
+```
+
+</div>
+
+## TL;DR
+
+### The Problem
+
+Many services need safe deploys, rollback, logs, metrics, cost visibility, secret rotation, database restore, failover, and debug workflows. They need Kubernetes-class operational leverage without Kubernetes-class cost. They do not always need Kubernetes, a custom operator framework, or another durable database to run those operations.
+
+Terraform is good at stable infrastructure shape. Kubernetes is good when you want a cluster scheduler and a broad ecosystem. Neither is a small, explicit ledger of operational journeys where a human or agent can resume from object storage after the facade is gone.
+
+### The Solution
+
+Skiff compiles simple service specs into cloud primitives, writes durable desired state and audit history to object storage, and runs explicit operations as typed sagas.
 
 ```text
 VM = pod
@@ -10,58 +44,378 @@ cloud autoscaling group = deployment
 cloud load balancer target group = service
 cloud IAM role = workload identity
 object storage = durable desired state and audit history
-skiffd = normal API/TUI/agent facade with rebuildable in-memory views
+skiffd = stateless facade with rebuildable in-memory views
 skiff CLI direct mode = recovery path
 ```
 
-Skiff is not trying to be a smaller Kubernetes. It is a different operating model: compile simple service specs into cloud primitives, publish signed release state to object storage, and let VM-local runners converge one workload replica per VM.
+### Why Use Skiff?
 
-## Why Skiff exists
+| Need | Skiff behavior | Concrete example |
+|---|---|---|
+| Deploy without a cluster database | Release and runtime manifests are signed, immutable objects | `skiff deploy skiff.yaml --format json` |
+| Recover when the facade is down | The CLI can operate directly against object storage and cloud APIs | `skiff --direct --state s3://skiff-state-prod status payments-api` |
+| See real cloud resources | ASGs, target groups, launch templates, IAM roles, log groups, and provider IDs stay visible | `skiff explain skiff.yaml --provider aws` |
+| Run risky operations explicitly | Rollback, restore, rotation, cutover, and failover are typed saga graphs | `skiff database restore orders-db --dry-run --format json` |
+| Give agents deterministic output | JSON separates facts, hypotheses, recommended commands, risk, and reversibility | `skiff doctor payments-api --fresh --format json` |
+| Avoid hidden locks | Leases live inside the control document they protect | service `control.json` is updated with CAS |
 
-Most production workloads do not need the full Kubernetes abstraction stack. They need to:
+## Quick Example
 
-- deploy services safely
-- roll back quickly
-- tail logs and inspect metrics
-- rotate secrets and keys
-- restore databases
-- canary releases
-- perform regional failover
-- debug unhealthy instances
-- understand what changed and why
+Run the local fake-provider path. It writes real Skiff object state and exercises validation, planning, release publication, deploy, status, logs, metrics, doctor, operation events, and the read-only TUI frame without cloud credentials.
 
-Terraform is excellent for stable infrastructure shape, but not for operational journeys. Kubernetes operators can model operations, but they often become opaque always-running controllers with hidden behavior.
+```bash
+git clone https://github.com/s1liconcow/skiff.git
+cd skiff
+make build
+export PATH="$PWD/bin:$PATH"
 
-Skiff fills the gap with explicit, auditable, resumable operations called **sagas**.
+make demo-local
 
-```text
-Terraform answers: what should exist?
-Skiff releases answer: what should run?
-Skiff sagas answer: what operational journey should happen now?
+skiff status http-hello --fresh
+skiff logs http-hello --limit 20
+skiff metrics http-hello
+skiff doctor http-hello
+skiff ops events http-hello --limit 30
+skiff tui http-hello --once --read-only
 ```
 
-## Core principles
+For the full walkthrough, including Apple Container and live AWS paths, see [docs/quickstart.md](docs/quickstart.md).
 
-1. **Object storage is durable truth.**  
-   Service control docs, release manifests, saga graphs, events, audit records, and resource summaries live in object storage.
+## Design Philosophy
 
-2. **`skiffd` is a facade, not the database.**  
-   `skiffd` provides API, TUI, auth, plugin execution, event streaming, and hot in-memory views. If it dies, it can rebuild from object storage.
+### Object Storage Is Durable Truth
 
-3. **The CLI has direct recovery mode.**  
-   Operators and agents can bypass `skiffd` and use object storage plus cloud APIs directly for break-glass recovery.
+Skiff writes durable state as signed or schema-versioned documents in object storage. Service control docs, release manifests, saga graphs, events, audit records, and resource summaries must survive `skiffd` restarts and outages.
 
-4. **One VM runs one workload replica by default.**  
-   This keeps identity, metrics, logs, health, debugging, and blast radius easy to understand.
+Example:
 
-5. **Cloud primitives remain visible.**  
-   Skiff does not hide ASGs, target groups, launch templates, IAM roles, logs, metrics, or secret references. It makes them easier to operate.
+```text
+services/payments-api/control.json
+services/payments-api/releases/rel_01J.../release.json
+services/payments-api/operations/op_01J.../intent.json
+services/payments-api/operations/op_01J.../events/01J....json
+audit/2026-05-19/01J....json
+```
 
-6. **Operations are explicit sagas.**  
-   Deploys, canaries, rollbacks, restores, rotations, failovers, and cutovers are graph-shaped workflows with typed steps, risk, reversibility, approvals, and append-only events.
+### `skiffd` Is A Facade, Not The Database
 
-7. **Secure by default.**  
-   Signed releases, digest-pinned artifacts, least-privilege IAM, no SSH-first debugging, encrypted state, and audited mutations are the defaults.
+`skiffd` serves API requests, powers the TUI, streams events, hosts plugins, enforces auth, and keeps fast in-memory views. Those views are rebuildable from object storage. If `skiffd` is unavailable, direct mode remains the recovery path.
+
+```bash
+skiff --direct --state s3://skiff-state-prod doctor payments-api --fresh --format json
+```
+
+### Operations Are Explicit Sagas
+
+Long-running operations are graph-shaped workflows with typed steps, persisted provider operation IDs, resumable control documents, risk, reversibility, approvals, and append-only events.
+
+```bash
+skiff deploy skiff.yaml --canary --canary-stages 5,25,100 --format json
+skiff ops watch payments-api --operation op_01J... --format json
+skiff ops approve saga_01J... --step approve-cutover --format json
+```
+
+### One VM Runs One Workload Replica By Default
+
+The VM is the workload isolation boundary. That makes identity, metrics, logs, health checks, debug sessions, and blast radius easier to reason about than multi-service VM packing.
+
+### Security Is Defaulted
+
+Production releases are signed, artifacts are digest-pinned, state buckets are encrypted and versioned, runner access is scoped, secrets are references rather than plaintext values, and mutating operations write audit records.
+
+## Comparison
+
+| Capability | Skiff | Terraform | Kubernetes | Nomad/systemd-style VM ops |
+|---|---|---|---|---|
+| Durable operation history | Object-state ledger with immutable events | Terraform state tracks resource shape | Cluster API stores current objects and events | Usually custom logs or scripts |
+| Normal deploy unit | One workload replica per VM | Not a deploy orchestrator | Pod/container | Job/task/service process |
+| Recovery without API server | Direct CLI over object storage and provider APIs | Terraform can apply from state backend | Usually needs API server/etcd | Depends on local tooling |
+| Rollback/restore/rotation model | Explicit saga graphs | Usually external runbooks | Controllers/operators | Usually scripts |
+| Cloud primitive visibility | First-class output | First-class resources | Often abstracted behind controllers | Direct but inconsistent |
+| Always-running reconciliation | Avoided by design | No | Common | Varies |
+| Agent-friendly JSON | Required for operator commands | Provider-dependent | kubectl JSON exists, semantics vary | Usually custom |
+
+Skiff is not a smaller Kubernetes and not a Terraform replacement. A useful shorthand is:
+
+```text
+Terraform for shape. Skiff for journeys.
+```
+
+## Installation
+
+### Release Installer
+
+The installer downloads a release archive for Linux or macOS, verifies `checksums.txt`, copies `skiff`, `skiffd`, `skiff-runner`, and `skiff-worker`, then runs `skiff version`.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/s1liconcow/skiff/main/scripts/install.sh | \
+  SKIFF_INSTALL_VERSION=0.2 SKIFF_INSTALL_DIR="$HOME/.local/bin" bash
+
+export PATH="$HOME/.local/bin:$PATH"
+skiff version
+```
+
+Set `SKIFF_INSTALL_PUBLIC_KEY` to require archive signature verification through `cosign` or `minisign`.
+
+### Build From Source
+
+```bash
+git clone https://github.com/s1liconcow/skiff.git
+cd skiff
+make build
+export PATH="$PWD/bin:$PATH"
+skiff version
+```
+
+### Install From Source
+
+```bash
+git clone https://github.com/s1liconcow/skiff.git
+cd skiff
+make install PREFIX="$HOME/.local"
+skiff version
+```
+
+### Install From A Local Release Artifact
+
+```bash
+scripts/build-release.sh 0.2
+
+SKIFF_INSTALL_VERSION=0.2 \
+SKIFF_INSTALL_BASE_URL="file://$PWD/dist" \
+SKIFF_INSTALL_DIR="$HOME/.local/bin" \
+scripts/install.sh
+```
+
+### Go Install For CLI-Only Development
+
+This installs the `skiff` CLI only. Use `make build` or the release installer when you also need `skiffd`, `skiff-runner`, and `skiff-worker`.
+
+```bash
+go install github.com/s1liconcow/skiff/cmd/skiff@latest
+skiff version
+```
+
+## Quick Start
+
+### Local No-Cloud Path
+
+```bash
+make build
+export PATH="$PWD/bin:$PATH"
+make demo-local
+```
+
+Then inspect the service:
+
+```bash
+skiff status http-hello --fresh
+skiff logs http-hello --limit 20
+skiff metrics http-hello
+skiff doctor http-hello
+skiff ops list --all --service http-hello
+```
+
+### Live AWS Bootstrap
+
+Use this in an isolated AWS account or disposable environment first. The deploy step can create real billable resources.
+
+```bash
+make build
+export PATH="$PWD/bin:$PATH"
+export AWS_REGION="${AWS_REGION:-us-west-2}"
+export AWS_DEFAULT_REGION="$AWS_REGION"
+export SKIFF_ENV="quickstart"
+
+mkdir -p .skiff-live
+cd .skiff-live
+
+skiff bootstrap aws \
+  --network managed \
+  --ingress private \
+  --yes \
+  --out bootstrap
+
+export SKIFF_CONFIG="$PWD/.skiffconfig"
+skiff config show
+```
+
+Bootstrap creates or records the environment object-state root, encrypted and versioned state bucket, KMS release signer, IAM roles, managed network substrate, runner defaults, and optional ingress resources. For public ingress with DNS:
+
+```bash
+export SKIFF_COMPANY_NAME="Acme"
+export SKIFF_DOMAIN_NAME="example.com"
+
+skiff bootstrap aws \
+  --network managed \
+  --ingress public \
+  --yes \
+  --out bootstrap
+```
+
+Prepare and plan a service:
+
+```bash
+skiff init stack api-database orders \
+  --dir orders \
+  --artifact registry.example.com/orders-api@sha256:REPLACE_WITH_DIGEST \
+  --yes
+
+skiff validate orders/skiff.yaml
+skiff plan orders/skiff.yaml
+skiff cost explain orders --file orders/skiff.yaml
+```
+
+Deploy only after the plan, cost output, AWS account boundary, artifact digest, and ingress model look correct:
+
+```bash
+skiff deploy orders/skiff.yaml --plan-only
+skiff deploy orders/skiff.yaml
+skiff status orders-api --fresh
+```
+
+## Command Reference
+
+Global flags can appear before most client commands:
+
+```bash
+skiff --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 status payments-api --format json
+skiff --api --api-url http://127.0.0.1:8585 ops events payments-api --format json --limit 20
+```
+
+| Command | Purpose | Example |
+|---|---|---|
+| `skiff init` | Create starter service or stack specs | `skiff init stack api-database orders --dir orders --artifact registry.example.com/orders-api@sha256:... --yes` |
+| `skiff validate` | Parse, default, and validate a spec | `skiff validate examples/service/http-hello/skiff.yaml --show-defaulted` |
+| `skiff plan` | Preview provider changes | `skiff plan skiff.yaml --provider aws --region us-west-2` |
+| `skiff explain` | Show the cloud primitives Skiff will use | `skiff explain skiff.yaml --provider aws --format json` |
+| `skiff bootstrap aws` | Create or emit the AWS state substrate | `skiff bootstrap aws --env prod --region us-west-2 --network managed --ingress private --yes` |
+| `skiff deploy` | Publish signed release state and deploy it | `skiff deploy skiff.yaml --canary --canary-stages 5,25,100` |
+| `skiff release candidate create` | Record immutable CI evidence | `skiff release candidate create --service payments-api --candidate-id cand_01J... --release-id rel_01J... --artifact-uri registry.example.com/payments-api@sha256:... --artifact-digest sha256:... --check tests=passed --format json` |
+| `skiff release promote` | Validate and record promotion intent | `skiff release promote payments-api --from staging --to prod --candidate cand_01J... --approval-id approval_01J... --format json` |
+| `skiff release list` | List immutable release manifests | `skiff release list payments-api --limit 5` |
+| `skiff release verify` | Verify a signed release manifest | `skiff release verify --file release.json --runtime-manifest runtime-manifest.json --public-key local-deploy=BASE64_PUBLIC_KEY --format json` |
+| `skiff status` | Show service status | `skiff status payments-api --fresh --format json` |
+| `skiff logs` | Query provider logs | `skiff logs payments-api --since 20m --instance i-abc123 --format json` |
+| `skiff metrics` | Query provider metrics | `skiff metrics payments-api --metric aws.elb.request_count --since 15m --format json` |
+| `skiff doctor` | Diagnose health and recommend actions | `skiff doctor payments-api --fresh --format json` |
+| `skiff cost explain` | Explain shape, capacity, and cost recommendations | `skiff cost explain payments-api --file skiff.yaml --pricing-scheme on-demand` |
+| `skiff cost pricing update` | Refresh local pricing catalog | `skiff cost pricing update --region us-west-2 --out .skiff-pricing.json` |
+| `skiff rollback` | Start a rollback saga | `skiff rollback payments-api --to previous-stable --format json` |
+| `skiff ops list` | List operation records | `skiff ops list --all --service payments-api` |
+| `skiff ops inspect` | Inspect an operation or saga | `skiff ops inspect --service payments-api --operation op_01J... --format json` |
+| `skiff ops events` | List recent service, operation, or saga events | `skiff ops events payments-api --limit 30` |
+| `skiff ops watch` | Follow an operation event stream | `skiff ops watch payments-api --operation op_01J... --format json` |
+| `skiff ops approve` | Approve a waiting saga step | `skiff ops approve saga_01J... --step approve-cutover --format json` |
+| `skiff ops resume` | Resume an operation or saga | `skiff ops resume saga_01J... --format json` |
+| `skiff database backup` | Create and verify a managed database restore point | `skiff database backup orders-db --direct --state s3://skiff-state-prod --format json` |
+| `skiff database restore` | Restore through an approval-gated saga | `skiff database restore orders-db --to 2026-05-17T02:00:00Z --mode new-db-cutover --secret-ref secret://managed-database/orders-db/connection-url --format json` |
+| `skiff rotate secret` | Rotate a secret pointer and consumers | `skiff rotate secret secret://managed-database/orders-db/connection-url --consumers orders-api --dry-run --format json` |
+| `skiff rotate key` | Rotate key material through a saga template | `skiff rotate key alias/skiff/prod/state --consumers payments-api --dry-run --format json` |
+| `skiff rotate cert` | Rotate certificate references | `skiff rotate cert payments-api-mtls --consumers payments-api --dry-run --format json` |
+| `skiff failover` | Plan or run a regional failover saga | `skiff failover orders --database orders-db --from-region us-west-2 --to-region us-east-1 --dry-run --format json` |
+| `skiff cutover` | Create weighted traffic cutover | `skiff cutover payments-api --from kube --to skiff --percent 10 --format json` |
+| `skiff debug collect` | Create a redacted diagnostic bundle | `skiff debug collect payments-api --instance i-abc123 --approval-id approval_01J... --format json` |
+| `skiff drift` | Compare resource records with provider inspection | `skiff drift payments-api --format json` |
+| `skiff gc plan` | Plan conservative cleanup | `skiff gc plan --service payments-api --format json` |
+| `skiff gc apply` | Apply approved cleanup | `skiff gc apply --service payments-api --approval-id approval_01J... --yes --format json` |
+| `skiff stateful` | Plan, apply, and inspect StatefulGroups | `skiff stateful plan examples/stateful/single-member/skiff.yaml --provider aws --region us-west-2` |
+| `skiff import kube` | Convert Kubernetes manifests into Skiff specs | `skiff import kube ./k8s --out skiff.yaml` |
+| `skiff terraform generate` | Generate Terraform modules for Skiff specs | `skiff terraform generate skiff.yaml --out infra/skiff/payments-api` |
+| `skiff adopt terraform` | Record externally managed resources in object state | `skiff adopt terraform infra/skiff/payments-api --format json` |
+| `skiff ci generate` | Generate CI/CD templates | `skiff ci generate github-actions --service payments-api --spec skiff.yaml --state s3://skiff-state-prod --provider aws --region us-west-2 --out .github/workflows/skiff.yml` |
+| `skiff contract test` | Run CI contract checks | `skiff contract test skiff.yaml --artifact-uri registry.example.com/payments-api@sha256:... --artifact-digest sha256:...` |
+| `skiff authz explain` | Explain policy and approval decisions | `skiff authz explain --action restore --service payments-api --env prod --risk high --format json` |
+| `skiff plugin` | Validate and run trusted plugins | `skiff plugin validate --plugin ./plugins/mtls --format json` |
+| `skiff config` | Inspect and switch contexts | `skiff config get-contexts` |
+| `skiff tui` | Open the terminal operations dashboard | `skiff tui payments-api --read-only` |
+| `skiff version` | Print client and optional server version | `skiff version --format json` |
+
+Discover the complete surface:
+
+```bash
+skiff help
+skiff help workflows
+skiff help adoption
+skiff help dev
+skiff help all
+```
+
+## Configuration
+
+Skiff reads a config file with named contexts. Contexts make the same command work in direct recovery mode or through `skiffd`.
+
+```yaml
+# .skiffconfig
+apiVersion: skiff.dev/v1alpha1
+kind: SkiffConfig
+current-context: prod-direct
+contexts:
+  - name: prod-direct
+    context:
+      mode: direct
+      env: prod
+      provider: aws
+      region: us-west-2
+      state: s3://skiff-acme-prod-us-west-2-state
+  - name: prod-api
+    context:
+      mode: api
+      env: prod
+      provider: aws
+      region: us-west-2
+      state: s3://skiff-acme-prod-us-west-2-state
+      api_url: https://skiffd.prod.example.com
+```
+
+Use it:
+
+```bash
+export SKIFF_CONFIG="$PWD/.skiffconfig"
+skiff config get-contexts
+skiff config use-context prod-direct
+skiff status payments-api --fresh
+```
+
+Common environment defaults:
+
+| Variable | Used for |
+|---|---|
+| `SKIFF_CONFIG` | Config file path |
+| `SKIFF_CONTEXT` | Context override |
+| `SKIFF_ENV` | Environment name |
+| `AWS_REGION` / `AWS_DEFAULT_REGION` | AWS SDK, bootstrap, provider, and pricing region |
+| `SKIFF_COMPANY_NAME` | Friendly bootstrap bucket/resource names |
+| `SKIFF_DOMAIN_NAME` | Public ingress base domain and wildcard service hosts |
+
+Example service spec:
+
+```yaml
+apiVersion: skiff.dev/v1alpha1
+kind: Service
+metadata:
+  name: payments-api
+  env: prod
+artifact:
+  type: oci
+  ref: registry.example.com/payments-api@sha256:abc123
+runtime:
+  port: 8080
+  health:
+    path: /healthz
+machine:
+  size: small
+scale:
+  min: 3
+  max: 20
+network:
+  ingress:
+    type: public-http
+    host: payments.example.com
+    tls:
+      enabled: true
+      certRef: aws-acm://us-west-2/certificate/payments-api
+```
 
 ## Architecture
 
@@ -69,364 +423,108 @@ Skiff sagas answer: what operational journey should happen now?
 Humans / agents / CI
         |
         v
-      skiff CLI  <----------------------+
-        |                               |
-        | API mode                      | direct recovery mode
-        v                               |
-      skiffd                            |
-  API / TUI / auth                      |
-  plugins / sagas                      |
-  in-memory views                       |
-        |                               |
-        v                               |
-object storage state bucket <-----------+
+      skiff CLI  <-----------------------------+
+        |                                      |
+        | API mode                             | direct recovery mode
+        v                                      |
+      skiffd                                   |
+  API / TUI / auth / plugins / sagas           |
+  rebuildable in-memory indexes                |
+        |                                      |
+        v                                      |
+object storage state bucket <------------------+
+        |
+        +--> immutable release manifests
+        +--> operation and saga intents
+        +--> CAS control documents with leases
+        +--> append-only events and audit records
+        +--> rebuildable indexes
         |
         v
 cloud provider primitives
+  ASG / target group / launch template / IAM / logs / metrics
         |
         v
 VM workload replicas
-  skiff-runner
-  app process
-  log/metric collector
+  skiff-runner -> verified artifact -> one workload process
 ```
 
-### Required components
+Required components:
 
-- `skiff` - CLI/TUI entrypoint for humans, CI, and agents.
-- `skiff-runner` - VM-local runner that fetches signed manifests and starts the workload.
-- Object storage state bucket - durable state, release ledger, operation events, and audit history.
-- Cloud provider primitives - AWS first.
+| Component | Role |
+|---|---|
+| `skiff` | CLI/TUI entrypoint for humans, CI, and agents |
+| `skiff-runner` | VM-local runner that fetches signed manifests and starts the workload |
+| object storage state bucket | Durable desired state, release ledger, operation events, and audit history |
+| cloud provider primitives | AWS-first implementation surface |
 
-### Normal product components
+Normal product components:
 
-- `skiffd` - stateless facade with in-memory indexes, event streaming, auth, plugin execution, and API/TUI support.
+| Component | Role |
+|---|---|
+| `skiffd` | Stateless API facade with in-memory indexes, event streaming, auth, plugin execution, and TUI support |
+| `skiff-worker` | Optional operation/saga resumer for long-running workflows |
+| plugins | Typed extensions for mTLS, diagnostics, runtime add-ons, and saga steps |
 
-### Optional components
+## Durable State Model
 
-- `skiff-worker` - optional operation/saga resumer for large installations or long-running operational flows.
-- Plugins - typed extensions for capabilities such as mTLS, managed database operations, diagnostics, or traffic controls.
-
-## Repository layout
-
-The intended Go repository structure:
+Object storage is plain, inspectable, and durable.
 
 ```text
-skiff/
-  cmd/
-    skiff/                  # CLI/TUI
-    skiffd/                 # stateless API facade
-    skiff-runner/           # VM-local runner
-    skiff-worker/           # optional operation/saga resumer
+services/<service>/control.json
+services/<service>/releases/<release>/release.json
+services/<service>/releases/<release>/runtime-manifest.json
+services/<service>/operations/<op>/intent.json
+services/<service>/operations/<op>/control.json
+services/<service>/operations/<op>/events/<ulid>.json
 
-  internal/
-    artifact/               # artifact preparation: OCI, tarball, binary
-    auth/                   # actors and authn helpers
-    authz/                  # authorization and approval policy
-    bootstrap/              # cloud bootstrap for state bucket, KMS, roles
-    cicd/                   # CI/CD templates and release candidate flows
-    cli/                    # CLI output, errors, progress rendering
-    client/                 # API and direct clients
-    compiler/               # spec -> typed IR
-    config/                 # config loading and validation
-    cost/                   # shape/cost advisor
-    debug/                  # diagnostic bundles and debug sessions
-    deploy/                 # release publishing and deploy orchestration
-    doctor/                 # service and saga diagnostics
-    drift/                  # cloud drift detection
-    events/                 # append-only event model and streaming
-    gc/                     # safe cleanup planning and apply
-    importers/              # Kubernetes and other importers
-    index/                  # skiffd rebuildable in-memory views
-    ir/                     # typed provider-neutral resource graph
-    objstore/               # object storage interface and backends
-    observability/          # logs, metrics, traces envelope
-    ops/                    # resumable operation controls
-    plugins/                # plugin host and registry
-    provider/               # provider interface and AWS implementation
-    release/                # release manifests, signing, verification
-    runner/                 # runner FSM and local lifecycle
-    saga/                   # operational graph executor and templates
-    security/               # signing, policy generation, redaction
-    spec/                   # public Skiff spec parsing/defaulting/validation
-    state/                  # object-state schemas, paths, CAS controls
-    stateful/               # StatefulGroup mechanics and recipe hooks
-    status/                 # service and stack status views
-    terraform/              # Terraform generate/adopt bridge
-    tui/                    # terminal UI
+sagas/<saga>/intent.json
+sagas/<saga>/graph.json
+sagas/<saga>/control.json
+sagas/<saga>/events/<ulid>.json
 
-  pkg/
-    pluginapi/              # stable plugin API
-    sagaapi/                # public saga step API, if needed later
-    sdk/                    # client SDK for agents/tools, if needed later
+resources/by-logical/<kind>/<name>.json
+resources/by-provider/<provider>/<kind>/<id>.json
 
-  docs/
-    adoption/
-    operations/
-    recipes/
-    support/
-    dev/
+indexes/services.json
+indexes/active-sagas.json
+indexes/recent-events.json
 
-  examples/
-    service/
-    stacks/
-    plugins/
-
-  tests/
-    conformance/
-    e2e/
-    fixtures/
-    golden/
-    integration/
+audit/<yyyy-mm-dd>/<ulid>.json
 ```
 
-## Object-state model
+| Object type | Mutation rule |
+|---|---|
+| release manifest | create-only |
+| runtime manifest | create-only |
+| operation intent | create-only |
+| operation event | create-only |
+| saga intent | create-only |
+| saga graph | create-only |
+| saga event | create-only |
+| audit event | create-only |
+| service control | compare-and-swap only |
+| operation control | compare-and-swap only |
+| saga control | compare-and-swap only |
+| derived indexes | rebuildable |
 
-Skiff state is plain, inspectable, durable object storage.
+Control documents are also lock documents. Skiff does not create separate lock files.
 
-Representative layout:
+## Agent Output
 
-```text
-root/
-  trust-root.json
+All user-facing commands should support `--format json`, `--no-color`, `--yes`, and `--trace-id` where applicable. JSON mode emits valid JSON only and includes enough context for a human or agent to continue after interruption.
 
-env/
-  control.json
-
-services/
-  payments-api/
-    control.json
-    specs/
-      sha256-....json
-    candidates/
-      rc_01J.../
-        candidate.json
-        plan.json
-    releases/
-      2026.05.16.1/
-        release.json
-        release.bundle
-        runtime-manifest.json
-        runtime-manifest.bundle
-        ir.json
-        plan.json
-        sbom.spdx.json
-        provenance.intoto.jsonl
-    operations/
-      op_01J.../
-        intent.json
-        control.json
-        events/
-          01J...-created.json
-          01J...-planned.json
-          01J...-rollout-started.json
-          01J...-succeeded.json
-        result.json
-
-sagas/
-  saga_01J.../
-    intent.json
-    graph.json
-    control.json
-    events/
-      01J...-started.json
-      01J...-approval-required.json
-      01J...-completed.json
-    artifacts/
-      plan.md
-      result.json
-
-resources/
-  by-logical/
-    services/payments-api/asg.json
-    services/payments-api/target-group.json
-  by-provider/
-    aws/asg/skiff-prod-payments-api.json
-
-indexes/
-  services.json
-  active-sagas.json
-  recent-events.json
-
-audit/
-  2026-05-16/
-    01J....json
-```
-
-There are three state categories:
-
-| Category | Examples | Mutation rule |
-|---|---|---|
-| Immutable history | release manifests, operation intents, events, audit records | create-only |
-| Control documents | service control, operation control, saga control, stateful member control | compare-and-swap |
-| Rebuildable views | service index, recent events, skiffd memory index | derived from truth |
-
-## CAS control documents
-
-Mutable control documents are updated through compare-and-swap. They are also the lease object. Do not create separate lock files.
-
-Example service control document:
-
-```json
-{
-  "schema": "skiff.service-control/v1",
-  "service": "payments-api",
-  "env": "prod",
-  "desired_release": "2026.05.16.1",
-  "stable_release": "2026.05.15.3",
-  "operation": {
-    "id": "op_01J...",
-    "kind": "deploy",
-    "state": "rolling_out",
-    "step": "canary"
-  },
-  "lease": {
-    "owner": "skiffd/i-abc123",
-    "token": "lease_01J...",
-    "generation": 42,
-    "expires_at": "2026-05-16T20:05:00Z"
-  },
-  "version": 18,
-  "updated_at": "2026-05-16T20:04:30Z"
-}
-```
-
-Rule:
-
-```text
-Write object storage first.
-Then update skiffd memory views.
-Never the reverse.
-```
-
-## Sagas
-
-A Skiff saga is a typed operational graph.
-
-Examples:
-
-- canary deployment
-- rollback
-- database backup
-- database restore
-- secret rotation
-- key rotation
-- certificate rotation
-- traffic cutover
-- regional failover
-- stateful member replacement
-- debug bundle collection
-
-A saga contains:
-
-```text
-intent.json  - immutable request
-graph.json   - immutable planned graph
-control.json - CAS-updated execution state and lease
-events/*     - append-only timeline
-artifacts/*  - plans, reports, results
-```
-
-Example saga graph:
-
-```text
-preflight
-  -> create snapshot
-  -> restore new database
-  -> smoke test
-  -> approval before cutover
-  -> update secret pointer
-  -> roll service
-  -> verify
-```
-
-Sagas are explicit and bounded. They are not hidden always-running controllers.
-
-## CLI overview
-
-Core commands:
-
-```bash
-skiff bootstrap aws
-skiff validate skiff.yaml
-skiff plan skiff.yaml
-skiff explain skiff.yaml
-skiff deploy skiff.yaml
-skiff deploy skiff.yaml --canary
-skiff status payments-api
-skiff logs payments-api --follow
-skiff metrics payments-api
-skiff doctor payments-api
-skiff cost explain payments-api --file skiff.yaml
-skiff rollback payments-api --to previous-stable
-skiff ops list --service payments-api
-skiff ops inspect saga_01J...
-skiff ops watch saga_01J...
-skiff ops approve saga_01J... --step approval_before_cutover
-skiff database restore payments-db --to 2026-05-15T10:00:00Z --secret-ref secret://managed-database/payments-db/url
-skiff rotate secret prod/payments/db-password
-skiff drift payments-api
-skiff gc plan
-skiff tui
-```
-
-Run `skiff help workflows`, `skiff help adoption`, `skiff help dev`, or
-`skiff help all` to discover the less common operational and low-level tools.
-
-Every operational command should support:
-
-```bash
---format json
---no-color
---yes
---trace-id
-```
-
-Direct recovery mode:
-
-```bash
-skiff --direct --state s3://skiff-state-prod status payments-api
-skiff --direct --state s3://skiff-state-prod rollback payments-api --to previous-stable
-```
-
-## Agent amenities
-
-Skiff is designed for agents as first-class users.
-
-Agent-facing behaviors:
-
-- deterministic JSON output
-- explicit exit codes
-- facts separated from hypotheses
-- recommended actions with safety metadata
-- reversible vs irreversible classification
-- operation and saga IDs for resumption
-- direct recovery commands
-- event streams plus object-log resume
-- trace IDs everywhere
-
-Example doctor output shape:
+Example:
 
 ```json
 {
   "ok": false,
   "code": "CANARY_FAILED",
   "summary": "Canary failed metrics gate",
+  "trace_id": "tr_01J...",
   "facts": [
-    {
-      "type": "target_health",
-      "message": "new release targets are healthy"
-    },
-    {
-      "type": "metrics_gate",
-      "message": "new release error rate is above threshold"
-    }
-  ],
-  "hypotheses": [
-    {
-      "confidence": 0.86,
-      "message": "new release is application-broken rather than infrastructure-broken"
-    }
+    {"type": "target_health", "message": "new release targets are healthy"},
+    {"type": "metrics_gate", "message": "new release error rate is above threshold"}
   ],
   "recommended_actions": [
     {
@@ -439,122 +537,117 @@ Example doctor output shape:
 }
 ```
 
-## Security defaults
-
-Skiff should default to:
-
-- signed release manifests
-- digest-pinned production artifacts
-- encrypted object-state bucket
-- versioned object-state bucket
-- least-privilege runner, deployer, and skiffd roles
-- no SSH-first debugging
-- managed debug sessions through cloud-native access mechanisms
-- public ingress through load balancers only
-- workload identity through cloud IAM
-- secret references, not plaintext secret values in object state
-- audit events for every mutation
-- approval gates for high-risk sagas
-- explicit risk and reversibility classification
-
-## Adoption paths
-
-### From scratch
-
-```bash
-skiff bootstrap aws --env prod --region us-west-2
-skiff init service payments-api
-skiff deploy skiff.yaml
-```
-
-### API plus managed database
-
-```bash
-skiff init stack api-database payments
-skiff deploy
-skiff status payments-api
-```
-
-### API with local SQLite
-
-```bash
-skiff init stack api-sqlite payments
-skiff stateful plan payments/skiff.yaml --provider fake --region local
-skiff stateful apply payments/skiff.yaml --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2
-```
-
-### From Kubernetes
-
-```bash
-skiff import kube ./k8s --out skiff.yaml
-skiff deploy skiff.yaml --shadow
-skiff cutover payments-api --from kube --to skiff --percent 10
-```
-
-### From Terraform
-
-```bash
-skiff terraform generate skiff.yaml --out infra/skiff/payments-api
-terraform -chdir=infra/skiff/payments-api apply
-skiff adopt terraform infra/skiff/payments-api
-skiff deploy skiff.yaml
-```
-
-Terraform can own stable infrastructure shape. Skiff owns releases, rollouts, rollback, diagnosis, sagas, and operation state.
-
-### CI/CD
-
-CI builds and proves artifacts. Skiff publishes and rolls them out.
-
-```bash
-skiff validate skiff.yaml
-skiff contract test skiff.yaml --artifact "$IMAGE_REF"
-skiff plan skiff.yaml --artifact "$IMAGE_REF"
-skiff release candidate create --service payments-api --artifact "$IMAGE_REF"
-skiff deploy skiff.yaml --env staging --candidate latest --yes
-skiff release promote payments-api --from staging --to prod --candidate latest-stable --strategy canary --yes
-```
-
-## Testing strategy
-
-Major test layers:
-
-1. **Unit tests** - schemas, CAS logic, compiler, provider lowering, signing, policy generation.
-2. **State workflow tests** - object-state flows using the in-memory object store.
-3. **Fake provider e2e tests** - full deploy/rollback/saga flows without cloud credentials.
-4. **Provider conformance tests** - support bar for AWS and future providers.
-5. **Optional cloud integration tests** - gated, isolated, tagged, and not required for normal PRs.
-6. **Production readiness tests** - interrupted deploys, failed rollouts, stale skiffd cache, direct recovery, lease contention, observability outages.
-
-## Milestone documents
-
-Implementation planning is organized into three bead documents:
-
-- `skiff_beads_m1_foundation.md` - core object-state foundation and runner MVP.
-- `skiff_beads_m2_operations.md` - stateless deploys, observability, doctor, and sagas.
-- `skiff_beads_m3_adoption_production.md` - adoption, plugins, recipes, production hardening, and GA.
-
-## Non-goals
-
-Skiff should not become:
-
-- a Kubernetes YAML emulator
-- a generic bin-packing scheduler
-- a service mesh by default
-- an always-running operator framework
-- an in-house secret store
-- a hidden abstraction over cloud primitives
-- a platform that requires its API server to recover itself
-- a system where state is only understandable through a proprietary database
-
-## Slogan
+Exit codes:
 
 ```text
-Terraform for shape. Skiff for journeys.
+0 success
+1 user/spec error
+2 policy denied
+3 provider/cloud error
+4 rollout/operation failed
+5 partial success
+6 auth error
+7 timeout
+8 internal error
 ```
 
-Or:
+## Development
 
-```text
-The VM is the pod. The cloud is the cluster. Object storage is the ledger.
+```bash
+make build
+make test
+make readiness
+make e2e-local
 ```
+
+Use repository-local Go caches when running tests manually:
+
+```bash
+GOCACHE=$PWD/.cache/go-build GOMODCACHE=$PWD/.cache/gomod go test ./...
+```
+
+Optional gates:
+
+```bash
+make e2e-apple-container
+SKIFF_AWS_E2E=1 make e2e-aws
+```
+
+Real cloud tests are gated, isolated by unique names/prefixes, heavily tagged, and cleanup-safe. See [docs/production-readiness.md](docs/production-readiness.md) and [docs/dev/e2e-matrix.md](docs/dev/e2e-matrix.md).
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `checksum for skiff_... not found` during install | `SKIFF_INSTALL_VERSION` does not match a published archive | Use a tag that has release assets, or build local artifacts with `scripts/build-release.sh 0.2` and set `SKIFF_INSTALL_BASE_URL=file://$PWD/dist` |
+| `config validation failed` | Missing context, state URI, provider, env, or region | Run `skiff config show --format json` and pass explicit flags such as `--direct --state s3://... --env prod --provider aws --region us-west-2` |
+| `release signing seed required` or signing errors | Non-fake deploy lacks a signing key reference | Use bootstrap-created `aws-kms://...`, pass `--signing-key-ref`, or use `--signing-backend keychain` for local fallback |
+| `PRECONDITION_FAILED`, `LEASE_HELD`, or `LEASE_LOST` | A CAS control document changed or another actor holds the embedded lease | Rerun `skiff status <service> --fresh --format json`, inspect `skiff ops events <service>`, then retry or resume the operation |
+| Service is unhealthy after deploy | Target health, runner state, or app health checks failed | Run `skiff doctor <service> --fresh --format json`, then follow the recommended non-mutating commands before rollback |
+| Logs or metrics are empty | Provider observability resources are missing, stale, or not yet emitting | Run `skiff explain skiff.yaml`, `skiff status <service> --fresh`, then `skiff doctor <service> --fresh --format json` |
+| Direct mode cannot find state | Wrong object-state URI or credentials | Verify the context with `skiff config show`, then test direct access with `skiff --direct --state <uri> ops events <service> --format json` |
+
+## Limitations
+
+| Limitation | Current state |
+|---|---|
+| AWS is first | Provider interfaces are intended to be extensible, but AWS is the main implementation target today |
+| Not a Kubernetes emulator | Imports can help migration, but unsupported Kubernetes behavior must warn or fail clearly |
+| No generic bin packing | One VM runs one workload replica by default |
+| `skiffd` is not required for recovery | Some normal API/TUI workflows use `skiffd`, but correctness must not depend on it |
+| Package managers are not the primary install path yet | Use the release installer, source build, or local release artifacts |
+| Live cloud operations can cost money | Bootstrap and deploy make billable AWS resources visible, especially NAT gateways, ALBs, ACM, hosted zones, ASGs, and state buckets |
+| Production use requires real artifact discipline | Use digest-pinned artifacts, release signing, least-privilege IAM, and approval gates |
+
+## FAQ
+
+### Is Skiff a Kubernetes replacement?
+
+No. Skiff does not mirror Kubernetes APIs or schedule containers into a cluster. It uses cloud primitives directly and treats the VM as the workload isolation boundary.
+
+### Is Skiff a Terraform replacement?
+
+No. Terraform can still own stable infrastructure shape. Skiff owns releases, rollouts, rollback, diagnosis, sagas, and operation state. Skiff can also emit Terraform for supported bootstrap and service shapes.
+
+### Why object storage instead of a database?
+
+Object storage gives Skiff durable, inspectable, versionable truth that survives `skiffd`. Mutable state uses compare-and-swap control documents. Immutable history is create-only.
+
+### What happens when `skiffd` is down?
+
+Use direct mode:
+
+```bash
+skiff --direct --state s3://skiff-state-prod status payments-api --fresh
+skiff --direct --state s3://skiff-state-prod rollback payments-api --to previous-stable --format json
+```
+
+### How does Skiff handle long-running operations?
+
+Operations are saga graphs. Step results, provider operation IDs, control state, events, and audit records are stored before waiting so a worker, CLI, or `skiffd` can resume.
+
+### Where do secrets go?
+
+Skiff stores secret references, not plaintext secret values, in object state and events. Use cloud secret managers or another secure store.
+
+### Can agents use Skiff safely?
+
+Yes. JSON output is a first-class contract. Recommendations include command strings, mutation metadata, safety, reversibility, operation IDs, saga IDs, and trace IDs.
+
+### How do I learn the deeper design?
+
+Start with these:
+
+- [docs/quickstart.md](docs/quickstart.md)
+- [docs/dev/cli.md](docs/dev/cli.md)
+- [docs/dev/object-state-layout.md](docs/dev/object-state-layout.md)
+- [docs/install.md](docs/install.md)
+- [docs/production-readiness.md](docs/production-readiness.md)
+
+## About Contributions
+
+*About Contributions:* Please don't take this the wrong way, but I do not accept outside contributions for any of my projects. I simply don't have the mental bandwidth to review anything, and it's my name on the thing, so I'm responsible for any problems it causes; thus, the risk-reward is highly asymmetric from my perspective. I'd also have to worry about other "stakeholders," which seems unwise for tools I mostly make for myself for free. Feel free to submit issues, and even PRs if you want to illustrate a proposed fix, but know I won't merge them directly. Instead, I'll have Claude or Codex review submissions via `gh` and independently decide whether and how to address them. Bug reports in particular are welcome. Sorry if this offends, but I want to avoid wasted time and hurt feelings. I understand this isn't in sync with the prevailing open-source ethos that seeks community contributions, but it's the only way I can move at this velocity and keep my sanity.
+
+## License
+
+No standalone license file is currently committed. Treat this repository as source-available unless a license is added.

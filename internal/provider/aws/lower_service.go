@@ -921,7 +921,7 @@ func renderRunnerCloudInit(configJSON string, opts LowerOptions) string {
 	writeCloudInitFile(&b, "/etc/systemd/system/skiff-runner.service", "0644", runnerServiceUnit())
 	b.WriteString("runcmd:\n")
 	if installCmd := runnerInstallCommand(opts); installCmd != "" {
-		writeCloudInitShellCommand(&b, "if command -v dnf >/dev/null 2>&1; then dnf install -y curl tar gzip; fi")
+		writeCloudInitShellCommand(&b, "if command -v dnf >/dev/null 2>&1; then dnf install -y bash curl tar gzip; fi")
 		writeCloudInitShellCommand(&b, installCmd)
 	}
 	b.WriteString("  - [ systemctl, daemon-reload ]\n")
@@ -963,7 +963,7 @@ func runnerInstallCommand(opts LowerOptions) string {
 	if keyRef := strings.TrimSpace(opts.RunnerInstallPublicKeyRef); keyRef != "" {
 		env = append(env, "SKIFF_INSTALL_PUBLIC_KEY="+shellQuote(keyRef))
 	}
-	return "if ! command -v skiff-runner >/dev/null 2>&1; then curl -fsSL " + shellQuote(scriptURL) + " | " + strings.Join(env, " ") + " sh; fi"
+	return "if ! command -v skiff-runner >/dev/null 2>&1; then curl -fsSL " + shellQuote(scriptURL) + " | " + strings.Join(env, " ") + " bash; fi"
 }
 
 func runnerServiceUnit() string {

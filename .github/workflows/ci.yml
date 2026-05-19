@@ -2,17 +2,28 @@ name: ci
 
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: "1.24.x"
+          go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
       - name: Check formatting
         run: test -z "$(gofmt -l $(find cmd internal tests -name '*.go' -print))"
       - name: Conformance

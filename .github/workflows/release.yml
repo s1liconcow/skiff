@@ -23,6 +23,9 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
@@ -32,9 +35,10 @@ jobs:
   release:
     name: Build and publish release
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - name: Check out release ref
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 0
@@ -77,10 +81,11 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
-          go-version: "1.24.x"
+          go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
 
       - name: Check formatting
         run: test -z "$(gofmt -l $(find cmd internal tests -name '*.go' -print))"
@@ -123,8 +128,13 @@ jobs:
 
           sha256sum -c dist/checksums.txt
 
+      - name: Attest release artifacts
+        uses: actions/attest@v4
+        with:
+          subject-checksums: dist/checksums.txt
+
       - name: Upload readiness report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: production-readiness
@@ -132,7 +142,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: skiff-${{ steps.release.outputs.version }}-release-artifacts
           path: |

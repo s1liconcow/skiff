@@ -2139,7 +2139,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Skiff
-        run: curl -fsSL https://get.skiff.dev | sh
+        run: curl -fsSL https://get.skiff.dev | bash
       - name: Test
         run: go test ./...
       - name: Build image
@@ -2171,7 +2171,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: curl -fsSL https://get.skiff.dev | sh
+      - run: curl -fsSL https://get.skiff.dev | bash
       - run: skiff deploy skiff.yaml --env staging --candidate latest --yes --format json
 
   promote-prod:
@@ -2180,7 +2180,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: curl -fsSL https://get.skiff.dev | sh
+      - run: curl -fsSL https://get.skiff.dev | bash
       - run: skiff release promote payments-api --from staging --to prod --candidate latest-stable --strategy canary --yes --format json
 ```
 

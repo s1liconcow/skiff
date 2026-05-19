@@ -43,13 +43,15 @@ func TestInstallScriptInstallsLocalReleaseArtifact(t *testing.T) {
 	}
 
 	installDir := filepath.Join(t.TempDir(), "bin")
-	cmd = exec.Command("sh", filepath.Join(root, "scripts", "install.sh"))
+	cmd = exec.Command("bash", filepath.Join(root, "scripts", "install.sh"))
 	cmd.Env = append(os.Environ(),
 		"SKIFF_INSTALL_VERSION=v0.0.0",
 		"SKIFF_INSTALL_BASE_URL=file://"+dist,
 		"SKIFF_INSTALL_DIR="+installDir,
 		"SKIFF_INSTALL_OS=linux",
 		"SKIFF_INSTALL_ARCH=amd64",
+		"SKIFF_INSTALL_CONFIGURE_AGENTS=0",
+		"SKIFF_INSTALL_COMPLETIONS=0",
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("install.sh: %v\n%s", err, out)

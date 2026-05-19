@@ -22,23 +22,32 @@ on:
   schedule:
     - cron: "17 9 * * *"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.mode || 'auto' }}
+  cancel-in-progress: true
+
 jobs:
   local:
     if: github.event_name == 'pull_request' || github.event_name == 'schedule' || inputs.mode == 'local' || inputs.mode == 'all'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: "1.24.x"
+          go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
       - name: Local e2e
         run: make e2e-local
       - name: Production readiness
         run: make readiness
         env:
           SKIFF_READINESS_REPORT: artifacts/readiness/production-readiness.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: production-readiness
@@ -48,18 +57,21 @@ jobs:
   apple:
     if: inputs.mode == 'apple' || inputs.mode == 'all'
     runs-on: macos-15
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: "1.24.x"
+          go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
       - name: Apple silicon e2e
         run: make e2e-apple-container
 
   aws:
     if: github.event_name == 'schedule' || inputs.mode == 'aws' || inputs.mode == 'all'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     env:
       SKIFF_AWS_E2E_STATE: ${{ secrets.SKIFF_AWS_E2E_STATE }}
       SKIFF_AWS_E2E_REGION: ${{ secrets.SKIFF_AWS_E2E_REGION }}
@@ -74,10 +86,11 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: "1.24.x"
+          go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
       - name: AWS e2e smoke
         run: make e2e-aws
