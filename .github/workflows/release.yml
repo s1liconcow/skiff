@@ -38,7 +38,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: Check out release ref
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 0
