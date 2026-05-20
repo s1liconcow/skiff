@@ -43,7 +43,7 @@ Set shared variables from the repository root:
 
 ```bash
 export APPLE_RUN_ID=postgres-ha-apple-$(date +%Y%m%d%H%M%S)
-export SKIFF_E2E_REPORT_DIR=$PWD/.skiff-demo-reports/apple-postgres-ha
+export SKIFF_E2E_REPORT_DIR=$PWD/.skiff-demo-reports/apple-postgres-ha/$APPLE_RUN_ID
 export SKIFF_E2E_OPSEM_IMAGE=localhost/skiff-opsem:e2e
 ```
 

@@ -113,7 +113,7 @@ make demo-apple-postgres-ha
 This runs the actual `skiff.dev/postgres-ha` package on Apple Silicon through
 the live StatefulGroup package harness. It starts RustFS for object state,
 applies the `postgres-ha` Apple StatefulGroup scenarios, locks
-`packages/postgres-ha`, builds and executes `cmd/postgres-ha-plugin`, runs a
-successful `primary-switchover-update`, and verifies the unsafe replica-lag path
-blocks before member mutation. It does not start a standalone Postgres container
-as a substitute for the package.
+`packages/postgres-ha` into a fresh report directory, builds and executes
+`cmd/postgres-ha-plugin`, runs a successful `primary-switchover-update`, and
+verifies the unsafe replica-lag path blocks before member mutation. It does not
+start a standalone Postgres container as a substitute for the package.

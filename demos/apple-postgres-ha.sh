@@ -2,7 +2,12 @@
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
-report_dir="${SKIFF_E2E_REPORT_DIR:-$repo_root/.skiff-demo-reports/apple-postgres-ha}"
+run_id="${SKIFF_DEMO_RUN_ID:-postgres-ha-$(date +%Y%m%d%H%M%S)}"
+if [[ -n "${SKIFF_E2E_REPORT_DIR:-}" ]]; then
+  report_dir="$SKIFF_E2E_REPORT_DIR"
+else
+  report_dir="$repo_root/.skiff-demo-reports/apple-postgres-ha/$run_id"
+fi
 opsem_image="${SKIFF_E2E_OPSEM_IMAGE:-localhost/skiff-opsem:e2e}"
 filter="${SKIFF_OPSEM_PROFILE_FILTER:-postgres-primary}"
 
@@ -54,6 +59,17 @@ EOF
 fi
 
 mkdir -p "$report_dir"
+
+if compgen -G "$report_dir/*-skiff.lock.json" >/dev/null; then
+  cat >&2 <<EOF
+Report directory already contains package lockfiles:
+  $report_dir
+
+Use a fresh report directory for each demo run, for example:
+  SKIFF_E2E_REPORT_DIR="$repo_root/.skiff-demo-reports/apple-postgres-ha/postgres-ha-\$(date +%Y%m%d%H%M%S)" make demo-apple-postgres-ha
+EOF
+  exit 1
+fi
 
 SKIFF_APPLE_STATEFUL_PACKAGES_E2E=1 \
 SKIFF_OPSEM_PROFILE_FILTER="$filter" \
