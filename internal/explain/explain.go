@@ -1,6 +1,8 @@
 package explain
 
 import (
+	"strings"
+
 	"github.com/s1liconcow/skiff/internal/ir"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
 )
@@ -292,6 +294,79 @@ func StatefulReadOnly(providerName string, graph *ir.Graph) Result {
 		})
 	}
 	return out
+}
+
+func PackageDerived(providerName string, graph *ir.Graph) Result {
+	if graph == nil {
+		return Result{Provider: providerName}
+	}
+	out := Result{
+		Provider: providerName,
+		Service:  graph.Service,
+		Env:      graph.Env,
+	}
+	for _, item := range graph.Resources.StatefulGroups {
+		if hasPackageSource(item.Meta.Source) {
+			out.Resources = append(out.Resources, ResourceExplanation{
+				Kind:           ir.ResourceKindStatefulGroup,
+				LogicalID:      item.Meta.LogicalID,
+				Name:           item.Meta.Name,
+				CloudPrimitive: "Skiff StatefulGroup",
+				Why:            "package dependency expands to an explicit StatefulGroup before provider lowering",
+				Source:         item.Meta.Source,
+			})
+		}
+	}
+	for _, item := range graph.Resources.StatefulMembers {
+		if hasPackageSource(item.Meta.Source) {
+			out.Resources = append(out.Resources, ResourceExplanation{
+				Kind:           ir.ResourceKindStatefulMember,
+				LogicalID:      item.Meta.LogicalID,
+				Name:           item.Meta.Name,
+				CloudPrimitive: "stateful member VM",
+				Why:            "package dependency declares a visible workload VM member with stable ordinal identity",
+				Source:         item.Meta.Source,
+			})
+		}
+	}
+	for _, item := range graph.Resources.StatefulVolumes {
+		if hasPackageSource(item.Meta.Source) {
+			out.Resources = append(out.Resources, ResourceExplanation{
+				Kind:           ir.ResourceKindStatefulVolume,
+				LogicalID:      item.Meta.LogicalID,
+				Name:           item.Meta.Name,
+				CloudPrimitive: "durable block volume",
+				Why:            "package dependency declares durable member storage explicitly",
+				Source:         item.Meta.Source,
+			})
+		}
+	}
+	for _, item := range graph.Resources.PackageOperations {
+		operations := append([]string{}, item.OperationProfiles...)
+		operations = append(operations, item.PackageSteps...)
+		why := "registers package operation profiles and package saga steps for explicit operational workflows"
+		if len(operations) > 0 {
+			why += ": " + strings.Join(operations, ", ")
+		}
+		out.Resources = append(out.Resources, ResourceExplanation{
+			Kind:           ir.ResourceKindPackageOperation,
+			LogicalID:      item.Meta.LogicalID,
+			Name:           item.Meta.Name,
+			CloudPrimitive: "Skiff package operation profile",
+			Why:            why,
+			Source:         item.Meta.Source,
+		})
+	}
+	return out
+}
+
+func hasPackageSource(source []ir.SourceRef) bool {
+	for _, ref := range source {
+		if ref.Package != "" || ref.Digest != "" || ref.LockfileDigest != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func securityGroupWhy(item aws.SecurityGroupAWS) string {

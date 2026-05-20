@@ -1,0 +1,17 @@
+{
+  "apiVersion": "skiff.dev/package/v1alpha1",
+  "kind": "Package",
+  "name": "opsem-shard-cluster",
+  "version": "1.0.0",
+  "exports": {
+    "dependencies": ["skiff-opsem"],
+    "operation_profiles": ["shard-allocation-rolling-update"],
+    "package_steps": [
+      "package.shard_allocation.verify_allocation",
+      "package.shard_allocation.relocate_primaries",
+      "package.shard_allocation.update_holders",
+      "package.shard_allocation.wait_for_rebalance",
+      "package.shard_allocation.verify_final"
+    ]
+  }
+}

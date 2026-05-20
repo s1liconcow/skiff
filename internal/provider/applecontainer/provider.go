@@ -342,6 +342,13 @@ func (p *Provider) container(ctx context.Context, args ...string) ([]byte, error
 	return output, nil
 }
 
+func (p *Provider) now() time.Time {
+	if p.clock == nil {
+		return time.Now().UTC()
+	}
+	return p.clock().UTC()
+}
+
 func (p *Provider) parseLogEntries(output, source string, req provider.LogsRequest) []provider.LogEntry {
 	var entries []provider.LogEntry
 	for _, line := range strings.Split(output, "\n") {

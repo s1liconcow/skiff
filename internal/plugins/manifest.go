@@ -172,8 +172,24 @@ func ValidateManifest(manifest pluginapi.Manifest) []pluginapi.Diagnostic {
 			if len(capability.SagaStepKinds) == 0 {
 				add("PLUGIN_CAPABILITY_SAGA_STEPS_REQUIRED", field+".saga_step_kinds", "saga step capabilities must list step kinds")
 			}
+		case pluginapi.CapabilityPackageStep:
+			if len(capability.PackageSteps) == 0 {
+				add("PLUGIN_CAPABILITY_PACKAGE_STEPS_REQUIRED", field+".package_steps", "package step capabilities must list typed package steps")
+			}
+			for j, step := range capability.PackageSteps {
+				stepField := fmt.Sprintf("%s.package_steps[%d]", field, j)
+				if !validCapabilityName(step.Kind) {
+					add("PLUGIN_CAPABILITY_PACKAGE_STEP_KIND_INVALID", stepField+".kind", "package step kind is required and must use lowercase letters, digits, dots, underscores, or hyphens")
+				}
+				if step.Risk != "" && !validRisk(string(step.Risk)) {
+					add("PLUGIN_CAPABILITY_PACKAGE_STEP_RISK_INVALID", stepField+".risk", "package step risk must be low, medium, high, or critical")
+				}
+				if step.Reversibility != "" && !validReversibility(string(step.Reversibility)) {
+					add("PLUGIN_CAPABILITY_PACKAGE_STEP_REVERSIBILITY_INVALID", stepField+".reversibility", "package step reversibility must be reversible, compensatable, partially_reversible, or irreversible")
+				}
+			}
 		default:
-			add("PLUGIN_CAPABILITY_KIND_UNKNOWN", field+".kind", "capability kind must be ir_patch, runtime_addon, doctor_check, or saga_step")
+			add("PLUGIN_CAPABILITY_KIND_UNKNOWN", field+".kind", "capability kind must be ir_patch, runtime_addon, doctor_check, saga_step, or package_step")
 		}
 	}
 	if hookSet(manifest.Hooks)[pluginapi.HookRuntimeAddons] && !manifest.Permissions.RuntimeAddons {
@@ -184,6 +200,9 @@ func ValidateManifest(manifest pluginapi.Manifest) []pluginapi.Diagnostic {
 	}
 	if hookSet(manifest.Hooks)[pluginapi.HookSagaStep] && len(manifest.Permissions.SagaStepKinds) == 0 {
 		add("PLUGIN_PERMISSION_SAGA_STEPS_REQUIRED", "permissions.saga_step_kinds", "saga_step hook requires allowed saga step kinds")
+	}
+	if hookSet(manifest.Hooks)[pluginapi.HookPackageStep] && len(manifest.Permissions.PackageStepKinds) == 0 {
+		add("PLUGIN_PERMISSION_PACKAGE_STEPS_REQUIRED", "permissions.package_step_kinds", "package_step hook requires allowed package step kinds")
 	}
 	return diagnostics
 }
@@ -213,7 +232,39 @@ func resolveManifestPath(path string) (string, error) {
 
 func knownHook(hook pluginapi.Hook) bool {
 	switch hook {
-	case pluginapi.HookValidate, pluginapi.HookMutateIR, pluginapi.HookRuntimeAddons, pluginapi.HookDoctorChecks, pluginapi.HookSagaStep:
+	case pluginapi.HookValidate, pluginapi.HookMutateIR, pluginapi.HookRuntimeAddons, pluginapi.HookDoctorChecks, pluginapi.HookSagaStep, pluginapi.HookPackageStep:
+		return true
+	default:
+		return false
+	}
+}
+
+func validCapabilityName(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validRisk(value string) bool {
+	switch value {
+	case "low", "medium", "high", "critical":
+		return true
+	default:
+		return false
+	}
+}
+
+func validReversibility(value string) bool {
+	switch value {
+	case "reversible", "compensatable", "partially_reversible", "irreversible":
 		return true
 	default:
 		return false

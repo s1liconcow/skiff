@@ -28,6 +28,10 @@ type StatefulApplier struct {
 	Authorizer authz.Authorizer
 }
 
+type statefulProviderApplier interface {
+	ApplyStatefulGroup(ctx context.Context, graph *ir.Graph, plan *provider.Plan) (*provider.ApplyResult, error)
+}
+
 type StatefulRequest struct {
 	Actor       schema.Actor `json:"actor"`
 	TraceID     string       `json:"trace_id,omitempty"`
@@ -215,13 +219,34 @@ func (a StatefulApplier) Apply(ctx context.Context, graph *ir.Graph, req Statefu
 		result.MutableObjectWrites = append(result.MutableObjectWrites, member.Key)
 	}
 
-	if err := a.updateStatefulOperationControl(ctx, graph.Service, req.OperationID, schema.OperationSucceeded, providerOps, []schema.StepResultRef{{
+	appendEvent("stateful.apply.object_state_written", "StatefulGroup group and member controls written before provider effects", schema.Fact{Type: "members", Message: strconv.Itoa(len(memberDocs))})
+	stepResults := []schema.StepResultRef{{
 		StepID:      "write_stateful_controls",
 		Kind:        "stateful.apply",
 		Status:      "succeeded",
 		Result:      rawJSON(map[string]any{"group": graph.Service, "replicas": graph.Resources.StatefulGroups[0].Replicas}),
 		CompletedAt: canonical.Time(a.now()),
-	}}); err != nil {
+	}}
+	if applier, ok := a.Provider.(statefulProviderApplier); ok {
+		applyResult, err := applier.ApplyStatefulGroup(ctx, graph, plan)
+		if err != nil {
+			return fail(err, "apply_stateful_provider")
+		}
+		var resourceIDs []string
+		if applyResult != nil {
+			resourceIDs = append(resourceIDs, applyResult.ResourceIDs...)
+		}
+		appendEvent("stateful.apply.provider_applied", "StatefulGroup provider effects applied after object state", schema.Fact{Type: "provider", Message: a.providerName()}, schema.Fact{Type: "resources", Message: strconv.Itoa(len(resourceIDs))})
+		stepResults = append(stepResults, schema.StepResultRef{
+			StepID:      "apply_stateful_provider",
+			Kind:        "stateful.apply",
+			Status:      "succeeded",
+			Result:      rawJSON(map[string]any{"provider": a.providerName(), "resource_ids": resourceIDs}),
+			CompletedAt: canonical.Time(a.now()),
+		})
+	}
+
+	if err := a.updateStatefulOperationControl(ctx, graph.Service, req.OperationID, schema.OperationSucceeded, providerOps, stepResults); err != nil {
 		return fail(err, "complete_operation")
 	}
 	if err := a.markStatefulGroupOperation(ctx, graph.Service, req, schema.OperationSucceeded, "object-state-written"); err != nil {
@@ -240,7 +265,6 @@ func (a StatefulApplier) Apply(ctx context.Context, graph *ir.Graph, req Statefu
 	for _, member := range memberDocs {
 		result.MemberControls = append(result.MemberControls, member.Control)
 	}
-	appendEvent("stateful.apply.object_state_written", "StatefulGroup group and member controls written before provider effects", schema.Fact{Type: "members", Message: strconv.Itoa(len(memberDocs))})
 	appendEvent("stateful.apply.succeeded", "StatefulGroup object-state apply completed")
 	successNow := a.now()
 	if err := a.appendStatefulAudit(ctx, log, req, graph.Service, "stateful.apply", "applied StatefulGroup object state", successNow, "success"); err != nil {
@@ -471,8 +495,13 @@ func (a StatefulApplier) createStatefulOperationIntent(ctx context.Context, grap
 	intent := schema.NewOperationIntent(req.OperationID, graph.Service, graph.Env, "stateful.apply", schema.Target{Kind: "stateful-group", Name: graph.Service}, req.Actor, req.TraceID, canonical.Time(now))
 	intent.Risk = schema.RiskMedium
 	intent.Reversibility = schema.Compensatable
+	intent.PackageLockDigest = graph.PackageLockDigest
 	intent.Summary = "apply StatefulGroup " + graph.Service + " object state"
-	intent.Params = rawJSON(map[string]any{"group": graph.Service, "replicas": graph.Resources.StatefulGroups[0].Replicas})
+	params := map[string]any{"group": graph.Service, "replicas": graph.Resources.StatefulGroups[0].Replicas}
+	if graph.PackageLockDigest != "" {
+		params["package_lock_digest"] = graph.PackageLockDigest
+	}
+	intent.Params = rawJSON(params)
 	body, err := canonical.Marshal(intent)
 	if err != nil {
 		return err

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"testing"
@@ -124,6 +126,54 @@ func TestSagaInspectJSONReadsDirectObjectState(t *testing.T) {
 	}
 	if len(got.Result.CurrentSteps) != 1 || got.Result.CurrentSteps[0] != "point-release" {
 		t.Fatalf("current steps missing: %+v", got.Result.CurrentSteps)
+	}
+}
+
+func TestSagaInspectAPIModeUsesSkiffd(t *testing.T) {
+	clearSkiffEnv(t)
+	restoreTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/sagas/inspect" {
+			t.Fatalf("unexpected API request %s %s", r.Method, r.URL.Path)
+		}
+		if r.URL.Query().Get("saga") != "saga_api" {
+			t.Fatalf("unexpected API query: %s", r.URL.RawQuery)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(`{"ok":true,"result":{
+				"saga_id":"saga_api",
+				"kind":"rollback",
+				"target":{"kind":"service","name":"payments-api"},
+				"status":"running",
+				"trace_id":"tr_saga_api",
+				"control":{"schema_version":"skiff.state/v1","saga_id":"saga_api","status":"running"},
+				"graph":{"schema_version":"skiff.state/v1","saga_id":"saga_api"},
+				"intent":{"schema_version":"skiff.state/v1","saga_id":"saga_api","kind":"rollback","target":{"kind":"service","name":"payments-api"}}
+			}}`)),
+			Request: r,
+		}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = restoreTransport })
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"saga", "inspect", "saga_api",
+		"--api",
+		"--api-url", "http://skiffd.test",
+		"--format", "json",
+		"--trace-id", "tr_saga_api",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var out sagaInspectOutput
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, stdout.String())
+	}
+	if !out.OK || out.Result.SagaID != "saga_api" || out.Result.Status != schema.SagaRunning {
+		t.Fatalf("unexpected API saga inspect output: %+v", out)
 	}
 }
 

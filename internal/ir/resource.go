@@ -24,6 +24,7 @@ const (
 	ResourceKindStatefulRecipe     = "StatefulRecipeRuntime"
 	ResourceKindSnapshotPolicy     = "StatefulSnapshotPolicy"
 	ResourceKindUpdatePolicy       = "StatefulUpdatePolicy"
+	ResourceKindPackageOperation   = "PackageOperation"
 
 	TagService            = "skiff.dev/service"
 	TagEnv                = "skiff.dev/env"
@@ -36,6 +37,8 @@ const (
 	TagStatefulGroup      = "skiff.dev/stateful-group"
 	TagMemberOrdinal      = "skiff.dev/member-ordinal"
 	TagStatefulRecipe     = "skiff.dev/recipe"
+	TagPackage            = "skiff.dev/package"
+	TagDependency         = "skiff.dev/dependency"
 )
 
 func RequiredTags(service, env string) map[string]string {

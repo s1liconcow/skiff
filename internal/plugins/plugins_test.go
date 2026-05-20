@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/s1liconcow/skiff/internal/doctor"
@@ -12,12 +13,14 @@ import (
 	"github.com/s1liconcow/skiff/internal/state/schema"
 	servicestatus "github.com/s1liconcow/skiff/internal/status"
 	"github.com/s1liconcow/skiff/pkg/pluginapi"
+	"github.com/s1liconcow/skiff/pkg/sagaapi"
 )
 
 type fakeRunner struct {
 	mutate pluginapi.MutateIRResponse
 	doctor pluginapi.DoctorChecksResponse
 	saga   pluginapi.SagaStepResultResponse
+	pkg    sagaapi.PackageStepResultResponse
 }
 
 func (r fakeRunner) RunPluginHook(ctx context.Context, plugin Plugin, hook pluginapi.Hook, request any, response any) error {
@@ -33,6 +36,9 @@ func (r fakeRunner) RunPluginHook(ctx context.Context, plugin Plugin, hook plugi
 		return json.Unmarshal(body, response)
 	case pluginapi.HookSagaStep:
 		body, _ := json.Marshal(r.saga)
+		return json.Unmarshal(body, response)
+	case pluginapi.HookPackageStep:
+		body, _ := json.Marshal(r.pkg)
 		return json.Unmarshal(body, response)
 	default:
 		return nil
@@ -190,6 +196,43 @@ func TestSagaStepRegistrationRunsThroughHost(t *testing.T) {
 	}
 }
 
+func TestPackageStepRegistrationUsesTypedCapabilities(t *testing.T) {
+	host := NewHost(&Registry{Plugins: []Plugin{{
+		Manifest: packageStepManifest(),
+		Source:   Source{Kind: SourcePath, Path: "fixture"},
+	}}}, fakeRunner{pkg: sagaapi.PackageStepResultResponse{Status: sagaapi.StepStatusFailed, Summary: "failed", Failure: &sagaapi.StepFailure{Code: "PACKAGE_STEP_FAILED", Summary: "package step failed", Retriable: true}}})
+
+	registered := PackageSteps(host)
+	step := registered["postgres.verify_replica_lag"]
+	if step == nil {
+		t.Fatalf("registered steps = %+v", registered)
+	}
+	result, err := step.Run(context.Background(), steps.StepRequest{
+		SagaID:  "saga_pkg",
+		TraceID: "tr_pkg",
+		Intent:  schema.SagaIntent{Target: schema.Target{Kind: "StatefulGroup", Name: "postgres"}},
+		Node:    schema.SagaNode{ID: "verify", Kind: "postgres.verify_replica_lag", Params: json.RawMessage(`{"target":"postgres","password":"secret-value"}`)},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Status != steps.StatusFailed || result.Failure == nil || !result.Failure.Retriable {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestValidateManifestRejectsInvalidPackageStep(t *testing.T) {
+	manifest := packageStepManifest()
+	manifest.Capabilities[0].PackageSteps[0].Kind = "Bad Kind"
+	diagnostics := ValidateManifest(manifest)
+	if len(diagnostics) == 0 {
+		t.Fatal("expected diagnostics")
+	}
+	if got := diagnostics[0].Code; !strings.Contains(got, "PACKAGE_STEP") {
+		t.Fatalf("diagnostics = %+v", diagnostics)
+	}
+}
+
 func baseManifest() pluginapi.Manifest {
 	return pluginapi.Manifest{
 		APIVersion: pluginapi.APIVersion,
@@ -231,6 +274,28 @@ func sagaManifest() pluginapi.Manifest {
 		Kind:          pluginapi.CapabilitySagaStep,
 		Name:          "wait-for-cert",
 		SagaStepKinds: []string{"plugin.wait-for-cert"},
+	}}
+	return manifest
+}
+
+func packageStepManifest() pluginapi.Manifest {
+	manifest := baseManifest()
+	manifest.Name = "postgres-package"
+	manifest.Hooks = []pluginapi.Hook{pluginapi.HookPackageStep}
+	manifest.Permissions = pluginapi.Permissions{PackageStepKinds: []string{"postgres.verify_replica_lag"}}
+	manifest.Capabilities = []pluginapi.Capability{{
+		Kind: pluginapi.CapabilityPackageStep,
+		Name: "verify-replica-lag",
+		PackageSteps: []sagaapi.PackageStepCapability{{
+			Kind:    "postgres.verify_replica_lag",
+			Summary: "verify replica lag",
+			Params: map[string]sagaapi.ParamSchema{
+				"target":   {Type: sagaapi.ParamString, Required: true},
+				"password": {Type: sagaapi.ParamString, Secret: true},
+			},
+			Risk:          sagaapi.RiskLow,
+			Reversibility: sagaapi.Reversible,
+		}},
 	}}
 	return manifest
 }

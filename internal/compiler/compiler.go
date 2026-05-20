@@ -11,6 +11,8 @@ import (
 
 type Options struct {
 	PackageLock                *internalpackages.LockFile
+	PackageLockDigest          string
+	PackageManifests           map[string]internalpackages.Manifest
 	AllowUnsignedLocalPackages bool
 }
 

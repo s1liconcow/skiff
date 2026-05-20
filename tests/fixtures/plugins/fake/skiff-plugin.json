@@ -8,12 +8,13 @@
     "kind": "command",
     "command": ["skiff-fake-plugin"]
   },
-  "hooks": ["validate", "mutate_ir", "runtime_addons", "doctor_checks", "saga_step"],
+  "hooks": ["validate", "mutate_ir", "runtime_addons", "doctor_checks", "saga_step", "package_step"],
   "permissions": {
     "allowed_patch_kinds": ["SecurityGroupRule"],
     "runtime_addons": true,
     "doctor_checks": true,
-    "saga_step_kinds": ["plugin.fake-step"]
+    "saga_step_kinds": ["plugin.fake-step"],
+    "package_step_kinds": ["fake.verify-ready"]
   },
   "capabilities": [
     {
@@ -35,6 +36,25 @@
       "kind": "saga_step",
       "name": "fake-step",
       "saga_step_kinds": ["plugin.fake-step"]
+    },
+    {
+      "kind": "package_step",
+      "name": "fake-package-step",
+      "package_steps": [
+        {
+          "kind": "fake.verify-ready",
+          "summary": "verify fake package readiness",
+          "params": {
+            "target": {"type": "string", "required": true},
+            "token": {"type": "string", "secret": true}
+          },
+          "result": {
+            "token": {"type": "string", "secret": true}
+          },
+          "risk": "low",
+          "reversibility": "reversible"
+        }
+      ]
     }
   ]
 }

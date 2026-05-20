@@ -555,14 +555,26 @@ func runSagaInspect(binary string, args []string, root rootOptions, stdout, stde
 	if err != nil {
 		return writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
 	}
-	if loaded.Config.Mode != config.ModeDirect {
-		return writeClientCommandError(binary, "saga", *flags.format, *flags.traceID, errors.New("saga inspect currently requires --direct mode"), stdout, stderr)
+	var result *sagastate.InspectResult
+	switch loaded.Config.Mode {
+	case config.ModeDirect:
+		store, err := openSagaObjectStore(loaded.Config)
+		if err != nil {
+			return writeClientError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
+		}
+		result, err = sagastate.NewStore(store).Inspect(nilContext(), *sagaID)
+	case config.ModeAPI, "":
+		apiClient, err := client.NewAPI(loaded.Config, client.APIOptions{})
+		if err != nil {
+			return writeClientError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
+		}
+		result, err = apiClient.InspectSaga(nilContext(), client.SagaInspectOptions{
+			Saga:    *sagaID,
+			TraceID: *flags.traceID,
+		})
+	default:
+		err = fmt.Errorf("saga inspect does not support mode %q", loaded.Config.Mode)
 	}
-	store, err := openSagaObjectStore(loaded.Config)
-	if err != nil {
-		return writeClientError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
-	}
-	result, err := sagastate.NewStore(store).Inspect(nilContext(), *sagaID)
 	if err != nil {
 		return writeClientError(binary, "saga", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
@@ -570,8 +582,8 @@ func runSagaInspect(binary string, args []string, root rootOptions, stdout, stde
 	case "human", "text":
 		printSagaInspectHuman(stdout, *result)
 		return ExitSuccess
-	case "json":
-		if err := json.NewEncoder(stdout).Encode(sagaInspectOutput{OK: true, TraceID: *flags.traceID, Result: *result}); err != nil {
+	case "json", "json-pretty":
+		if err := writeJSON(stdout, *flags.format, sagaInspectOutput{OK: true, TraceID: *flags.traceID, Result: *result}); err != nil {
 			fmt.Fprintf(stderr, "%s saga inspect: %v\n", binary, err)
 			return ExitInternalError
 		}
@@ -637,15 +649,20 @@ func createCanaryOperationDocs(ctx context.Context, store objstore.ObjectStore, 
 	intent := schema.NewOperationIntent(req.OperationID, req.Service, req.Env, templates.CanaryDeployCommand, schema.Target{Kind: "service", Name: req.Service}, req.Actor, req.TraceID, canonical.Time(req.CreatedAt.UTC()))
 	intent.Risk = schema.RiskMedium
 	intent.Reversibility = schema.Compensatable
+	intent.PackageLockDigest = req.PackageLockDigest
 	intent.Summary = fmt.Sprintf("canary deploy %s release %s", req.Service, req.ReleaseID)
-	intent.Params = rawJSON(map[string]any{
+	params := map[string]any{
 		"saga_id":         req.SagaID,
 		"release_id":      req.ReleaseID,
 		"stages":          req.Stages,
 		"bake_duration":   req.BakeDuration,
 		"metric_gates":    req.MetricGates,
 		"rollback_policy": req.RollbackPolicy,
-	})
+	}
+	if req.PackageLockDigest != "" {
+		params["package_lock_digest"] = req.PackageLockDigest
+	}
+	intent.Params = rawJSON(params)
 	intentBody, err := canonical.Marshal(intent)
 	if err != nil {
 		return err

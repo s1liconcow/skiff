@@ -1,0 +1,18 @@
+{
+  "apiVersion": "skiff.dev/package/v1alpha1",
+  "kind": "Package",
+  "name": "opsem-partition-isr",
+  "version": "1.0.0",
+  "exports": {
+    "dependencies": ["skiff-opsem"],
+    "operation_profiles": ["partition-quorum-rolling-update"],
+    "package_steps": [
+      "package.partition_quorum.verify_quorum",
+      "package.partition_quorum.update_non_leaders",
+      "package.partition_quorum.verify_in_sync_replicas",
+      "package.partition_quorum.move_leaders",
+      "package.partition_quorum.update_previous_leaders",
+      "package.partition_quorum.verify_final"
+    ]
+  }
+}

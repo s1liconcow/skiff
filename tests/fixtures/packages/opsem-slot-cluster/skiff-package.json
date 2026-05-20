@@ -1,0 +1,17 @@
+{
+  "apiVersion": "skiff.dev/package/v1alpha1",
+  "kind": "Package",
+  "name": "opsem-slot-cluster",
+  "version": "1.0.0",
+  "exports": {
+    "dependencies": ["skiff-opsem"],
+    "operation_profiles": ["slot-aware-failover-update"],
+    "package_steps": [
+      "package.slot_aware.verify_coverage",
+      "package.slot_aware.failover_replicas",
+      "package.slot_aware.verify_slot_health",
+      "package.slot_aware.update_remaining_members",
+      "package.slot_aware.verify_final_coverage"
+    ]
+  }
+}

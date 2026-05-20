@@ -9,12 +9,14 @@ import (
 	"github.com/s1liconcow/skiff/internal/saga/steps"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 	"github.com/s1liconcow/skiff/pkg/pluginapi"
+	"github.com/s1liconcow/skiff/pkg/sagaapi"
 )
 
 const (
 	Name              = "skiff-fake-plugin"
 	Version           = "0.1.0"
 	SagaStepKind      = "plugin.fake-step"
+	PackageStepKind   = "fake.verify-ready"
 	DoctorFindingCode = "FAKE_PLUGIN_CHECK"
 )
 
@@ -47,12 +49,14 @@ func Manifest() pluginapi.Manifest {
 			pluginapi.HookRuntimeAddons,
 			pluginapi.HookDoctorChecks,
 			pluginapi.HookSagaStep,
+			pluginapi.HookPackageStep,
 		},
 		Permissions: pluginapi.Permissions{
 			AllowedPatchKinds: []string{plugins.PatchKindSecurityGroupRule},
 			RuntimeAddons:     true,
 			DoctorChecks:      true,
 			SagaStepKinds:     []string{SagaStepKind},
+			PackageStepKinds:  []string{PackageStepKind},
 		},
 		Capabilities: []pluginapi.Capability{
 			{
@@ -74,6 +78,23 @@ func Manifest() pluginapi.Manifest {
 				Kind:          pluginapi.CapabilitySagaStep,
 				Name:          "fake-step",
 				SagaStepKinds: []string{SagaStepKind},
+			},
+			{
+				Kind: pluginapi.CapabilityPackageStep,
+				Name: "fake-package-step",
+				PackageSteps: []sagaapi.PackageStepCapability{{
+					Kind:    PackageStepKind,
+					Summary: "verify fake package readiness",
+					Params: map[string]sagaapi.ParamSchema{
+						"target": {Type: sagaapi.ParamString, Required: true},
+						"token":  {Type: sagaapi.ParamString, Secret: true},
+					},
+					Result: map[string]sagaapi.ParamSchema{
+						"token": {Type: sagaapi.ParamString, Secret: true},
+					},
+					Risk:          sagaapi.RiskLow,
+					Reversibility: sagaapi.Reversible,
+				}},
 			},
 		},
 	}
@@ -114,8 +135,41 @@ func (Runner) RunPluginHook(ctx context.Context, plugin plugins.Plugin, hook plu
 	case pluginapi.HookSagaStep:
 		req, _ := request.(pluginapi.SagaStepRequest)
 		return runSagaPhase(req, response)
+	case pluginapi.HookPackageStep:
+		req, _ := request.(pluginapi.PackageStepRequest)
+		return runPackageStepPhase(req, response)
 	default:
 		return nil
+	}
+}
+
+func runPackageStepPhase(req pluginapi.PackageStepRequest, response any) error {
+	switch req.Phase {
+	case sagaapi.StepPhasePlan:
+		return assign(response, sagaapi.PackageStepPlanResponse{
+			Summary:       "fake package step will verify target readiness",
+			Risk:          sagaapi.RiskLow,
+			Reversibility: sagaapi.Reversible,
+		})
+	case sagaapi.StepPhaseDoctor:
+		return assign(response, sagaapi.PackageStepDoctorResponse{Findings: []sagaapi.PackageStepFinding{{
+			Code:     "FAKE_PACKAGE_STEP_OK",
+			Severity: "low",
+			Summary:  "fake package step is healthy",
+		}}})
+	default:
+		return assign(response, sagaapi.PackageStepResultResponse{
+			Status:  sagaapi.StepStatusSucceeded,
+			Result:  json.RawMessage(`{"phase":"` + string(req.Phase) + `","token":"redacted-by-host"}`),
+			Summary: "fake package step " + string(req.Phase) + " completed",
+			ProviderOperations: []sagaapi.ProviderOperationRef{{
+				Provider:    "fake",
+				Kind:        "package-step",
+				ID:          "fake-package-step-" + string(req.Phase),
+				ObservedAt:  "2026-05-17T00:00:00Z",
+				Description: "reference package operation",
+			}},
+		})
 	}
 }
 

@@ -168,6 +168,50 @@ func TestExecutorRetriesAndCompensatesInReverseTopologicalOrder(t *testing.T) {
 	}
 }
 
+func TestExecutorStoresWaitingProviderOperationsInControl(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	sagas := NewStore(store, WithClock(fixedClock))
+	if _, err := sagas.Create(ctx, sampleCreateRequest()); err != nil {
+		t.Fatalf("create saga: %v", err)
+	}
+	waiting := &fakeStep{
+		kind:   "check.preflight",
+		status: steps.StatusWaiting,
+		providerOps: []schema.ProviderOperationRef{{
+			Provider: "fake",
+			Kind:     "package-step",
+			ID:       "op_waiting",
+		}},
+	}
+	executor := &Executor{
+		Store: sagas,
+		Steps: map[string]steps.Step{
+			"check.preflight": waiting,
+		},
+		Owner:   "waiting-executor",
+		Sleep:   noSleep,
+		EventID: sequenceIDs().next,
+	}
+	result, err := executor.Execute(ctx, "saga_01JABC")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if result.Status != schema.SagaRunning || len(result.WaitingSteps) != 1 || result.WaitingSteps[0] != "preflight" {
+		t.Fatalf("result = %+v", result)
+	}
+	control, err := sagas.GetControl(ctx, "saga_01JABC")
+	if err != nil {
+		t.Fatalf("get control: %v", err)
+	}
+	if len(control.Control.StepResults) != 1 || len(control.Control.StepResults[0].ProviderOperations) != 1 {
+		t.Fatalf("waiting provider operations not stored in control: %+v", control.Control.StepResults)
+	}
+	if control.Control.StepResults[0].ProviderOperations[0].ID != "op_waiting" {
+		t.Fatalf("provider ops = %+v", control.Control.StepResults[0].ProviderOperations)
+	}
+}
+
 func TestSagaLeaseRejectsStaleExecutor(t *testing.T) {
 	ctx := context.Background()
 	store := memory.New()
@@ -194,10 +238,12 @@ func TestSagaLeaseRejectsStaleExecutor(t *testing.T) {
 }
 
 type fakeStep struct {
-	kind       string
-	runCalls   int
-	failRuns   int
-	compensate func(steps.StepRequest, schema.StepResult)
+	kind        string
+	runCalls    int
+	failRuns    int
+	status      steps.Status
+	providerOps []schema.ProviderOperationRef
+	compensate  func(steps.StepRequest, schema.StepResult)
 }
 
 func (s *fakeStep) Kind() string { return s.kind }
@@ -213,7 +259,11 @@ func (s *fakeStep) Run(ctx context.Context, req steps.StepRequest) (*steps.StepR
 	if s.runCalls <= s.failRuns {
 		return nil, errors.New("planned failure")
 	}
-	return &steps.StepResult{Status: steps.StatusSucceeded, Result: json.RawMessage(`{"ok":true}`)}, nil
+	status := s.status
+	if status == "" {
+		status = steps.StatusSucceeded
+	}
+	return &steps.StepResult{Status: status, Result: json.RawMessage(`{"ok":true}`), ProviderOperations: append([]schema.ProviderOperationRef(nil), s.providerOps...)}, nil
 }
 
 func (s *fakeStep) Resume(ctx context.Context, req steps.StepRequest) (*steps.StepResult, error) {

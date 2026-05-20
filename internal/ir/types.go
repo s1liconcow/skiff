@@ -6,10 +6,12 @@ import "encoding/json"
 const SchemaVersion = "skiff.ir/v1alpha1"
 
 type Graph struct {
-	SchemaVersion string    `json:"schema_version"`
-	Service       string    `json:"service"`
-	Env           string    `json:"env"`
-	Resources     Resources `json:"resources"`
+	SchemaVersion     string              `json:"schema_version"`
+	Service           string              `json:"service"`
+	Env               string              `json:"env"`
+	PackageLockDigest string              `json:"package_lock_digest,omitempty"`
+	Packages          []PackageProvenance `json:"packages,omitempty"`
+	Resources         Resources           `json:"resources"`
 }
 
 type Resources struct {
@@ -36,10 +38,25 @@ type Resources struct {
 	StatefulRecipes     []StatefulRecipe     `json:"stateful_recipes,omitempty"`
 	SnapshotPolicies    []SnapshotPolicy     `json:"snapshot_policies,omitempty"`
 	UpdatePolicies      []UpdatePolicy       `json:"update_policies,omitempty"`
+	PackageOperations   []PackageOperation   `json:"package_operations,omitempty"`
 }
 
 type SourceRef struct {
-	Path string `json:"path"`
+	Path           string `json:"path,omitempty"`
+	Package        string `json:"package,omitempty"`
+	Version        string `json:"version,omitempty"`
+	Digest         string `json:"digest,omitempty"`
+	ManifestDigest string `json:"manifest_digest,omitempty"`
+	LockfileDigest string `json:"lockfile_digest,omitempty"`
+}
+
+type PackageProvenance struct {
+	Name           string `json:"name,omitempty"`
+	Ref            string `json:"ref,omitempty"`
+	Version        string `json:"version,omitempty"`
+	Digest         string `json:"digest,omitempty"`
+	ManifestDigest string `json:"manifest_digest,omitempty"`
+	LockfileDigest string `json:"lockfile_digest,omitempty"`
 }
 
 type ResourceMeta struct {
@@ -291,6 +308,15 @@ type SnapshotPolicy struct {
 type UpdatePolicy struct {
 	Meta     ResourceMeta `json:"meta"`
 	Strategy string       `json:"strategy"`
+}
+
+type PackageOperation struct {
+	Meta              ResourceMeta      `json:"meta"`
+	Dependency        string            `json:"dependency"`
+	Package           PackageProvenance `json:"package"`
+	OperationProfiles []string          `json:"operation_profiles,omitempty"`
+	PackageSteps      []string          `json:"package_steps,omitempty"`
+	Config            json.RawMessage   `json:"config,omitempty"`
 }
 
 type Artifact struct {

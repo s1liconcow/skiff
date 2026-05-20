@@ -226,19 +226,20 @@ type ActiveOperation struct {
 }
 
 type OperationIntent struct {
-	SchemaVersion string          `json:"schema_version"`
-	OperationID   string          `json:"operation_id"`
-	Service       string          `json:"service"`
-	Env           string          `json:"env"`
-	Kind          string          `json:"kind"`
-	Target        Target          `json:"target"`
-	Actor         Actor           `json:"actor"`
-	TraceID       string          `json:"trace_id"`
-	Risk          Risk            `json:"risk"`
-	Reversibility Reversibility   `json:"reversibility"`
-	Summary       string          `json:"summary"`
-	CreatedAt     string          `json:"created_at"`
-	Params        json.RawMessage `json:"params,omitempty"`
+	SchemaVersion     string          `json:"schema_version"`
+	OperationID       string          `json:"operation_id"`
+	Service           string          `json:"service"`
+	Env               string          `json:"env"`
+	Kind              string          `json:"kind"`
+	Target            Target          `json:"target"`
+	Actor             Actor           `json:"actor"`
+	TraceID           string          `json:"trace_id"`
+	Risk              Risk            `json:"risk"`
+	Reversibility     Reversibility   `json:"reversibility"`
+	PackageLockDigest string          `json:"package_lock_digest,omitempty"`
+	Summary           string          `json:"summary"`
+	CreatedAt         string          `json:"created_at"`
+	Params            json.RawMessage `json:"params,omitempty"`
 }
 
 type OperationControl struct {
@@ -255,13 +256,14 @@ type OperationControl struct {
 }
 
 type StepResultRef struct {
-	StepID      string          `json:"step_id"`
-	Kind        string          `json:"kind"`
-	Status      string          `json:"status"`
-	Result      json.RawMessage `json:"result,omitempty"`
-	ResultRef   string          `json:"result_ref,omitempty"`
-	Failure     *StepFailure    `json:"failure,omitempty"`
-	CompletedAt string          `json:"completed_at,omitempty"`
+	StepID             string                 `json:"step_id"`
+	Kind               string                 `json:"kind"`
+	Status             string                 `json:"status"`
+	Result             json.RawMessage        `json:"result,omitempty"`
+	ResultRef          string                 `json:"result_ref,omitempty"`
+	Failure            *StepFailure           `json:"failure,omitempty"`
+	ProviderOperations []ProviderOperationRef `json:"provider_operations,omitempty"`
+	CompletedAt        string                 `json:"completed_at,omitempty"`
 }
 
 type StepResult struct {
@@ -286,6 +288,15 @@ type StepFailure struct {
 	RetryAfter string `json:"retry_after,omitempty"`
 }
 
+type PackageProvenance struct {
+	Name           string `json:"name,omitempty"`
+	Ref            string `json:"ref,omitempty"`
+	Version        string `json:"version,omitempty"`
+	Digest         string `json:"digest,omitempty"`
+	ManifestDigest string `json:"manifest_digest,omitempty"`
+	LockfileDigest string `json:"lockfile_digest,omitempty"`
+}
+
 type ArtifactRef struct {
 	Type   string `json:"type"`
 	URI    string `json:"uri"`
@@ -308,6 +319,7 @@ type ReleaseManifest struct {
 	Artifact              ArtifactRef `json:"artifact"`
 	RuntimeManifestKey    string      `json:"runtime_manifest_key"`
 	RuntimeManifestDigest string      `json:"runtime_manifest_digest,omitempty"`
+	PackageLockDigest     string      `json:"package_lock_digest,omitempty"`
 	MinRunnerVersion      string      `json:"min_runner_version,omitempty"`
 	Digest                string      `json:"digest,omitempty"`
 	CreatedAt             string      `json:"created_at"`
@@ -362,15 +374,16 @@ type EvidenceRef struct {
 }
 
 type RuntimeManifest struct {
-	SchemaVersion string            `json:"schema_version"`
-	Service       string            `json:"service"`
-	Env           string            `json:"env"`
-	ReleaseID     string            `json:"release_id"`
-	Command       []string          `json:"command,omitempty"`
-	EnvVars       map[string]string `json:"env_vars,omitempty"`
-	HealthCheck   *HealthCheck      `json:"health_check,omitempty"`
-	Metrics       *MetricsConfig    `json:"metrics,omitempty"`
-	CreatedAt     string            `json:"created_at"`
+	SchemaVersion     string            `json:"schema_version"`
+	Service           string            `json:"service"`
+	Env               string            `json:"env"`
+	ReleaseID         string            `json:"release_id"`
+	PackageLockDigest string            `json:"package_lock_digest,omitempty"`
+	Command           []string          `json:"command,omitempty"`
+	EnvVars           map[string]string `json:"env_vars,omitempty"`
+	HealthCheck       *HealthCheck      `json:"health_check,omitempty"`
+	Metrics           *MetricsConfig    `json:"metrics,omitempty"`
+	CreatedAt         string            `json:"created_at"`
 }
 
 type MetricsConfig struct {
@@ -389,25 +402,28 @@ type HealthCheck struct {
 }
 
 type SagaIntent struct {
-	SchemaVersion string          `json:"schema_version"`
-	SagaID        string          `json:"saga_id"`
-	Kind          string          `json:"kind"`
-	Target        Target          `json:"target"`
-	Actor         Actor           `json:"actor"`
-	TraceID       string          `json:"trace_id"`
-	Risk          Risk            `json:"risk"`
-	Reversibility Reversibility   `json:"reversibility"`
-	Summary       string          `json:"summary"`
-	CreatedAt     string          `json:"created_at"`
-	Params        json.RawMessage `json:"params,omitempty"`
+	SchemaVersion     string             `json:"schema_version"`
+	SagaID            string             `json:"saga_id"`
+	Kind              string             `json:"kind"`
+	Target            Target             `json:"target"`
+	Actor             Actor              `json:"actor"`
+	TraceID           string             `json:"trace_id"`
+	Risk              Risk               `json:"risk"`
+	Reversibility     Reversibility      `json:"reversibility"`
+	PackageLockDigest string             `json:"package_lock_digest,omitempty"`
+	Summary           string             `json:"summary"`
+	CreatedAt         string             `json:"created_at"`
+	Params            json.RawMessage    `json:"params,omitempty"`
+	Package           *PackageProvenance `json:"package,omitempty"`
 }
 
 type SagaGraph struct {
-	SchemaVersion string     `json:"schema_version"`
-	SagaID        string     `json:"saga_id"`
-	Nodes         []SagaNode `json:"nodes"`
-	Edges         []SagaEdge `json:"edges,omitempty"`
-	CreatedAt     string     `json:"created_at"`
+	SchemaVersion string             `json:"schema_version"`
+	SagaID        string             `json:"saga_id"`
+	Nodes         []SagaNode         `json:"nodes"`
+	Edges         []SagaEdge         `json:"edges,omitempty"`
+	CreatedAt     string             `json:"created_at"`
+	Package       *PackageProvenance `json:"package,omitempty"`
 }
 
 type SagaNode struct {

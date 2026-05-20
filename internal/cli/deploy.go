@@ -57,6 +57,7 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 	canaryMetric := fs.String("canary-metric", "", "metric gate name for canary stages")
 	canaryComparator := fs.String("canary-comparator", "<=", "metric gate comparator for canary stages")
 	canaryThreshold := fs.Float64("canary-threshold", 0, "metric gate threshold for canary stages")
+	packageFlags := addPackageCompileFlags(fs)
 
 	flagArgs, positionals, err := splitDeployArgs(args)
 	if err != nil {
@@ -90,7 +91,15 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 	if err != nil {
 		return writeSpecError(binary, "SPEC_DECODE_FAILED", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 	}
-	graph, err := compiler.Compile(nilContext(), *doc, compiler.Options{})
+	compileOpts, err := compilerOptionsForDocument(*doc, packageFlags, true)
+	if err != nil {
+		var validation spec.ValidationError
+		if errors.As(err, &validation) {
+			return writeSpecError(binary, "SPEC_INVALID", *flags.format, *flags.traceID, errors.New("spec validation failed"), validation.Diagnostics, stdout, stderr)
+		}
+		return writeSpecError(binary, "SPEC_COMPILE_FAILED", *flags.format, *flags.traceID, err, nil, stdout, stderr)
+	}
+	graph, err := compiler.Compile(nilContext(), *doc, compileOpts)
 	if err != nil {
 		var validation spec.ValidationError
 		if errors.As(err, &validation) {
@@ -161,14 +170,15 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 			return writeSpecError(binary, "DEPLOY_INVALID", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 		}
 		req := templates.CanaryRequest{
-			OperationID:  *operationID,
-			Service:      graph.Service,
-			Env:          graph.Env,
-			ReleaseID:    firstNonEmptyString(*releaseID, "rel_"+events.NewID(time.Now().UTC(), *flags.traceID+graph.Service+"canary")),
-			Stages:       stages,
-			BakeDuration: *canaryBake,
-			Actor:        schema.Actor{ID: "skiff-cli", Type: "user"},
-			TraceID:      *flags.traceID,
+			OperationID:       *operationID,
+			Service:           graph.Service,
+			Env:               graph.Env,
+			ReleaseID:         firstNonEmptyString(*releaseID, "rel_"+events.NewID(time.Now().UTC(), *flags.traceID+graph.Service+"canary")),
+			Stages:            stages,
+			BakeDuration:      *canaryBake,
+			Actor:             schema.Actor{ID: "skiff-cli", Type: "user"},
+			TraceID:           *flags.traceID,
+			PackageLockDigest: graph.PackageLockDigest,
 		}
 		if *canaryMetric != "" {
 			req.MetricGates = []templates.MetricGate{{Metric: *canaryMetric, Comparator: *canaryComparator, Threshold: *canaryThreshold}}
@@ -298,12 +308,14 @@ func splitDeployArgs(args []string) ([]string, []string, error) {
 		"canary-metric":                        true,
 		"canary-stages":                        true,
 		"canary-threshold":                     true,
+		"cache":                                true,
 		"config":                               true,
 		"context":                              true,
 		"env":                                  true,
 		"file":                                 true,
 		"format":                               true,
 		"key-id":                               true,
+		"lockfile":                             true,
 		"mode":                                 true,
 		"operation-id":                         true,
 		"provider":                             true,

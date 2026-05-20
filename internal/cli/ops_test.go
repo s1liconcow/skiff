@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -132,6 +135,217 @@ func TestOpsResumeJSONContinuesRollout(t *testing.T) {
 	}
 }
 
+func TestOpsInspectAPIModeUsesSkiffd(t *testing.T) {
+	clearSkiffEnv(t)
+	restoreTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/ops/inspect" {
+			t.Fatalf("unexpected API request %s %s", r.Method, r.URL.Path)
+		}
+		if r.URL.Query().Get("service") != "payments-api" || r.URL.Query().Get("operation") != "op_api" {
+			t.Fatalf("unexpected API query: %s", r.URL.RawQuery)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"operation_id":"op_api","service":"payments-api","status":"running","trace_id":"tr_ops_api_inspect","control":{"schema_version":"skiff.state/v1","operation_id":"op_api","service":"payments-api","status":"running"}}}`)),
+			Request:    r,
+		}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = restoreTransport })
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"ops", "inspect", "op_api",
+		"--service", "payments-api",
+		"--api",
+		"--api-url", "http://skiffd.test",
+		"--format", "json",
+		"--trace-id", "tr_ops_api_inspect",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var out opsInspectOutput
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, stdout.String())
+	}
+	if !out.OK || out.Result.OperationID != "op_api" || out.Result.Service != "payments-api" {
+		t.Fatalf("unexpected API inspect output: %+v", out)
+	}
+}
+
+func TestOpsCatalogPlanAndRunPackageProfileJSON(t *testing.T) {
+	clearSkiffEnv(t)
+	dir := writePkgCLIFixture(t, "postgres-ha")
+	root := t.TempDir()
+	lockfile := root + "/skiff.lock.json"
+	cache := root + "/cache"
+	_ = runPkgJSON(t, []string{"pkg", "add", "file://" + dir, "--lockfile", lockfile, "--cache", cache, "--format", "json"})
+
+	list := runOpsJSON(t, []string{"ops", "list", "postgres-ha", "--lockfile", lockfile, "--cache", cache, "--format", "json", "--trace-id", "tr_ops_list"})
+	var catalog opsCatalogOutput
+	if err := json.Unmarshal(list, &catalog); err != nil {
+		t.Fatalf("decode catalog: %v\n%s", err, string(list))
+	}
+	if !catalog.OK || catalog.TraceID != "tr_ops_list" || catalog.Target != "postgres-ha" {
+		t.Fatalf("unexpected catalog output: %+v", catalog)
+	}
+	foundPackageOperation := false
+	for _, operation := range catalog.Operations {
+		if operation.Name == "primary-switchover-update" && operation.Package != nil && operation.Package.Digest != "" {
+			foundPackageOperation = true
+		}
+	}
+	if !foundPackageOperation {
+		t.Fatalf("catalog did not include package-provided primary switchover: %+v", catalog.Operations)
+	}
+
+	plan := runOpsJSON(t, []string{
+		"ops", "plan", "postgres-ha", "primary-switchover-update",
+		"--lockfile", lockfile,
+		"--cache", cache,
+		"--operation-id", "op_pkg_plan",
+		"--saga-id", "saga_pkg_plan",
+		"--param", "release_id=rel_1",
+		"--param", "candidate=postgres-ha-1",
+		"--format", "json",
+		"--trace-id", "tr_ops_plan",
+	})
+	var planned opsPlanOutput
+	if err := json.Unmarshal(plan, &planned); err != nil {
+		t.Fatalf("decode plan: %v\n%s", err, string(plan))
+	}
+	if !planned.OK || planned.WouldWrite || planned.OperationID != "op_pkg_plan" || planned.SagaID != "saga_pkg_plan" || planned.Package == nil {
+		t.Fatalf("unexpected plan output: %+v", planned)
+	}
+	if planned.Profile.Risk != "high" || len(planned.Profile.Params) == 0 {
+		t.Fatalf("unexpected profile explanation: %+v", planned.Profile)
+	}
+	apiPlan := runOpsJSON(t, []string{
+		"ops", "plan", "postgres-ha", "primary-switchover-update",
+		"--api",
+		"--api-url", "http://127.0.0.1:65535",
+		"--lockfile", lockfile,
+		"--cache", cache,
+		"--operation-id", "op_pkg_plan_api",
+		"--saga-id", "saga_pkg_plan_api",
+		"--param", "release_id=rel_1",
+		"--param", "candidate=postgres-ha-1",
+		"--format", "json",
+		"--trace-id", "tr_ops_plan_api",
+	})
+	var apiPlanned opsPlanOutput
+	if err := json.Unmarshal(apiPlan, &apiPlanned); err != nil {
+		t.Fatalf("decode api plan: %v\n%s", err, string(apiPlan))
+	}
+	if !apiPlanned.OK || apiPlanned.WouldWrite || apiPlanned.Profile.Name != planned.Profile.Name {
+		t.Fatalf("unexpected api plan output: %+v", apiPlanned)
+	}
+
+	planOnly := runOpsJSON(t, []string{
+		"ops", "run", "postgres-ha", "primary-switchover-update",
+		"--plan-only",
+		"--lockfile", lockfile,
+		"--cache", cache,
+		"--operation-id", "op_pkg_plan_only",
+		"--saga-id", "saga_pkg_plan_only",
+		"--param", "release_id=rel_1",
+		"--param", "candidate=postgres-ha-1",
+		"--format", "json",
+		"--trace-id", "tr_ops_plan_only",
+	})
+	var planOnlyOut opsPlanOutput
+	if err := json.Unmarshal(planOnly, &planOnlyOut); err != nil {
+		t.Fatalf("decode plan-only: %v\n%s", err, string(planOnly))
+	}
+	if !planOnlyOut.OK || !planOnlyOut.PlanOnly || planOnlyOut.WouldWrite {
+		t.Fatalf("unexpected plan-only output: %+v", planOnlyOut)
+	}
+
+	store := memory.New()
+	restoreStore := openOpsObjectStore
+	openOpsObjectStore = func(cfg config.Config) (objstore.ObjectStore, error) { return store, nil }
+	t.Cleanup(func() { openOpsObjectStore = restoreStore })
+	run := runOpsJSON(t, []string{
+		"ops", "run", "postgres-ha", "primary-switchover-update",
+		"--direct",
+		"--env", "prod",
+		"--provider", "aws",
+		"--region", "us-west-2",
+		"--state", "memory://ops",
+		"--lockfile", lockfile,
+		"--cache", cache,
+		"--operation-id", "op_pkg_run",
+		"--saga-id", "saga_pkg_run",
+		"--param", "release_id=rel_1",
+		"--param", "candidate=postgres-ha-1",
+		"--format", "json",
+		"--trace-id", "tr_ops_run",
+		"--yes",
+	})
+	var runOut opsPlanOutput
+	if err := json.Unmarshal(run, &runOut); err != nil {
+		t.Fatalf("decode run: %v\n%s", err, string(run))
+	}
+	if !runOut.OK || !runOut.WouldWrite || runOut.OperationID != "op_pkg_run" || runOut.SagaID != "saga_pkg_run" {
+		t.Fatalf("unexpected run output: %+v", runOut)
+	}
+	inspect, err := opsstate.NewStore(store).Inspect(context.Background(), "postgres-ha", "op_pkg_run")
+	if err != nil {
+		t.Fatalf("inspect created operation: %v", err)
+	}
+	if inspect.Status != schema.OperationPending || inspect.Kind != "primary-switchover-update" || inspect.Risk != schema.RiskHigh {
+		t.Fatalf("unexpected created operation: %+v", inspect)
+	}
+	if _, err := store.Get(context.Background(), "sagas/saga_pkg_run/intent.json"); err != nil {
+		t.Fatalf("saga intent not written: %v", err)
+	}
+
+	restoreTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/ops/profile-run" {
+			t.Fatalf("unexpected API request %s %s", r.Method, r.URL.Path)
+		}
+		var req opsstate.ProfileOperationRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode API request: %v", err)
+		}
+		if req.OperationID != "op_pkg_api" || req.Render.SagaID != "saga_pkg_api" || req.Render.Package.Digest == "" {
+			t.Fatalf("unexpected API request body: %+v", req)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"operation_id":"op_pkg_api","saga_id":"saga_pkg_api","trace_id":"tr_ops_api","paths":{"operation_intent":"services/postgres-ha/operations/op_pkg_api/intent.json"}}}`)),
+			Request:    r,
+		}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = restoreTransport })
+	apiRun := runOpsJSON(t, []string{
+		"ops", "run", "postgres-ha", "primary-switchover-update",
+		"--api",
+		"--api-url", "http://skiffd.test",
+		"--env", "prod",
+		"--lockfile", lockfile,
+		"--cache", cache,
+		"--operation-id", "op_pkg_api",
+		"--saga-id", "saga_pkg_api",
+		"--param", "release_id=rel_1",
+		"--param", "candidate=postgres-ha-1",
+		"--format", "json",
+		"--trace-id", "tr_ops_api",
+		"--yes",
+	})
+	var apiRunOut opsPlanOutput
+	if err := json.Unmarshal(apiRun, &apiRunOut); err != nil {
+		t.Fatalf("decode api run: %v\n%s", err, string(apiRun))
+	}
+	if !apiRunOut.OK || !apiRunOut.WouldWrite || apiRunOut.Paths["operation_intent"] == "" {
+		t.Fatalf("unexpected api run output: %+v", apiRunOut)
+	}
+}
+
 func createCLIOperation(t *testing.T, store objstore.ObjectStore, service, operationID string, status schema.OperationStatus) {
 	t.Helper()
 	intent := schema.NewOperationIntent(operationID, service, "prod", "rollback", schema.Target{Kind: "service", Name: service}, schema.Actor{ID: "agent-one", Type: "agent"}, "tr_ops", canonical.Time(cliOpsNow()))
@@ -151,6 +365,19 @@ func createCLIOperation(t *testing.T, store objstore.ObjectStore, service, opera
 		TraceID:   "tr_ops",
 	}
 	createCLIJSON(t, store, mustCLIOperationControlKey(t, service, operationID), control)
+}
+
+func runOpsJSON(t *testing.T, args []string) []byte {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", args, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("%v exit=%d stderr=%s stdout=%s", args, code, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("%v stderr=%q, want empty", args, stderr.String())
+	}
+	return stdout.Bytes()
 }
 
 func createCLIJSON(t *testing.T, store objstore.ObjectStore, key string, value any) {
@@ -230,4 +457,10 @@ func (p *cliOpsProvider) Rollback(ctx context.Context, req provider.RollbackRequ
 
 func cliOpsNow() time.Time {
 	return time.Date(2026, 5, 17, 2, 15, 0, 0, time.UTC)
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

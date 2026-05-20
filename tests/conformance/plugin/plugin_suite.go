@@ -15,10 +15,11 @@ import (
 )
 
 type Suite struct {
-	Plugin       plugins.Plugin
-	Runner       plugins.Runner
-	ManifestPath string
-	SagaStepKind string
+	Plugin          plugins.Plugin
+	Runner          plugins.Runner
+	ManifestPath    string
+	SagaStepKind    string
+	PackageStepKind string
 }
 
 func Run(t *testing.T, suite Suite) {
@@ -31,6 +32,9 @@ func Run(t *testing.T, suite Suite) {
 	}
 	if suite.SagaStepKind == "" {
 		t.Fatal("saga step kind is required")
+	}
+	if suite.PackageStepKind == "" {
+		t.Fatal("package step kind is required")
 	}
 	ctx := context.Background()
 
@@ -170,6 +174,65 @@ func Run(t *testing.T, suite Suite) {
 		}
 		if len(findings) == 0 || findings[0].Code == "" {
 			t.Fatalf("step doctor findings = %+v", findings)
+		}
+	})
+
+	t.Run("package step", func(t *testing.T) {
+		registered := plugins.PackageSteps(host)
+		step := registered[suite.PackageStepKind]
+		if step == nil {
+			t.Fatalf("registered package steps = %+v", registered)
+		}
+		req := steps.StepRequest{
+			SagaID:  "saga_package_conformance",
+			TraceID: "tr_plugin_conformance",
+			Intent: schema.SagaIntent{
+				SagaID: "saga_package_conformance",
+				Target: schema.Target{
+					Kind: "StatefulGroup",
+					Name: "payments-api",
+				},
+			},
+			Node: schema.SagaNode{
+				ID:     "package-fake",
+				Kind:   suite.PackageStepKind,
+				Params: json.RawMessage(`{"target":"fixture","token":"conformance-secret"}`),
+			},
+		}
+		plan, err := step.Plan(ctx, req)
+		if err != nil {
+			t.Fatalf("Package Plan: %v", err)
+		}
+		if plan.Summary == "" || plan.Risk == "" || plan.Reversibility == "" {
+			t.Fatalf("package step plan incomplete: %+v", plan)
+		}
+		result, err := step.Run(ctx, req)
+		if err != nil {
+			t.Fatalf("Package Run: %v", err)
+		}
+		if result.Status != steps.StatusSucceeded || result.Summary == "" || len(result.ProviderOperations) == 0 {
+			t.Fatalf("package step result incomplete: %+v", result)
+		}
+		resumed, err := step.Resume(ctx, req)
+		if err != nil {
+			t.Fatalf("Package Resume: %v", err)
+		}
+		if resumed.Status != steps.StatusSucceeded {
+			t.Fatalf("package resume result = %+v", resumed)
+		}
+		compensated, err := step.Compensate(ctx, req, schema.StepResult{StepID: "package-fake", Status: string(steps.StatusSucceeded)})
+		if err != nil {
+			t.Fatalf("Package Compensate: %v", err)
+		}
+		if compensated.Status != steps.StatusSucceeded {
+			t.Fatalf("package compensate result = %+v", compensated)
+		}
+		findings, err := step.Doctor(ctx, req)
+		if err != nil {
+			t.Fatalf("Package Doctor: %v", err)
+		}
+		if len(findings) == 0 || findings[0].Code == "" {
+			t.Fatalf("package step doctor findings = %+v", findings)
 		}
 	})
 }

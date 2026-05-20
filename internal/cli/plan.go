@@ -36,6 +36,7 @@ func runPlan(binary string, args []string, root rootOptions, stdout, stderr io.W
 	providerName := fs.String("provider", root.Provider, "provider to plan")
 	region := fs.String("region", root.Region, "cloud provider region")
 	stateBucket := fs.String("state", root.State, "object-state bucket URI")
+	packageFlags := addPackageCompileFlags(fs)
 
 	flagArgs, positionals, err := splitPlanArgs(args)
 	if err != nil {
@@ -86,7 +87,15 @@ func runPlan(binary string, args []string, root rootOptions, stdout, stderr io.W
 	if err != nil {
 		return writeSpecError(binary, "SPEC_DECODE_FAILED", *format, *traceID, err, nil, stdout, stderr)
 	}
-	graph, err := compiler.Compile(nilContext(), *doc, compiler.Options{})
+	compileOpts, err := compilerOptionsForDocument(*doc, packageFlags, true)
+	if err != nil {
+		var validation spec.ValidationError
+		if errors.As(err, &validation) {
+			return writeSpecError(binary, "SPEC_INVALID", *format, *traceID, errors.New("spec validation failed"), validation.Diagnostics, stdout, stderr)
+		}
+		return writeSpecError(binary, "SPEC_COMPILE_FAILED", *format, *traceID, err, nil, stdout, stderr)
+	}
+	graph, err := compiler.Compile(nilContext(), *doc, compileOpts)
 	if err != nil {
 		var validation spec.ValidationError
 		if errors.As(err, &validation) {
@@ -98,7 +107,7 @@ func runPlan(binary string, args []string, root rootOptions, stdout, stderr io.W
 		return writeSpecError(binary, "PLAN_INVALID", *format, *traceID, fmt.Errorf("unsupported provider %q; expected aws", *providerName), nil, stdout, stderr)
 	}
 	var plan *provider.Plan
-	if doc.Kind == spec.KindStatefulGroup && *region == "" {
+	if (doc.Kind == spec.KindStatefulGroup || len(graph.Resources.StatefulGroups) > 0) && *region == "" {
 		plan = statefulReadOnlyPlan(*providerName, graph)
 	} else {
 		awsProvider, err := aws.NewFromConfig(config.Config{Region: *region, StateBucket: *stateBucket})
@@ -109,6 +118,7 @@ func runPlan(binary string, args []string, root rootOptions, stdout, stderr io.W
 		if err != nil {
 			return writeSpecError(binary, "PLAN_FAILED", *format, *traceID, err, nil, stdout, stderr)
 		}
+		plan.Resources = append(plan.Resources, statefulReadOnlyChanges(graph)...)
 	}
 	advisorWarnings := skiffcost.PlanWarnings(skiffcost.InputFromGraph(graph))
 
@@ -138,10 +148,12 @@ func runPlan(binary string, args []string, root rootOptions, stdout, stderr io.W
 
 func splitPlanArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
+		"cache":    true,
 		"file":     true,
 		"format":   true,
 		"config":   true,
 		"context":  true,
+		"lockfile": true,
 		"provider": true,
 		"region":   true,
 		"state":    true,

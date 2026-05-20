@@ -16,23 +16,27 @@ func TestDeploymentCanaryTemplateRegistersStagedGraph(t *testing.T) {
 		t.Fatalf("canary template command was not registered")
 	}
 	req, err := factory(templates.CanaryRequest{
-		SagaID:       "saga_01JCANARY",
-		OperationID:  "op_01JCANARY",
-		Service:      "payments-api",
-		Env:          "prod",
-		ReleaseID:    "rel_canary",
-		Stages:       []templates.CanaryStage{{Percent: 10}, {Percent: 50}, {Percent: 100}},
-		BakeDuration: "30s",
-		MetricGates:  []templates.MetricGate{{Metric: "aws.elb.http_5xx_count", Comparator: "<=", Threshold: 0, Window: "5m"}},
-		TraceID:      "tr_canary",
-		Actor:        schema.Actor{ID: "agent-one", Type: "agent"},
-		CreatedAt:    time.Date(2026, 5, 17, 2, 0, 0, 0, time.UTC),
+		SagaID:            "saga_01JCANARY",
+		OperationID:       "op_01JCANARY",
+		Service:           "payments-api",
+		Env:               "prod",
+		ReleaseID:         "rel_canary",
+		Stages:            []templates.CanaryStage{{Percent: 10}, {Percent: 50}, {Percent: 100}},
+		BakeDuration:      "30s",
+		MetricGates:       []templates.MetricGate{{Metric: "aws.elb.http_5xx_count", Comparator: "<=", Threshold: 0, Window: "5m"}},
+		PackageLockDigest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		TraceID:           "tr_canary",
+		Actor:             schema.Actor{ID: "agent-one", Type: "agent"},
+		CreatedAt:         time.Date(2026, 5, 17, 2, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
 		t.Fatalf("template: %v", err)
 	}
 	if req.Intent.Kind != templates.DeploymentCanaryKind || req.Intent.Risk != schema.RiskMedium || req.Intent.Reversibility != schema.Compensatable {
 		t.Fatalf("unexpected intent: %+v", req.Intent)
+	}
+	if req.Intent.PackageLockDigest != "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" {
+		t.Fatalf("package lock digest missing from canary saga intent: %+v", req.Intent)
 	}
 	if req.Control.Status != schema.SagaPending || req.Control.TraceID != "tr_canary" {
 		t.Fatalf("unexpected control: %+v", req.Control)

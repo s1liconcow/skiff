@@ -17,6 +17,9 @@ Run optional modes:
 
 ```bash
 make e2e-apple-container
+make e2e-apple-stateful
+SKIFF_OPSEM_E2E=1 SKIFF_E2E_OPSEM_IMAGE=registry.example/skiff-opsem@sha256:... make e2e-apple-stateful
+SKIFF_OPSEM_PROFILES_E2E=1 SKIFF_E2E_OPSEM_IMAGE=registry.example/skiff-opsem@sha256:... make e2e-apple-opsem-profiles
 SKIFF_AWS_E2E=1 SKIFF_AWS_E2E_STATE=s3://skiff-e2e-state SKIFF_AWS_E2E_REGION=us-west-2 SKIFF_AWS_E2E_PREFIX=skiff-e2e-$(date +%s) make e2e-aws
 SKIFF_AWS_E2E=1 SKIFF_AWS_E2E_LIVE_APPLY=1 SKIFF_AWS_E2E_STATE=s3://skiff-e2e-state SKIFF_AWS_E2E_REGION=us-west-2 SKIFF_AWS_E2E_PREFIX=skiff-e2e-$(date +%s) SKIFF_AWS_VPC_ID=vpc-... SKIFF_AWS_SUBNET_IDS=subnet-a,subnet-b SKIFF_AWS_AMI_ID=ami-... make e2e-aws
 ```
@@ -43,6 +46,9 @@ turn the AWS smoke gate into a live primitive deployment.
 | canary | covered | optional | gated | Local runs a one-stage canary saga; Apple starts a three-stage rolling canary in direct mode and monitors it through local `skiffd`. |
 | rollback | covered | not_applicable | gated | Local rolls back to the previous stable release and verifies service control. |
 | direct mode | covered | covered | gated | Local uses `--direct`; Apple uses direct mode against RustFS for runner recovery checks and to start the canary saga. |
+| StatefulGroup live apply | covered | gated | gated | Apple StatefulGroup e2e deploys three local member containers, one persistent Apple volume per member, ordered in-place update, replace-member with volume movement, direct inspect, and local `skiffd` API status. |
+| Operation semantic fixtures | covered | gated | not_applicable | `tests/fixtures/opsem` models primary/replica, raft, ISR, slot, and shard semantics with deterministic failure injection; the gated opsem Apple harness validates live member state and volume movement with the supplied opsem image. |
+| Operation profile DSL semantic e2e | covered | gated | not_applicable | `TestOpsemAppleOperationProfilesE2E` locks opsem package fixtures, runs `skiff ops run`, executes rendered package-step saga graphs against live Apple StatefulGroups, verifies durable operation/saga/audit objects, direct resume, unsafe-state blocking, and local `skiffd` inspect. |
 | drift | covered | not_applicable | gated | Local runs drift against persisted fake-provider resource records. |
 | debug collect | covered | not_implemented | gated | Local direct mode collects a redacted bundle through the fake provider and writes durable audit/event records. AWS remains gated behind a live SSM client adapter. |
 | cost advisor | covered | fixture | gated | Local runs `skiff cost explain` with supplied metrics and AWS EC2/RDS price-list fixtures. Live AWS pricing fetches remain gated by explicit `--aws-pricing`. |
@@ -57,11 +63,20 @@ Set `SKIFF_E2E_REPORT_DIR` to collect JSON reports. Reports include trace ID, op
 ## Apple Silicon Environment
 
 - `SKIFF_APPLE_CONTAINER_E2E=1` or `SKIFF_CONTAINER_E2E=1` enables the Apple test.
+- `SKIFF_APPLE_STATEFUL_E2E=1` enables the Apple StatefulGroup test.
+- `SKIFF_OPSEM_E2E=1` enables the live `skiff-opsem` Apple harness.
+- `SKIFF_OPSEM_PROFILES_E2E=1` enables the live operation-profile DSL semantic harness.
 - `SKIFF_E2E_CADDY_IMAGE` defaults to `docker.io/library/caddy:2-alpine` and is resolved to a digest before release publication.
 - `SKIFF_E2E_CADDY_NEXT_IMAGE` optionally rolls the second release to a different digest-pinned Caddy image.
+- `SKIFF_E2E_STATEFUL_IMAGE` defaults to `docker.io/library/busybox:1.36` and is resolved to a digest before StatefulGroup deployment.
+- `SKIFF_E2E_OPSEM_IMAGE` points to an OCI image built from `tests/fixtures/opsem/Dockerfile`; it must be digest-pinned or registry-resolvable.
 - `SKIFF_E2E_RUSTFS_IMAGE` defaults to `docker.io/rustfs/rustfs:latest`.
 
 The test creates unique Apple container names and RustFS buckets and registers cleanup handlers for containers and volumes. It also writes operation, resource, event, saga, and audit objects into RustFS so direct-mode status, events, doctor, ops inspection, release verification, local `skiffd` API reads, and canary event-stream replay run against S3-compatible object state.
+
+The Apple StatefulGroup test creates a RustFS-backed object-state bucket plus three Apple member containers and three persistent Apple volumes. It records provider IDs and cleanup commands in the JSON report, then runs ordered in-place update and replace-member/move-volume sagas against the live member processes.
+
+The operation-profile semantic harness creates one opsem StatefulGroup per semantic mode, resolves the matching package fixture from `tests/fixtures/packages/opsem-*`, renders and writes package-backed operation/saga documents through `skiff ops run`, and executes the rendered package-step graph against the live member admin APIs. It intentionally interrupts the RAFT scenario once to prove direct resume and injects an ISR failure to prove unsafe plans stop before live member mutation.
 
 ## AWS Environment
 

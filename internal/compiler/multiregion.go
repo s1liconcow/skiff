@@ -174,6 +174,12 @@ func forEachMeta(resources *ir.Resources, fn func(*ir.ResourceMeta)) {
 	for i := range resources.DatabaseBindings {
 		fn(&resources.DatabaseBindings[i].Meta)
 	}
+	for i := range resources.ObjectStores {
+		fn(&resources.ObjectStores[i].Meta)
+	}
+	for i := range resources.ObjectStoreBindings {
+		fn(&resources.ObjectStoreBindings[i].Meta)
+	}
 	for i := range resources.GlobalTraffic {
 		fn(&resources.GlobalTraffic[i].Meta)
 	}
@@ -185,5 +191,29 @@ func forEachMeta(resources *ir.Resources, fn func(*ir.ResourceMeta)) {
 	}
 	for i := range resources.RuntimeManifests {
 		fn(&resources.RuntimeManifests[i].Meta)
+	}
+	for i := range resources.StatefulGroups {
+		fn(&resources.StatefulGroups[i].Meta)
+	}
+	for i := range resources.StatefulMembers {
+		fn(&resources.StatefulMembers[i].Meta)
+	}
+	for i := range resources.StatefulVolumes {
+		fn(&resources.StatefulVolumes[i].Meta)
+	}
+	for i := range resources.StatefulDNS {
+		fn(&resources.StatefulDNS[i].Meta)
+	}
+	for i := range resources.StatefulRecipes {
+		fn(&resources.StatefulRecipes[i].Meta)
+	}
+	for i := range resources.SnapshotPolicies {
+		fn(&resources.SnapshotPolicies[i].Meta)
+	}
+	for i := range resources.UpdatePolicies {
+		fn(&resources.UpdatePolicies[i].Meta)
+	}
+	for i := range resources.PackageOperations {
+		fn(&resources.PackageOperations[i].Meta)
 	}
 }

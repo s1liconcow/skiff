@@ -23,7 +23,8 @@ Plugins start with a JSON manifest:
   "permissions": {
     "allowed_patch_kinds": ["SecurityGroupRule"],
     "doctor_checks": true,
-    "saga_step_kinds": ["mtls.issue-certificate"]
+    "saga_step_kinds": ["mtls.issue-certificate"],
+    "package_step_kinds": ["postgres.verify_replica_lag"]
   },
   "capabilities": [
     {
@@ -40,6 +41,25 @@ Plugins start with a JSON manifest:
       "kind": "saga_step",
       "name": "issue-certificate",
       "saga_step_kinds": ["mtls.issue-certificate"]
+    },
+    {
+      "kind": "package_step",
+      "name": "postgres-safety",
+      "package_steps": [
+        {
+          "kind": "postgres.verify_replica_lag",
+          "summary": "verify replica lag before switchover",
+          "params": {
+            "target": {"type": "string", "required": true},
+            "admin_token": {"type": "string", "secret": true}
+          },
+          "result": {
+            "admin_token": {"type": "string", "secret": true}
+          },
+          "risk": "low",
+          "reversibility": "reversible"
+        }
+      ]
     }
   ]
 }
@@ -79,6 +99,20 @@ Example `mutate_ir` response:
 The host rejects patch kinds that are not declared in
 `permissions.allowed_patch_kinds`. `skiff explain --plugin <path>` shows which
 plugin emitted each accepted patch before provider lowering.
+
+## Package Steps
+
+Package steps are typed saga steps exposed by a package plugin. They run through
+the `package_step` hook and receive only a JSON request with saga context,
+declared params, previous step results, and package provenance. They do not
+receive cloud SDK clients. Cloud mutations still go through Skiff provider
+steps.
+
+Package step responses can return `succeeded`, `failed`, `waiting`, or
+`running`, structured failures with `retriable`, and provider operation IDs that
+Skiff persists for resume. Mark secret params and result fields with
+`"secret": true`; the host redacts those fields from hook requests, persisted
+results, provider operation descriptions, and doctor finding summaries.
 
 ## CLI Workflow
 

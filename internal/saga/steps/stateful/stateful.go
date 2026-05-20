@@ -672,7 +672,10 @@ func (s OrderedMemberUpdate) runRecipeHooks(ctx context.Context, req steps.StepR
 		return nil, nil
 	}
 	if params.Recipe != "" && s.Recipe.Name() != "" && s.Recipe.Name() != params.Recipe {
-		return nil, fmt.Errorf("stateful recipe %q is configured but runner has recipe %q", params.Recipe, s.Recipe.Name())
+		matcher, ok := s.Recipe.(interface{ MatchesRecipe(string) bool })
+		if !ok || !matcher.MatchesRecipe(params.Recipe) {
+			return nil, fmt.Errorf("stateful recipe %q is configured but runner has recipe %q", params.Recipe, s.Recipe.Name())
+		}
 	}
 	recipeReq := stateruntime.RecipeRequest{
 		Group:       control.Group,

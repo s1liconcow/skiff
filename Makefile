@@ -11,7 +11,7 @@ PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 CORE_BINS := skiff skiffd skiff-runner skiff-worker
 
-.PHONY: build install test readiness e2e-local e2e-apple-container e2e-aws demo-local demo-test demo-apple-container demo-apple-context demo-apple-up demo-apple-down clean-apple-containers codex-apple-sandbox codex-apple-sandbox-playwright vet fmt lint generate smoke clean
+.PHONY: build install test readiness e2e-local e2e-apple-container e2e-apple-stateful e2e-apple-opsem-profiles e2e-aws demo-local demo-test demo-apple-container demo-apple-context demo-apple-up demo-apple-down clean-apple-containers codex-apple-sandbox codex-apple-sandbox-playwright vet fmt lint generate smoke clean
 
 build:
 	mkdir -p bin
@@ -38,6 +38,12 @@ e2e-local:
 
 e2e-apple-container:
 	SKIFF_APPLE_CONTAINER_E2E=1 $(GO_TEST_ENV) $(GO) test ./tests/e2e -run TestAppleContainerRustFSCaddyRollout -count=1 -v
+
+e2e-apple-stateful:
+	SKIFF_APPLE_STATEFUL_E2E=1 $(GO_TEST_ENV) $(GO) test ./tests/e2e -run 'TestAppleStatefulGroupRustFSE2E|TestOpsemAppleStatefulHarness' -count=1 -v
+
+e2e-apple-opsem-profiles:
+	SKIFF_OPSEM_PROFILES_E2E=1 $(GO_TEST_ENV) $(GO) test ./tests/e2e -run TestOpsemAppleOperationProfilesE2E -count=1 -v
 
 e2e-aws:
 	SKIFF_AWS_E2E=1 $(GO_TEST_ENV) $(GO) test ./tests/e2e -run TestAWSE2E -count=1 -v

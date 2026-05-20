@@ -21,18 +21,19 @@ const (
 )
 
 type CanaryRequest struct {
-	SagaID         string        `json:"saga_id,omitempty"`
-	OperationID    string        `json:"operation_id,omitempty"`
-	Service        string        `json:"service"`
-	Env            string        `json:"env"`
-	ReleaseID      string        `json:"release_id"`
-	Stages         []CanaryStage `json:"stages,omitempty"`
-	BakeDuration   string        `json:"bake_duration,omitempty"`
-	MetricGates    []MetricGate  `json:"metric_gates,omitempty"`
-	RollbackPolicy string        `json:"rollback_policy,omitempty"`
-	TraceID        string        `json:"trace_id,omitempty"`
-	Actor          schema.Actor  `json:"actor"`
-	CreatedAt      time.Time     `json:"created_at,omitempty"`
+	SagaID            string        `json:"saga_id,omitempty"`
+	OperationID       string        `json:"operation_id,omitempty"`
+	Service           string        `json:"service"`
+	Env               string        `json:"env"`
+	ReleaseID         string        `json:"release_id"`
+	Stages            []CanaryStage `json:"stages,omitempty"`
+	BakeDuration      string        `json:"bake_duration,omitempty"`
+	MetricGates       []MetricGate  `json:"metric_gates,omitempty"`
+	RollbackPolicy    string        `json:"rollback_policy,omitempty"`
+	PackageLockDigest string        `json:"package_lock_digest,omitempty"`
+	TraceID           string        `json:"trace_id,omitempty"`
+	Actor             schema.Actor  `json:"actor"`
+	CreatedAt         time.Time     `json:"created_at,omitempty"`
 }
 
 type CanaryStage struct {
@@ -89,17 +90,18 @@ func DeploymentCanary(req CanaryRequest) (saga.CreateRequest, error) {
 	nodes, edges := canaryGraph(req)
 	return saga.CreateRequest{
 		Intent: schema.SagaIntent{
-			SchemaVersion: schema.Version,
-			SagaID:        req.SagaID,
-			Kind:          DeploymentCanaryKind,
-			Target:        schema.Target{Kind: "service", Name: req.Service},
-			Actor:         req.Actor,
-			TraceID:       req.TraceID,
-			Risk:          schema.RiskMedium,
-			Reversibility: schema.Compensatable,
-			Summary:       fmt.Sprintf("canary deploy %s release %s", req.Service, req.ReleaseID),
-			CreatedAt:     now,
-			Params:        mustJSON(common),
+			SchemaVersion:     schema.Version,
+			SagaID:            req.SagaID,
+			Kind:              DeploymentCanaryKind,
+			Target:            schema.Target{Kind: "service", Name: req.Service},
+			Actor:             req.Actor,
+			TraceID:           req.TraceID,
+			Risk:              schema.RiskMedium,
+			Reversibility:     schema.Compensatable,
+			PackageLockDigest: req.PackageLockDigest,
+			Summary:           fmt.Sprintf("canary deploy %s release %s", req.Service, req.ReleaseID),
+			CreatedAt:         now,
+			Params:            mustJSON(common),
 		},
 		Graph: schema.SagaGraph{
 			SchemaVersion: schema.Version,
@@ -128,6 +130,7 @@ func NormalizeCanaryRequest(req CanaryRequest) CanaryRequest {
 	req.OperationID = strings.TrimSpace(req.OperationID)
 	req.SagaID = strings.TrimSpace(req.SagaID)
 	req.TraceID = strings.TrimSpace(req.TraceID)
+	req.PackageLockDigest = strings.TrimSpace(req.PackageLockDigest)
 	req.RollbackPolicy = strings.TrimSpace(req.RollbackPolicy)
 	req.BakeDuration = strings.TrimSpace(req.BakeDuration)
 	if req.BakeDuration == "" {

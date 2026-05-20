@@ -161,6 +161,16 @@ func StatefulMembersPrefix(group string) (string, error) {
 	return "stateful/" + group + "/members/", nil
 }
 
+func StatefulProviderRuntime(group, provider string) (string, error) {
+	if err := validateName("stateful_group", group); err != nil {
+		return "", err
+	}
+	if err := validateName("provider", provider); err != nil {
+		return "", err
+	}
+	return "stateful/" + group + "/providers/" + provider + "/runtime.json", nil
+}
+
 func StatefulBackupIntent(group, backup string) (string, error) {
 	if err := validateName("stateful_group", group); err != nil {
 		return "", err

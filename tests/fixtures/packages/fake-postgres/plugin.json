@@ -1,0 +1,41 @@
+{
+  "apiVersion": "skiff.dev/plugin/v1alpha1",
+  "kind": "Plugin",
+  "name": "fake-postgres",
+  "version": "1.0.0",
+  "runtime": {
+    "kind": "command",
+    "command": ["fake-postgres-plugin"]
+  },
+  "hooks": ["doctor_checks", "package_step"],
+  "permissions": {
+    "doctor_checks": true,
+    "package_step_kinds": ["postgres.verify_replica_lag"]
+  },
+  "capabilities": [
+    {
+      "kind": "doctor_check",
+      "name": "replica-lag-doctor",
+      "doctor_checks": ["postgres.replica_lag"]
+    },
+    {
+      "kind": "package_step",
+      "name": "postgres-safety",
+      "package_steps": [
+        {
+          "kind": "postgres.verify_replica_lag",
+          "summary": "verify replica lag before switchover",
+          "params": {
+            "target": {"type": "string", "required": true},
+            "admin_token": {"type": "string", "secret": true}
+          },
+          "result": {
+            "admin_token": {"type": "string", "secret": true}
+          },
+          "risk": "low",
+          "reversibility": "reversible"
+        }
+      ]
+    }
+  ]
+}

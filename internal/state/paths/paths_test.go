@@ -99,6 +99,13 @@ func TestCoreObjectPaths(t *testing.T) {
 			want: "resources/by-provider/aws/target-group/arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup%2Fpayments%2Fabc.json",
 		},
 		{
+			name: "stateful provider runtime",
+			path: func() (string, error) {
+				return paths.StatefulProviderRuntime("orders-stream", "apple-container")
+			},
+			want: "stateful/orders-stream/providers/apple-container/runtime.json",
+		},
+		{
 			name: "service log archive prefix",
 			path: func() (string, error) {
 				return paths.ServiceLogArchivePrefix("payments-api", "prod")

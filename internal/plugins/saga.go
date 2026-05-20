@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/s1liconcow/skiff/internal/saga/steps"
+	packagestep "github.com/s1liconcow/skiff/internal/saga/steps/package"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 	"github.com/s1liconcow/skiff/pkg/pluginapi"
 )
@@ -26,6 +27,38 @@ func SagaSteps(host *Host) map[string]steps.Step {
 					continue
 				}
 				out[kind] = pluginSagaStep{host: host, plugin: plugin, kind: kind}
+			}
+		}
+	}
+	for kind, step := range PackageSteps(host) {
+		out[kind] = step
+	}
+	return out
+}
+
+func PackageSteps(host *Host) map[string]steps.Step {
+	out := map[string]steps.Step{}
+	if host == nil || host.Registry == nil {
+		return out
+	}
+	for _, plugin := range host.Registry.Hooks(pluginapi.HookPackageStep) {
+		allowed := stringSet(plugin.Manifest.Permissions.PackageStepKinds)
+		for _, capability := range plugin.Manifest.Capabilities {
+			if capability.Kind != pluginapi.CapabilityPackageStep {
+				continue
+			}
+			for _, declared := range capability.PackageSteps {
+				if !allowed[declared.Kind] {
+					continue
+				}
+				plugin := plugin
+				step, err := packagestep.New(plugin.Manifest, declared, func(ctx context.Context, hook pluginapi.Hook, request any, response any) error {
+					return host.Runner.RunPluginHook(ctx, plugin, hook, request, response)
+				})
+				if err != nil {
+					continue
+				}
+				out[declared.Kind] = step
 			}
 		}
 	}

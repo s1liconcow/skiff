@@ -1,0 +1,15 @@
+{
+  "apiVersion": "skiff.dev/package/v1alpha1",
+  "kind": "Package",
+  "name": "fake-postgres",
+  "version": "1.0.0",
+  "exports": {
+    "dependencies": ["fake-postgres"],
+    "operation_profiles": ["primary-switchover-update"],
+    "package_steps": ["postgres.verify_replica_lag"],
+    "doctor_checks": ["postgres.replica_lag"]
+  },
+  "plugin": {
+    "manifest": "plugin.json"
+  }
+}

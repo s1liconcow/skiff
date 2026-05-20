@@ -21,6 +21,8 @@ import (
 	eventstream "github.com/s1liconcow/skiff/internal/events"
 	stateindex "github.com/s1liconcow/skiff/internal/index"
 	"github.com/s1liconcow/skiff/internal/objstore"
+	opsstate "github.com/s1liconcow/skiff/internal/ops"
+	sagastate "github.com/s1liconcow/skiff/internal/saga"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 	servicestatus "github.com/s1liconcow/skiff/internal/status"
 )
@@ -144,6 +146,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/doctor", s.handleDoctor)
 	mux.HandleFunc("/v1/services", s.handleServices)
 	mux.HandleFunc("/v1/sagas", s.handleSagas)
+	mux.HandleFunc("/v1/sagas/inspect", s.handleSagaInspect)
+	mux.HandleFunc("/v1/ops/inspect", s.handleOpsInspect)
+	mux.HandleFunc("/v1/ops/profile-run", s.handleOpsProfileRun)
 	mux.HandleFunc("/v1/stateful/groups", s.handleStatefulGroups)
 	mux.HandleFunc("/v1/stateful/groups/", s.handleStatefulGroups)
 	mux.HandleFunc("/v1/stateful/status", s.handleStatefulStatus)
@@ -493,6 +498,91 @@ func (s *Server) handleSagas(w http.ResponseWriter, r *http.Request) {
 		"freshness":  read.freshness,
 		"index":      read.freshness,
 		"sagas":      sagas,
+	})
+}
+
+func (s *Server) handleSagaInspect(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if _, ok := negotiateFormat(w, r, true); !ok {
+		return
+	}
+	sagaID := strings.TrimSpace(r.URL.Query().Get("saga"))
+	if sagaID == "" {
+		writeError(w, r, http.StatusBadRequest, "SAGA_REQUIRED", "saga query parameter is required", nil)
+		return
+	}
+	result, err := sagastate.NewStore(s.store).Inspect(r.Context(), sagaID)
+	if err != nil {
+		writeError(w, r, http.StatusNotFound, "SAGA_INSPECT_FAILED", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"trace_id":   traceIDFromContext(r.Context()),
+		"request_id": requestIDFromContext(r.Context()),
+		"result":     result,
+	})
+}
+
+func (s *Server) handleOpsInspect(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if _, ok := negotiateFormat(w, r, true); !ok {
+		return
+	}
+	service := strings.TrimSpace(r.URL.Query().Get("service"))
+	operation := strings.TrimSpace(r.URL.Query().Get("operation"))
+	if service == "" || operation == "" {
+		writeError(w, r, http.StatusBadRequest, "OPERATION_REQUIRED", "service and operation query parameters are required", nil)
+		return
+	}
+	result, err := opsstate.NewStore(s.store).Inspect(r.Context(), service, operation)
+	if err != nil {
+		writeError(w, r, http.StatusNotFound, "OPERATION_INSPECT_FAILED", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"trace_id":   traceIDFromContext(r.Context()),
+		"request_id": requestIDFromContext(r.Context()),
+		"result":     result,
+	})
+}
+
+func (s *Server) handleOpsProfileRun(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if _, ok := negotiateFormat(w, r, true); !ok {
+		return
+	}
+	var req opsstate.ProfileOperationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "decode operation profile run request: "+err.Error(), nil)
+		return
+	}
+	if req.Env == "" {
+		req.Env = s.cfg.Env
+	}
+	if req.Render.TraceID == "" {
+		req.Render.TraceID = traceIDFromContext(r.Context())
+	}
+	req.Render.Actor = actorFromContext(r.Context())
+	result, _, err := opsstate.CreateProfileOperation(r.Context(), s.store, req)
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "OPERATION_PROFILE_RUN_FAILED", err.Error(), []recommendedAction{
+			{ID: "plan_operation", Command: "skiff ops plan <target> <operation> --format json", Mutating: false},
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"trace_id":   result.TraceID,
+		"request_id": requestIDFromContext(r.Context()),
+		"result":     result,
 	})
 }
 

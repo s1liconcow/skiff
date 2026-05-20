@@ -9,6 +9,7 @@ import (
 
 	"github.com/s1liconcow/skiff/internal/compiler"
 	"github.com/s1liconcow/skiff/internal/ir"
+	internalpackages "github.com/s1liconcow/skiff/internal/packages"
 	"github.com/s1liconcow/skiff/internal/spec"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
 )
@@ -154,6 +155,161 @@ stateful:
 	}
 }
 
+func TestCompileStackPackageManagedDatabase(t *testing.T) {
+	doc, err := spec.Decode([]byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: Stack
+metadata:
+  name: payments
+  env: dev
+stack:
+  services:
+    - name: api
+      artifact:
+        type: oci
+        ref: registry.example.com/payments-api:latest
+      runtime:
+        port: 8080
+        health:
+          path: /healthz
+  dependencies:
+    - name: db
+      uses: skiff.dev/postgres-ha
+      version: "1.2.0"
+      config:
+        mode: managed
+        engine: postgres
+        version: "16"
+        size: small
+  bindings:
+    - from: api
+      to: db
+      as: DATABASE_URL
+`), spec.DecodeOptions{})
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	lockDigest := testDigest("c")
+	graph, err := compiler.Compile(context.Background(), *doc, packageCompilerOptions(lockDigest, "postgres-ha", "skiff.dev/postgres-ha", internalpackages.Manifest{
+		APIVersion: "skiff.dev/package/v1alpha1",
+		Kind:       "Package",
+		Name:       "postgres-ha",
+		Version:    "1.2.0",
+		Exports: internalpackages.ManifestExports{
+			Dependencies:      []string{"postgres"},
+			OperationProfiles: []string{"primary-switchover-update"},
+			PackageSteps:      []string{"postgres.verify_replica_lag"},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if graph.PackageLockDigest != lockDigest || len(graph.Packages) != 1 {
+		t.Fatalf("package lock/provenance missing: digest=%q packages=%+v", graph.PackageLockDigest, graph.Packages)
+	}
+	if len(graph.Resources.ManagedDatabases) != 1 {
+		t.Fatalf("package managed database missing: %+v", graph.Resources.ManagedDatabases)
+	}
+	db := graph.Resources.ManagedDatabases[0]
+	if db.Engine != "postgres" || db.ConnectionSecretRef == "" || db.Meta.Tags[ir.TagPackage] != "skiff.dev/postgres-ha" {
+		t.Fatalf("managed database not expanded with package metadata: %+v", db)
+	}
+	if !hasPackageSource(db.Meta.Source, "skiff.dev/postgres-ha", lockDigest) {
+		t.Fatalf("managed database missing package source: %+v", db.Meta.Source)
+	}
+	runtime := graph.Resources.RuntimeManifests[0]
+	if runtime.Env["DATABASE_URL"] != db.ConnectionSecretRef {
+		t.Fatalf("runtime DATABASE_URL = %q, want %q", runtime.Env["DATABASE_URL"], db.ConnectionSecretRef)
+	}
+	if len(graph.Resources.DatabaseSecrets) != 1 || len(graph.Resources.DatabaseBindings) != 1 {
+		t.Fatalf("database secret/binding missing: secrets=%+v bindings=%+v", graph.Resources.DatabaseSecrets, graph.Resources.DatabaseBindings)
+	}
+	if len(graph.Resources.PackageOperations) != 1 || graph.Resources.PackageOperations[0].OperationProfiles[0] != "primary-switchover-update" {
+		t.Fatalf("package operations missing: %+v", graph.Resources.PackageOperations)
+	}
+}
+
+func TestCompileStackPackageStatefulDependency(t *testing.T) {
+	doc, err := spec.Decode([]byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: Stack
+metadata:
+  name: orders
+  env: dev
+stack:
+  services:
+    - name: api
+      artifact:
+        type: oci
+        ref: registry.example.com/orders-api:latest
+      runtime:
+        port: 8080
+        health:
+          path: /healthz
+  dependencies:
+    - name: stream
+      uses: skiff.dev/jetstream
+      version: "1.0.0"
+      config:
+        mode: stateful
+        replicas: 3
+        volume:
+          size: 50Gi
+        artifact:
+          type: oci
+          ref: registry.example.com/nats@sha256:abc123
+        runtime:
+          command: ["/nats-server", "-js"]
+          ports:
+            client: 4222
+            monitoring: 8222
+          health:
+            path: /healthz
+            port: 8222
+  bindings:
+    - from: api
+      to: stream
+      as: NATS_URL
+`), spec.DecodeOptions{})
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	lockDigest := testDigest("d")
+	graph, err := compiler.Compile(context.Background(), *doc, packageCompilerOptions(lockDigest, "jetstream", "skiff.dev/jetstream", internalpackages.Manifest{
+		APIVersion: "skiff.dev/package/v1alpha1",
+		Kind:       "Package",
+		Name:       "jetstream",
+		Version:    "1.0.0",
+		Exports: internalpackages.ManifestExports{
+			Dependencies:      []string{"jetstream"},
+			OperationProfiles: []string{"jetstream-rolling-update"},
+			PackageSteps:      []string{"nats.verify_cluster"},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if len(graph.Resources.StatefulGroups) != 1 || graph.Resources.StatefulGroups[0].Replicas != 3 {
+		t.Fatalf("stateful dependency not expanded: %+v", graph.Resources.StatefulGroups)
+	}
+	if len(graph.Resources.StatefulMembers) != 3 || len(graph.Resources.StatefulVolumes) != 3 {
+		t.Fatalf("stateful members/volumes missing: members=%+v volumes=%+v", graph.Resources.StatefulMembers, graph.Resources.StatefulVolumes)
+	}
+	if graph.Resources.RuntimeManifests[0].Env["NATS_URL"] != "skiff://stateful/orders-stream" {
+		t.Fatalf("NATS_URL binding = %q", graph.Resources.RuntimeManifests[0].Env["NATS_URL"])
+	}
+	group := graph.Resources.StatefulGroups[0]
+	if group.Meta.Tags[ir.TagService] != "orders-api" || group.Meta.Tags[ir.TagDependency] != "stream" {
+		t.Fatalf("stateful package tags missing root service/dependency: %+v", group.Meta.Tags)
+	}
+	if !hasPackageSource(group.Meta.Source, "skiff.dev/jetstream", lockDigest) {
+		t.Fatalf("stateful group missing package source: %+v", group.Meta.Source)
+	}
+	if len(graph.Resources.PackageOperations) != 1 || graph.Resources.PackageOperations[0].Package.Ref != "skiff.dev/jetstream" {
+		t.Fatalf("stateful package operations missing: %+v", graph.Resources.PackageOperations)
+	}
+}
+
 func TestSemanticDiffIgnoresResourceOrdering(t *testing.T) {
 	graph := *compileExample(t)
 	extra := graph.Resources.LogConfigs[0]
@@ -279,6 +435,21 @@ func resourceMetas(graph *ir.Graph) []ir.ResourceMeta {
 	for _, resource := range graph.Resources.Listeners {
 		out = append(out, resource.Meta)
 	}
+	for _, resource := range graph.Resources.ManagedDatabases {
+		out = append(out, resource.Meta)
+	}
+	for _, resource := range graph.Resources.DatabaseSecrets {
+		out = append(out, resource.Meta)
+	}
+	for _, resource := range graph.Resources.DatabaseBindings {
+		out = append(out, resource.Meta)
+	}
+	for _, resource := range graph.Resources.ObjectStores {
+		out = append(out, resource.Meta)
+	}
+	for _, resource := range graph.Resources.ObjectStoreBindings {
+		out = append(out, resource.Meta)
+	}
 	for _, resource := range graph.Resources.InstanceTemplates {
 		out = append(out, resource.Meta)
 	}
@@ -309,5 +480,46 @@ func resourceMetas(graph *ir.Graph) []ir.ResourceMeta {
 	for _, resource := range graph.Resources.UpdatePolicies {
 		out = append(out, resource.Meta)
 	}
+	for _, resource := range graph.Resources.PackageOperations {
+		out = append(out, resource.Meta)
+	}
 	return out
+}
+
+func packageCompilerOptions(lockDigest, name, ref string, manifest internalpackages.Manifest) compiler.Options {
+	entry := internalpackages.LockEntry{
+		Name:           name,
+		Ref:            ref,
+		Version:        manifest.Version,
+		Digest:         testDigest("a"),
+		SignatureRef:   "oci://registry.example.com/skiff/" + name + ".sig@" + testDigest("b"),
+		Source:         "oci://registry.example.com/skiff/" + name + ":" + manifest.Version,
+		ManifestDigest: testDigest("b"),
+		ResolvedAt:     "2026-05-20T02:43:35Z",
+	}
+	return compiler.Options{
+		PackageLock: &internalpackages.LockFile{
+			Schema:   "skiff.lock/v1alpha1",
+			Packages: []internalpackages.LockEntry{entry},
+		},
+		PackageLockDigest: lockDigest,
+		PackageManifests: map[string]internalpackages.Manifest{
+			name:         manifest,
+			ref:          manifest,
+			entry.Source: manifest,
+		},
+	}
+}
+
+func testDigest(fill string) string {
+	return "sha256:" + strings.Repeat(fill, 64)
+}
+
+func hasPackageSource(source []ir.SourceRef, pkg, lockDigest string) bool {
+	for _, ref := range source {
+		if ref.Package == pkg && ref.LockfileDigest == lockDigest {
+			return true
+		}
+	}
+	return false
 }

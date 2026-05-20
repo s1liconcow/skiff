@@ -352,14 +352,15 @@ func completedResults(control schema.SagaControl) map[string]schema.StepResult {
 	for _, ref := range control.StepResults {
 		if ref.Status == string(steps.StatusSucceeded) {
 			out[ref.StepID] = schema.StepResult{
-				SchemaVersion: schema.Version,
-				SagaID:        control.SagaID,
-				StepID:        ref.StepID,
-				Kind:          ref.Kind,
-				Status:        ref.Status,
-				Result:        cloneRaw(ref.Result),
-				Failure:       ref.Failure,
-				CompletedAt:   ref.CompletedAt,
+				SchemaVersion:      schema.Version,
+				SagaID:             control.SagaID,
+				StepID:             ref.StepID,
+				Kind:               ref.Kind,
+				Status:             ref.Status,
+				Result:             cloneRaw(ref.Result),
+				Failure:            ref.Failure,
+				ProviderOperations: append([]schema.ProviderOperationRef(nil), ref.ProviderOperations...),
+				CompletedAt:        ref.CompletedAt,
 			}
 		}
 	}
@@ -380,12 +381,13 @@ func upsertStepResultRef(refs []schema.StepResultRef, next schema.StepResultRef)
 
 func stepResultRef(result schema.StepResult) schema.StepResultRef {
 	ref := schema.StepResultRef{
-		StepID:      result.StepID,
-		Kind:        result.Kind,
-		Status:      result.Status,
-		Result:      cloneRaw(result.Result),
-		Failure:     result.Failure,
-		CompletedAt: result.CompletedAt,
+		StepID:             result.StepID,
+		Kind:               result.Kind,
+		Status:             result.Status,
+		Result:             cloneRaw(result.Result),
+		Failure:            result.Failure,
+		ProviderOperations: append([]schema.ProviderOperationRef(nil), result.ProviderOperations...),
+		CompletedAt:        result.CompletedAt,
 	}
 	if result.Status != string(steps.StatusWaiting) {
 		ref.ResultRef = fmt.Sprintf("sagas/%s/artifacts/results/%s.json", result.SagaID, result.StepID)

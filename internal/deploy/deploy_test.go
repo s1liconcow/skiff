@@ -56,6 +56,7 @@ func TestDeployPublishesReleaseUpdatesControlAndEvents(t *testing.T) {
 	signer := testSigner(t)
 	p := newAWSProviderForDeploy(t, manager, store)
 	graph := compileDeployGraph(t)
+	graph.PackageLockDigest = "sha256:" + strings.Repeat("c", 64)
 	result, err := deploy.Deployer{
 		Store:    store,
 		Provider: p,
@@ -87,6 +88,9 @@ func TestDeployPublishesReleaseUpdatesControlAndEvents(t *testing.T) {
 	}
 	runtimeManifest := readObject[schema.RuntimeManifest](t, store, runtimeKey)
 	releaseManifest := readObject[schema.ReleaseManifest](t, store, releaseKey)
+	if runtimeManifest.PackageLockDigest != graph.PackageLockDigest || releaseManifest.PackageLockDigest != graph.PackageLockDigest {
+		t.Fatalf("package lock digest missing from manifests: runtime=%q release=%q", runtimeManifest.PackageLockDigest, releaseManifest.PackageLockDigest)
+	}
 	if runtimeManifest.Metrics == nil || !runtimeManifest.Metrics.Enabled || runtimeManifest.Metrics.Path != "/metrics" {
 		t.Fatalf("runtime manifest missing metrics config: %+v", runtimeManifest.Metrics)
 	}
@@ -123,6 +127,14 @@ func TestDeployPublishesReleaseUpdatesControlAndEvents(t *testing.T) {
 	opControl := readObject[schema.OperationControl](t, store, opControlKey)
 	if opControl.Status != schema.OperationSucceeded {
 		t.Fatalf("operation control status = %s", opControl.Status)
+	}
+	opIntentKey, err := paths.OperationIntent(graph.Service, result.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opIntent := readObject[schema.OperationIntent](t, store, opIntentKey)
+	if opIntent.PackageLockDigest != graph.PackageLockDigest {
+		t.Fatalf("operation intent package lock digest = %q, want %q", opIntent.PackageLockDigest, graph.PackageLockDigest)
 	}
 	log, err := events.NewLog(events.Options{Store: store, Clock: fixedDeployNow})
 	if err != nil {

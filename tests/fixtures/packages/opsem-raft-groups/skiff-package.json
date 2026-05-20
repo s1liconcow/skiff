@@ -1,0 +1,18 @@
+{
+  "apiVersion": "skiff.dev/package/v1alpha1",
+  "kind": "Package",
+  "name": "opsem-raft-groups",
+  "version": "1.0.0",
+  "exports": {
+    "dependencies": ["skiff-opsem"],
+    "operation_profiles": ["raft-group-rolling-update"],
+    "package_steps": [
+      "package.raft_group.verify_quorum",
+      "package.raft_group.update_followers",
+      "package.raft_group.verify_followers_caught_up",
+      "package.raft_group.transfer_leader",
+      "package.raft_group.update_previous_leader",
+      "package.raft_group.verify_final_quorum"
+    ]
+  }
+}

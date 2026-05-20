@@ -2,6 +2,7 @@ package client
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/s1liconcow/skiff/internal/config"
+	opsstate "github.com/s1liconcow/skiff/internal/ops"
+	sagastate "github.com/s1liconcow/skiff/internal/saga"
 	"github.com/s1liconcow/skiff/internal/state/schema"
 )
 
@@ -174,6 +177,44 @@ func (c *API) Sagas(ctx context.Context, opts SagaOptions) (*SagaList, error) {
 	}, nil
 }
 
+func (c *API) InspectSaga(ctx context.Context, opts SagaInspectOptions) (*sagastate.InspectResult, error) {
+	query := url.Values{}
+	query.Set("saga", opts.Saga)
+	var body struct {
+		OK     bool                    `json:"ok"`
+		Result sagastate.InspectResult `json:"result"`
+	}
+	if err := c.getJSON(ctx, "/v1/sagas/inspect", opts.TraceID, query, &body); err != nil {
+		return nil, err
+	}
+	return &body.Result, nil
+}
+
+func (c *API) InspectOperation(ctx context.Context, opts OperationInspectOptions) (*opsstate.InspectResult, error) {
+	query := url.Values{}
+	query.Set("service", opts.Service)
+	query.Set("operation", opts.Operation)
+	var body struct {
+		OK     bool                   `json:"ok"`
+		Result opsstate.InspectResult `json:"result"`
+	}
+	if err := c.getJSON(ctx, "/v1/ops/inspect", opts.TraceID, query, &body); err != nil {
+		return nil, err
+	}
+	return &body.Result, nil
+}
+
+func (c *API) CreateProfileOperation(ctx context.Context, req opsstate.ProfileOperationRequest) (*opsstate.ProfileOperationResult, error) {
+	var body struct {
+		OK     bool                            `json:"ok"`
+		Result opsstate.ProfileOperationResult `json:"result"`
+	}
+	if err := c.postJSON(ctx, "/v1/ops/profile-run", req.Render.TraceID, req, &body); err != nil {
+		return nil, err
+	}
+	return &body.Result, nil
+}
+
 func (c *API) WatchEvents(ctx context.Context, opts EventWatchOptions) (<-chan EventDelivery, error) {
 	query := url.Values{}
 	if opts.Scope != "" {
@@ -322,6 +363,39 @@ func (c *API) getJSON(ctx context.Context, path string, traceID string, query ur
 		return Fail("API_REQUEST_INVALID", "build API request", ExitUserError, err)
 	}
 	req.Header.Set("Accept", "application/json")
+	if traceID != "" {
+		req.Header.Set("X-Skiff-Trace-Id", traceID)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return Fail("API_REQUEST_FAILED", "call skiffd API", ExitProviderError, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return decodeAPIError(resp, fmt.Sprintf("skiffd API returned HTTP %d", resp.StatusCode))
+	}
+	defer resp.Body.Close()
+	dec := json.NewDecoder(resp.Body)
+	if err := dec.Decode(out); err != nil {
+		return Fail("API_RESPONSE_INVALID", "decode skiffd API response", ExitProviderError, err)
+	}
+	return nil
+}
+
+func (c *API) postJSON(ctx context.Context, path string, traceID string, value any, out any) error {
+	body, err := json.Marshal(value)
+	if err != nil {
+		return Fail("API_REQUEST_INVALID", "encode API request", ExitUserError, err)
+	}
+	u := c.baseURL.ResolveReference(&url.URL{Path: path})
+	values := u.Query()
+	values.Set("format", "json")
+	u.RawQuery = values.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(body))
+	if err != nil {
+		return Fail("API_REQUEST_INVALID", "build API request", ExitUserError, err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
 	if traceID != "" {
 		req.Header.Set("X-Skiff-Trace-Id", traceID)
 	}

@@ -101,3 +101,32 @@ Production entries must include exact version, package digest, manifest digest,
 signature reference, source registry, and resolution timestamp. Local unsigned
 `file://` packages are a development escape hatch only when explicitly allowed
 by the caller.
+
+When a Stack has `stack.dependencies[]`, direct-mode commands load the lockfile
+and local package cache before compiling:
+
+```bash
+skiff validate skiff.yaml --lockfile skiff.lock.json --cache .skiff/packages/cache
+skiff compile skiff.yaml --lockfile skiff.lock.json --cache .skiff/packages/cache
+skiff plan skiff.yaml --direct --state s3://skiff-state-prod --lockfile skiff.lock.json --cache .skiff/packages/cache
+skiff explain skiff.yaml --lockfile skiff.lock.json --cache .skiff/packages/cache
+skiff deploy skiff.yaml --direct --state s3://skiff-state-prod --lockfile skiff.lock.json --cache .skiff/packages/cache
+```
+
+Package-expanded IR resources carry source provenance with package ref, version,
+package digest, manifest digest, and lockfile digest. Deploys copy the package
+lock digest into release manifests, runtime manifests, operation intents, and
+canary saga intents so recovery can prove which dependency graph was compiled.
+
+## Conformance
+
+Package authors can run deterministic local checks without deploying a workload:
+
+```bash
+skiff pkg verify file://../postgres-ha --conformance
+```
+
+The base harness validates the package manifest, lock-compatible metadata,
+plugin capability declarations, operation profile explain/render behavior, and
+Skiff CLI examples found in package markdown files. Live Apple provider checks
+remain gated separately for release validation.

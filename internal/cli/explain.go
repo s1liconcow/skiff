@@ -9,6 +9,7 @@ import (
 
 	"github.com/s1liconcow/skiff/internal/compiler"
 	"github.com/s1liconcow/skiff/internal/explain"
+	"github.com/s1liconcow/skiff/internal/ir"
 	"github.com/s1liconcow/skiff/internal/plugins"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
 	"github.com/s1liconcow/skiff/internal/spec"
@@ -35,6 +36,7 @@ func runExplain(binary string, args []string, root rootOptions, stdout, stderr i
 	region := fs.String("region", root.Region, "cloud provider region")
 	stateBucket := fs.String("state", root.State, "object-state bucket URI")
 	releaseID := fs.String("release-id", "", "release ID to place in runner user-data")
+	packageFlags := addPackageCompileFlags(fs)
 	var pluginPaths pluginPathsFlag
 	fs.Var(&pluginPaths, "plugin", "plugin manifest path or directory; may be repeated")
 
@@ -63,7 +65,15 @@ func runExplain(binary string, args []string, root rootOptions, stdout, stderr i
 	if err != nil {
 		return writeSpecError(binary, "SPEC_DECODE_FAILED", *format, *traceID, err, nil, stdout, stderr)
 	}
-	graph, err := compiler.Compile(nilContext(), *doc, compiler.Options{})
+	compileOpts, err := compilerOptionsForDocument(*doc, packageFlags, true)
+	if err != nil {
+		var validation spec.ValidationError
+		if errors.As(err, &validation) {
+			return writeSpecError(binary, "SPEC_INVALID", *format, *traceID, errors.New("spec validation failed"), validation.Diagnostics, stdout, stderr)
+		}
+		return writeSpecError(binary, "SPEC_COMPILE_FAILED", *format, *traceID, err, nil, stdout, stderr)
+	}
+	graph, err := compiler.Compile(nilContext(), *doc, compileOpts)
 	if err != nil {
 		var validation spec.ValidationError
 		if errors.As(err, &validation) {
@@ -110,6 +120,8 @@ func runExplain(binary string, args []string, root rootOptions, stdout, stderr i
 		result = explain.AWS(lowered)
 		awsDetails = lowered
 	}
+	packageDerived := explain.PackageDerived(*providerName, graph)
+	result.Resources = append(result.Resources, packageDerived.Resources...)
 
 	switch *format {
 	case "human", "text":
@@ -120,6 +132,9 @@ func runExplain(binary string, args []string, root rootOptions, stdout, stderr i
 		}
 		for _, resource := range result.Resources {
 			fmt.Fprintf(stdout, "- %s %s: %s\n", resource.CloudPrimitive, resource.Name, resource.Why)
+			if source := sourcePackageSummary(resource.Source); source != "" {
+				fmt.Fprintf(stdout, "  package: %s\n", source)
+			}
 		}
 		for _, patch := range patchExplanations {
 			fmt.Fprintf(stdout, "- plugin %s added %s at %s: %s\n", patch.Plugin, patch.Kind, patch.Path, patch.Summary)
@@ -138,8 +153,10 @@ func runExplain(binary string, args []string, root rootOptions, stdout, stderr i
 
 func splitExplainArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
+		"cache":      true,
 		"file":       true,
 		"format":     true,
+		"lockfile":   true,
 		"provider":   true,
 		"region":     true,
 		"release-id": true,
@@ -148,4 +165,21 @@ func splitExplainArgs(args []string) ([]string, []string, error) {
 		"plugin":     true,
 	}
 	return splitArgs(args, valueFlags)
+}
+
+func sourcePackageSummary(source []ir.SourceRef) string {
+	for _, ref := range source {
+		if ref.Package == "" && ref.Digest == "" && ref.LockfileDigest == "" {
+			continue
+		}
+		out := ref.Package
+		if ref.Version != "" {
+			out += "@" + ref.Version
+		}
+		if out == "" {
+			out = ref.Digest
+		}
+		return out
+	}
+	return ""
 }

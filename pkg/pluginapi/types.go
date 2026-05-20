@@ -3,7 +3,11 @@
 // and apply; they do not receive raw cloud clients.
 package pluginapi
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/s1liconcow/skiff/pkg/sagaapi"
+)
 
 const (
 	APIVersion = "skiff.dev/plugin/v1alpha1"
@@ -18,6 +22,7 @@ const (
 	HookRuntimeAddons Hook = "runtime_addons"
 	HookDoctorChecks  Hook = "doctor_checks"
 	HookSagaStep      Hook = "saga_step"
+	HookPackageStep   Hook = "package_step"
 )
 
 type CapabilityKind string
@@ -27,6 +32,7 @@ const (
 	CapabilityRuntimeAddon CapabilityKind = "runtime_addon"
 	CapabilityDoctorCheck  CapabilityKind = "doctor_check"
 	CapabilitySagaStep     CapabilityKind = "saga_step"
+	CapabilityPackageStep  CapabilityKind = "package_step"
 )
 
 type RuntimeKind string
@@ -74,17 +80,19 @@ type Permissions struct {
 	RuntimeAddons     bool     `json:"runtime_addons,omitempty"`
 	DoctorChecks      bool     `json:"doctor_checks,omitempty"`
 	SagaStepKinds     []string `json:"saga_step_kinds,omitempty"`
+	PackageStepKinds  []string `json:"package_step_kinds,omitempty"`
 }
 
 type Capability struct {
-	Kind          CapabilityKind `json:"kind"`
-	Name          string         `json:"name"`
-	Version       string         `json:"version,omitempty"`
-	Description   string         `json:"description,omitempty"`
-	PatchKinds    []string       `json:"patch_kinds,omitempty"`
-	RuntimeAddons []string       `json:"runtime_addons,omitempty"`
-	DoctorChecks  []string       `json:"doctor_checks,omitempty"`
-	SagaStepKinds []string       `json:"saga_step_kinds,omitempty"`
+	Kind          CapabilityKind                  `json:"kind"`
+	Name          string                          `json:"name"`
+	Version       string                          `json:"version,omitempty"`
+	Description   string                          `json:"description,omitempty"`
+	PatchKinds    []string                        `json:"patch_kinds,omitempty"`
+	RuntimeAddons []string                        `json:"runtime_addons,omitempty"`
+	DoctorChecks  []string                        `json:"doctor_checks,omitempty"`
+	SagaStepKinds []string                        `json:"saga_step_kinds,omitempty"`
+	PackageSteps  []sagaapi.PackageStepCapability `json:"package_steps,omitempty"`
 }
 
 type Diagnostic struct {
@@ -219,3 +227,13 @@ type ProviderOperationRef struct {
 	ObservedAt  string `json:"observed_at,omitempty"`
 	Description string `json:"description,omitempty"`
 }
+
+type PackageStepRequest struct {
+	Manifest Manifest `json:"manifest"`
+	sagaapi.PackageStepRequest
+}
+
+type PackageStepPlanResponse = sagaapi.PackageStepPlanResponse
+type PackageStepResultResponse = sagaapi.PackageStepResultResponse
+type PackageStepDoctorResponse = sagaapi.PackageStepDoctorResponse
+type PackageStepFinding = sagaapi.PackageStepFinding

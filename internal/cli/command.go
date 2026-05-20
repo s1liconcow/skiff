@@ -132,6 +132,8 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runOps(binary, root.Args, root, stdout, stderr)
 	case "plan":
 		return runPlan(binary, root.Args, root, stdout, stderr)
+	case "pkg":
+		return runPkg(binary, root.Args, root, stdout, stderr)
 	case "plugin":
 		return runPlugin(binary, root.Args, root, stdout, stderr)
 	case "policy":
@@ -329,6 +331,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  cost       Explain service shape and capacity recommendations")
 	fmt.Fprintln(w, "  rollback   Roll a service back to a stable release")
 	fmt.Fprintln(w, "  ops        Inspect, watch, approve, and resume operations")
+	fmt.Fprintln(w, "  pkg        Add, verify, explain, and lock packages")
 	fmt.Fprintln(w, "  config     Inspect and switch Skiff configuration contexts")
 	fmt.Fprintln(w, "  tui        Open the terminal operations dashboard")
 	if binary == "skiffd" {
@@ -377,6 +380,7 @@ func printAllUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
 	fmt.Fprintln(w, "  ops        Inspect, watch, approve, and resume operations")
 	fmt.Fprintln(w, "  plan       Dry-run provider resource changes for a spec")
+	fmt.Fprintln(w, "  pkg        Add, verify, explain, and lock packages")
 	fmt.Fprintln(w, "  plugin     Inspect, validate, and run trusted Skiff plugins")
 	fmt.Fprintln(w, "  policy     Explain generated state security policies")
 	fmt.Fprintln(w, "  promote    Validate and record release promotion intent")
@@ -435,6 +439,7 @@ func printDevHelp(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  completion Generate shell completions")
 	fmt.Fprintln(w, "  authz      Explain authorization and approval decisions")
 	fmt.Fprintln(w, "  policy     Explain generated state security policies")
+	fmt.Fprintln(w, "  pkg        Add, verify, explain, and lock packages")
 	fmt.Fprintln(w, "  plugin     Inspect, validate, and run trusted Skiff plugins")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
 	fmt.Fprintln(w, "  state      Inspect object-state paths")
@@ -1841,6 +1846,7 @@ func runCompile(binary string, args []string, stdout, stderr io.Writer) int {
 	filePath := fs.String("file", "", "Skiff YAML or JSON spec file")
 	outPath := fs.String("out", "", "write canonical IR JSON to path, or - for stdout")
 	allowUnknown := fs.Bool("allow-unknown-fields", false, "accept unknown fields for compatibility checks")
+	packageFlags := addPackageCompileFlags(fs)
 
 	flagArgs, positionals, err := splitCompileArgs(args)
 	if err != nil {
@@ -1870,7 +1876,15 @@ func runCompile(binary string, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return writeCompileError(binary, "SPEC_DECODE_FAILED", *format, *traceID, err, nil, stdout, stderr)
 	}
-	graph, err := compiler.Compile(nilContext(), *doc, compiler.Options{})
+	compileOpts, err := compilerOptionsForDocument(*doc, packageFlags, true)
+	if err != nil {
+		var validation spec.ValidationError
+		if errors.As(err, &validation) {
+			return writeCompileError(binary, "SPEC_INVALID", *format, *traceID, errors.New("spec validation failed"), validation.Diagnostics, stdout, stderr)
+		}
+		return writeCompileError(binary, "SPEC_COMPILE_FAILED", *format, *traceID, err, nil, stdout, stderr)
+	}
+	graph, err := compiler.Compile(nilContext(), *doc, compileOpts)
 	if err != nil {
 		var validation spec.ValidationError
 		if errors.As(err, &validation) {
@@ -1968,6 +1982,7 @@ func runValidate(binary string, args []string, stdout, stderr io.Writer) int {
 	filePath := fs.String("file", "", "Skiff YAML or JSON spec file")
 	allowUnknown := fs.Bool("allow-unknown-fields", false, "accept unknown fields for compatibility checks")
 	showDefaulted := fs.Bool("show-defaulted", false, "include the defaulted spec in output")
+	packageFlags := addPackageCompileFlags(fs)
 
 	flagArgs, positionals, err := splitValidateArgs(args)
 	if err != nil {
@@ -1997,6 +2012,13 @@ func runValidate(binary string, args []string, stdout, stderr io.Writer) int {
 	result := spec.Validate(*doc)
 	if !result.OK {
 		return writeSpecError(binary, "SPEC_INVALID", *format, *traceID, errors.New("spec validation failed"), result.Diagnostics, stdout, stderr)
+	}
+	if _, err := compilerOptionsForDocument(*doc, packageFlags, false); err != nil {
+		var validation spec.ValidationError
+		if errors.As(err, &validation) {
+			return writeSpecError(binary, "SPEC_INVALID", *format, *traceID, errors.New("spec validation failed"), validation.Diagnostics, stdout, stderr)
+		}
+		return writeSpecError(binary, "SPEC_INVALID", *format, *traceID, err, nil, stdout, stderr)
 	}
 
 	switch *format {
@@ -2612,8 +2634,10 @@ func splitVerifyArgs(args []string) ([]string, []string, error) {
 
 func splitValidateArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
+		"cache":    true,
 		"file":     true,
 		"format":   true,
+		"lockfile": true,
 		"trace-id": true,
 	}
 	return splitArgs(args, valueFlags)
@@ -2621,8 +2645,10 @@ func splitValidateArgs(args []string) ([]string, []string, error) {
 
 func splitCompileArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
+		"cache":    true,
 		"file":     true,
 		"format":   true,
+		"lockfile": true,
 		"out":      true,
 		"trace-id": true,
 	}

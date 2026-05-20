@@ -285,8 +285,13 @@ func (d Deployer) createOperationIntent(ctx context.Context, graph *ir.Graph, re
 	intent := schema.NewOperationIntent(req.OperationID, graph.Service, graph.Env, "deploy", schema.Target{Kind: "service", Name: graph.Service}, req.Actor, req.TraceID, canonical.Time(now))
 	intent.Risk = schema.RiskMedium
 	intent.Reversibility = schema.Compensatable
+	intent.PackageLockDigest = graph.PackageLockDigest
 	intent.Summary = "deploy " + graph.Service + " release " + req.ReleaseID
-	intent.Params = rawJSON(map[string]string{"release_id": req.ReleaseID})
+	params := map[string]string{"release_id": req.ReleaseID}
+	if graph.PackageLockDigest != "" {
+		params["package_lock_digest"] = graph.PackageLockDigest
+	}
+	intent.Params = rawJSON(params)
 	body, err := canonical.Marshal(intent)
 	if err != nil {
 		return err
@@ -369,15 +374,16 @@ func (d Deployer) publishRelease(ctx context.Context, graph *ir.Graph, req Reque
 		return nil, nil, err
 	}
 	runtimeManifest := schema.RuntimeManifest{
-		SchemaVersion: schema.Version,
-		Service:       graph.Service,
-		Env:           graph.Env,
-		ReleaseID:     req.ReleaseID,
-		Command:       append([]string(nil), compiled.Command...),
-		EnvVars:       cloneStringMap(compiled.Env),
-		HealthCheck:   healthCheck(compiled.HealthCheck),
-		Metrics:       metricsConfig(compiled.Metrics),
-		CreatedAt:     canonical.Time(now),
+		SchemaVersion:     schema.Version,
+		Service:           graph.Service,
+		Env:               graph.Env,
+		ReleaseID:         req.ReleaseID,
+		PackageLockDigest: graph.PackageLockDigest,
+		Command:           append([]string(nil), compiled.Command...),
+		EnvVars:           cloneStringMap(compiled.Env),
+		HealthCheck:       healthCheck(compiled.HealthCheck),
+		Metrics:           metricsConfig(compiled.Metrics),
+		CreatedAt:         canonical.Time(now),
 	}
 	runtimeDigest, err := release.RuntimeManifestDigest(runtimeManifest)
 	if err != nil {
@@ -395,6 +401,7 @@ func (d Deployer) publishRelease(ctx context.Context, graph *ir.Graph, req Reque
 		Artifact:              artifactRef(compiled.Artifact),
 		RuntimeManifestKey:    runtimeKey,
 		RuntimeManifestDigest: runtimeDigest,
+		PackageLockDigest:     graph.PackageLockDigest,
 		MinRunnerVersion:      buildinfo.Version,
 		CreatedAt:             canonical.Time(now),
 	}

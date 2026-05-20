@@ -109,6 +109,17 @@ type SagaList struct {
 	Source    string        `json:"source"`
 }
 
+type SagaInspectOptions struct {
+	Saga    string `json:"saga"`
+	TraceID string `json:"trace_id,omitempty"`
+}
+
+type OperationInspectOptions struct {
+	Service   string `json:"service"`
+	Operation string `json:"operation"`
+	TraceID   string `json:"trace_id,omitempty"`
+}
+
 type EventWatcher interface {
 	WatchEvents(ctx context.Context, opts EventWatchOptions) (<-chan EventDelivery, error)
 }

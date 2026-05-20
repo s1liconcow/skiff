@@ -27,6 +27,7 @@ type Manifest struct {
 type ManifestExports struct {
 	Dependencies      []string `json:"dependencies,omitempty"`
 	OperationProfiles []string `json:"operation_profiles,omitempty"`
+	PackageSteps      []string `json:"package_steps,omitempty"`
 	DoctorChecks      []string `json:"doctor_checks,omitempty"`
 }
 
@@ -93,6 +94,7 @@ func ValidateManifest(manifest Manifest) []spec.Diagnostic {
 	}
 	validateExportList(add, "$.exports.dependencies", manifest.Exports.Dependencies, validateNameValue)
 	validateExportList(add, "$.exports.operation_profiles", manifest.Exports.OperationProfiles, validateStepKindValue)
+	validateExportList(add, "$.exports.package_steps", manifest.Exports.PackageSteps, validateStepKindValue)
 	validateExportList(add, "$.exports.doctor_checks", manifest.Exports.DoctorChecks, validateStepKindValue)
 	if manifest.Plugin != nil {
 		value := strings.TrimSpace(manifest.Plugin.Manifest)
@@ -164,24 +166,41 @@ func ValidateStackLock(doc spec.Document, lock *LockFile, opts ValidationOptions
 	}
 	diagnostics := ValidateLock(*lock, validationOpts)
 	add := diagnosticAppender(&diagnostics)
-	entries := map[string]LockEntry{}
-	for _, entry := range lock.Packages {
-		if entry.Name != "" {
-			entries[entry.Name] = entry
-		}
-	}
 	for i, dependency := range doc.Stack.Dependencies {
 		base := fmt.Sprintf("$.stack.dependencies[%d]", i)
-		entry, ok := entries[dependency.Name]
+		entry, ok := FindLockEntryForDependency(*lock, dependency)
 		if !ok {
 			add(base+".name", "PACKAGE_LOCK_ENTRY_MISSING", "dependency has no matching skiff.lock.json entry")
 			continue
 		}
-		if strings.TrimSpace(entry.Ref) != strings.TrimSpace(dependency.Uses) {
+		if !lockEntryMatchesDependency(entry, dependency) {
 			add(base+".uses", "PACKAGE_LOCK_REF_MISMATCH", "dependency uses does not match locked package ref")
 		}
 	}
 	return diagnostics
+}
+
+func FindLockEntryForDependency(lock LockFile, dependency spec.StackDependency) (LockEntry, bool) {
+	dependencyName := strings.TrimSpace(dependency.Name)
+	for _, entry := range lock.Packages {
+		if dependencyName != "" && strings.TrimSpace(entry.Name) == dependencyName {
+			return entry, true
+		}
+	}
+	for _, entry := range lock.Packages {
+		if lockEntryMatchesDependency(entry, dependency) {
+			return entry, true
+		}
+	}
+	return LockEntry{}, false
+}
+
+func lockEntryMatchesDependency(entry LockEntry, dependency spec.StackDependency) bool {
+	uses := strings.TrimSpace(dependency.Uses)
+	if uses == "" {
+		return false
+	}
+	return strings.TrimSpace(entry.Ref) == uses || strings.TrimSpace(entry.Source) == uses
 }
 
 func decodeStrict(body []byte, dst any, label string) error {

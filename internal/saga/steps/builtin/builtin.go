@@ -12,6 +12,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/saga/steps/service"
 	statefulsteps "github.com/s1liconcow/skiff/internal/saga/steps/stateful"
 	sagatime "github.com/s1liconcow/skiff/internal/saga/steps/time"
+	stateruntime "github.com/s1liconcow/skiff/internal/stateful"
 )
 
 type Options struct {
@@ -38,7 +39,8 @@ func New(opts Options) map[string]steps.Step {
 		sagatime.Sleep{},
 	}
 	statefulProvider, _ := opts.Provider.(provider.StatefulOperations)
-	items = append(items, statefulsteps.NewWithProvider(opts.Store, statefulProvider, nil)...)
+	statefulRecipe, _ := opts.Provider.(stateruntime.Recipe)
+	items = append(items, statefulsteps.NewWithProvider(opts.Store, statefulProvider, statefulRecipe)...)
 	if trafficProvider, ok := opts.Provider.(provider.TrafficOperations); ok {
 		items = append(items, service.TrafficShift{Shifter: trafficProvider})
 	}

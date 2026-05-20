@@ -9,11 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/s1liconcow/skiff/internal/compiler"
+	"github.com/s1liconcow/skiff/internal/ir"
 	"github.com/s1liconcow/skiff/internal/objstore"
 	"github.com/s1liconcow/skiff/internal/objstore/memory"
 	"github.com/s1liconcow/skiff/internal/provider"
 	fakeprovider "github.com/s1liconcow/skiff/internal/provider/fake"
 	"github.com/s1liconcow/skiff/internal/security"
+	"github.com/s1liconcow/skiff/internal/spec"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
 	"github.com/s1liconcow/skiff/internal/state/paths"
 	"github.com/s1liconcow/skiff/internal/state/schema"
@@ -108,6 +111,156 @@ func TestInspectResourceUsesStoredFakeHealthForNonTarballRelease(t *testing.T) {
 	}
 	if inspection.Status != "configured" || inspection.ProviderID != "fake-target-group-caddy-web" {
 		t.Fatalf("unexpected inspection: %+v", inspection)
+	}
+}
+
+func TestStatefulPlanUsesStableAppleMemberAndVolumeIDs(t *testing.T) {
+	t.Setenv("SKIFF_APPLE_STATEFUL_PORT_BASE", "31000")
+	graph := compileAppleStatefulGraph(t)
+	plan, err := New().Plan(context.Background(), graph)
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if plan.Provider != Name || plan.Service != "ledger" || plan.Env != "prod" {
+		t.Fatalf("unexpected plan header: %+v", plan)
+	}
+	var member provider.PlannedChange
+	var volume provider.PlannedChange
+	for _, change := range plan.Resources {
+		switch {
+		case change.Kind == ir.ResourceKindStatefulMember && change.ProviderID == "skiff-prod-ledger-m0-g1":
+			member = change
+		case change.Kind == ir.ResourceKindStatefulVolume && change.ProviderID == "skiff-prod-ledger-m0-data":
+			volume = change
+		}
+	}
+	if member.ProviderID == "" || volume.ProviderID == "" {
+		t.Fatalf("plan missing stable member/volume IDs: %+v", plan.Resources)
+	}
+	var desired appleStatefulMemberDesired
+	if err := canonical.UnmarshalStrict(member.Desired, &desired); err != nil {
+		t.Fatalf("decode member desired: %v", err)
+	}
+	if desired.Ordinal != 0 || desired.MemberOrdinal != 0 || desired.HostPorts["admin"] != 31000 || desired.HostPorts["health"] != 31001 {
+		t.Fatalf("unexpected member desired: %+v", desired)
+	}
+	if member.Tags[ir.TagStatefulGroup] != "ledger" || member.Tags[ir.TagMemberOrdinal] != "0" || member.Tags[ir.TagStatefulRecipe] != "tiny-stateful" {
+		t.Fatalf("missing stateful tags: %+v", member.Tags)
+	}
+}
+
+func TestApplyStatefulGroupStartsContainersAndPersistsRuntime(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("SKIFF_APPLE_STATEFUL_PORT_BASE", "31000")
+	graph := compileAppleStatefulGraph(t)
+	store := memory.New()
+	container, calls := recordingContainerCLI(t)
+	now := time.Date(2026, 5, 20, 1, 0, 0, 0, time.UTC)
+	p := New(WithStateStore(store), WithContainerCLI(container), WithClock(func() time.Time { return now }))
+	plan, err := p.Plan(ctx, graph)
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	result, err := p.ApplyStatefulGroup(ctx, graph, plan)
+	if err != nil {
+		t.Fatalf("apply stateful group: %v", err)
+	}
+	if len(result.ResourceIDs) != 4 {
+		t.Fatalf("resource IDs = %+v", result.ResourceIDs)
+	}
+	body := string(mustRead(t, calls))
+	for _, want := range []string{
+		"volume create --opt size=1048576 skiff-prod-ledger-m0-data",
+		"run --name skiff-prod-ledger-m0-g1 --detach --user root",
+		"-p 127.0.0.1:31000:8081",
+		"-p 127.0.0.1:31001:8080",
+		"-e SKIFF_STATEFUL_MEMBER=0",
+		"-v skiff-prod-ledger-m0-data:/data",
+		"docker.io/library/busybox@sha256:" + strings.Repeat("a", 64),
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("container calls missing %q:\n%s", want, body)
+		}
+	}
+	runtimeKey, err := paths.StatefulProviderRuntime("ledger", Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeObj, err := store.Get(ctx, runtimeKey)
+	if err != nil {
+		t.Fatalf("runtime doc: %v", err)
+	}
+	var runtime appleStatefulRuntime
+	if err := canonical.UnmarshalStrict(runtimeObj.Body, &runtime); err != nil {
+		t.Fatalf("decode runtime: %v", err)
+	}
+	if runtime.Group != "ledger" || len(runtime.Members) != 2 || runtime.Members[1].VolumeName != "skiff-prod-ledger-m1-data" {
+		t.Fatalf("unexpected runtime: %+v", runtime)
+	}
+	resourceKey, err := paths.ProviderResource(Name, applePathSafe(ir.ResourceKindStatefulMember), "skiff-prod-ledger-m0-g1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Get(ctx, resourceKey); err != nil {
+		t.Fatalf("member resource record: %v", err)
+	}
+}
+
+func TestStatefulReplacementMovesAppleVolumeToNewContainer(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("SKIFF_APPLE_STATEFUL_PORT_BASE", "31000")
+	graph := compileAppleStatefulGraph(t)
+	store := memory.New()
+	container, calls := recordingContainerCLI(t)
+	p := New(WithStateStore(store), WithContainerCLI(container))
+	plan, err := p.Plan(ctx, graph)
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if _, err := p.ApplyStatefulGroup(ctx, graph, plan); err != nil {
+		t.Fatalf("apply stateful group: %v", err)
+	}
+	if err := os.WriteFile(calls, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref := provider.StatefulMemberRef{Group: "ledger", Env: "prod", Member: 1}
+	if _, err := p.FenceInstance(ctx, provider.FenceInstanceRequest{Ref: ref, InstanceID: "skiff-prod-ledger-m1-g1"}); err != nil {
+		t.Fatalf("fence: %v", err)
+	}
+	if _, err := p.DetachVolume(ctx, provider.DetachVolumeRequest{Ref: ref, InstanceID: "skiff-prod-ledger-m1-g1", VolumeID: "skiff-prod-ledger-m1-data"}); err != nil {
+		t.Fatalf("detach: %v", err)
+	}
+	launched, err := p.LaunchReplacement(ctx, provider.LaunchReplacementRequest{Ref: ref, PreviousID: "skiff-prod-ledger-m1-g1", VolumeID: "skiff-prod-ledger-m1-data", Generation: 2})
+	if err != nil {
+		t.Fatalf("launch replacement: %v", err)
+	}
+	if launched.InstanceID != "skiff-prod-ledger-m1-g2" {
+		t.Fatalf("replacement ID = %q", launched.InstanceID)
+	}
+	if _, err := p.AttachVolume(ctx, provider.AttachVolumeRequest{Ref: ref, InstanceID: launched.InstanceID, VolumeID: "skiff-prod-ledger-m1-data"}); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	if _, err := p.UpdateMemberDNS(ctx, provider.UpdateMemberDNSRequest{Ref: ref, DNSName: "ledger-1.local", InstanceID: launched.InstanceID}); err != nil {
+		t.Fatalf("dns: %v", err)
+	}
+	body := string(mustRead(t, calls))
+	for _, want := range []string{
+		"stop --time 2 skiff-prod-ledger-m1-g1",
+		"delete --force skiff-prod-ledger-m1-g1",
+		"run --name skiff-prod-ledger-m1-g2 --detach --user root",
+		"-v skiff-prod-ledger-m1-data:/data",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("replacement calls missing %q:\n%s", want, body)
+		}
+	}
+	runtime, err := p.loadStatefulRuntime(ctx, "ledger")
+	if err != nil {
+		t.Fatalf("load runtime: %v", err)
+	}
+	member, _, ok := runtime.member(1)
+	if !ok || member.ContainerName != "skiff-prod-ledger-m1-g2" || member.VolumeName != "skiff-prod-ledger-m1-data" {
+		t.Fatalf("runtime did not move member volume: %+v", runtime)
 	}
 }
 
@@ -269,6 +422,73 @@ func writeDemoTarball(t *testing.T, files map[string]string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func compileAppleStatefulGraph(t *testing.T) *ir.Graph {
+	t.Helper()
+	doc, result, err := spec.Parse([]byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: StatefulGroup
+metadata:
+  name: ledger
+  env: prod
+stateful:
+  replicas: 2
+  members:
+    - ordinal: 0
+      dnsName: ledger-0.local
+    - ordinal: 1
+      dnsName: ledger-1.local
+  volume:
+    size: 1Mi
+    mountPath: /data
+    encrypted: true
+  recipe:
+    name: tiny-stateful
+    config:
+      artifact:
+        type: oci
+        ref: docker.io/library/busybox@sha256:`+strings.Repeat("a", 64)+`
+      runtime:
+        command:
+          - sh
+          - -c
+          - sleep 3600
+        ports:
+          health: 8080
+          admin: 8081
+        health:
+          path: /healthz
+          port: 8080
+  update:
+    strategy: ordered
+`), spec.DecodeOptions{})
+	if err != nil {
+		t.Fatalf("parse spec: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("spec invalid: %+v", result.Diagnostics)
+	}
+	graph, err := compiler.Compile(context.Background(), *doc, compiler.Options{})
+	if err != nil {
+		t.Fatalf("compile graph: %v", err)
+	}
+	return graph
+}
+
+func recordingContainerCLI(t *testing.T) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls.log")
+	container := filepath.Join(dir, "container")
+	if err := os.WriteFile(container, []byte(`#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$SKIFF_TEST_CONTAINER_CALLS"
+exit 0
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SKIFF_TEST_CONTAINER_CALLS", calls)
+	return container, calls
 }
 
 func mustRead(t *testing.T, path string) []byte {
