@@ -47,9 +47,11 @@ It also installs shell completions when possible and writes a small Skiff skill
 for local Codex or Claude installations. Use `--no-completions` or
 `--no-agents` to skip those integrations.
 
-Runner image inputs live in `build/runner-image/`. The base image installs
-`skiff-runner`, enables `skiff-runner.service`, and expects direct object-state
-runner user-data at `/etc/skiff/runner.json`.
+Runner image inputs live in `build/runner-image/`. The supported Packer flow
+bakes Amazon Linux 2023 x86_64 and arm64 AMIs, installs `skiff-runner` and
+`skiff-worker`, enables `skiff-runner.service`, and expects direct object-state
+runner user-data at `/etc/skiff/runner.json`. Published AMIs are discoverable
+through SSM parameters such as `/skiff/runner/ami/al2023/x86_64/stable`.
 
 Self-hosted `skiffd` is deployed as a normal Skiff service from
 `examples/skiffd/skiff.yaml`. `skiffd` remains a stateless facade; direct mode is

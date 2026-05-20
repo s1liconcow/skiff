@@ -45,8 +45,8 @@ func TestPlanAWSComplete(t *testing.T) {
 	if plan.RootConfig.Runner == nil || plan.RootConfig.Runner.AMISSMParameter != DefaultRunnerAMISSMParameter {
 		t.Fatalf("runner AMI SSM parameter = %+v", plan.RootConfig.Runner)
 	}
-	if plan.RootConfig.Runner.InstallVersion != DefaultRunnerInstallVersion {
-		t.Fatalf("runner install version = %q", plan.RootConfig.Runner.InstallVersion)
+	if plan.RootConfig.Runner.InstallVersion != "" {
+		t.Fatalf("official runner AMI should not need first-boot install: %+v", plan.RootConfig.Runner)
 	}
 }
 
@@ -71,7 +71,7 @@ func TestPlanAWSManagedPrivateNetwork(t *testing.T) {
 		t.Fatalf("missing private ingress root config: %+v", plan.RootConfig.Ingress)
 	}
 	if plan.RootConfig.Runner == nil || plan.RootConfig.Runner.AMISSMParameter != DefaultRunnerAMISSMParameter {
-		t.Fatalf("missing runner AL2023 SSM default: %+v", plan.RootConfig.Runner)
+		t.Fatalf("missing runner SSM default: %+v", plan.RootConfig.Runner)
 	}
 	if len(plan.Resources) != 13 {
 		t.Fatalf("resource count = %d, want 13", len(plan.Resources))
@@ -227,6 +227,24 @@ func TestPlanAWSExplicitRunnerAMIIDOverridesSSMDefault(t *testing.T) {
 	}
 	if plan.RootConfig.Runner.InstallVersion != "" {
 		t.Fatalf("runner install version should be empty for custom AMI: %+v", plan.RootConfig.Runner)
+	}
+}
+
+func TestPlanAWSFallbackAL2023RunnerAMIInstallsPinnedRunner(t *testing.T) {
+	plan, err := PlanAWS(AWSOptions{
+		Env:                   "prod",
+		Region:                "us-west-2",
+		StateBucket:           "skiff-state-prod",
+		RunnerAMISSMParameter: FallbackRunnerAMISSMParameter,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.RootConfig.Runner == nil || plan.RootConfig.Runner.AMISSMParameter != FallbackRunnerAMISSMParameter {
+		t.Fatalf("runner fallback SSM parameter = %+v", plan.RootConfig.Runner)
+	}
+	if plan.RootConfig.Runner.InstallVersion != DefaultRunnerInstallVersion {
+		t.Fatalf("fallback AL2023 AMI should install pinned runner release: %+v", plan.RootConfig.Runner)
 	}
 }
 

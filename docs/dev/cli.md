@@ -279,6 +279,14 @@ skiff ops run ledger-stream update-release --release-id rel_01J... --members 0 -
 skiff ops run ledger-stream replace-member --member 0 --approval-id approval_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
 ```
 
+Package operation profiles use the same surface. The profile name comes from the
+locked package and package parameters are explicit:
+
+```bash
+skiff ops plan payments-db primary-switchover-update --param release_id=rel_01J... --param candidate=payments-db-1 --format json
+skiff ops run payments-db primary-switchover-update --param release_id=rel_01J... --param candidate=payments-db-1 --approval-id approval_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+```
+
 `skiff stateful update-release` and `skiff stateful replace-member` remain
 compatibility aliases. `skiff saga start` is deprecated for normal operation
 creation; use `deploy --canary` for canaries and `ops run` for stateful

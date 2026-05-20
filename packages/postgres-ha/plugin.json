@@ -1,0 +1,219 @@
+{
+  "apiVersion": "skiff.dev/plugin/v1alpha1",
+  "kind": "Plugin",
+  "name": "postgres-ha",
+  "version": "1.0.0",
+  "description": "First-party HA Postgres package steps for safe primary switchover and replica lag validation.",
+  "runtime": {
+    "kind": "command",
+    "command": ["postgres-ha-plugin"]
+  },
+  "hooks": ["doctor_checks", "package_step"],
+  "permissions": {
+    "doctor_checks": true,
+    "package_step_kinds": [
+      "package.primary_switchover.verify_cluster_healthy",
+      "package.primary_switchover.verify_candidate_caught_up",
+      "package.primary_switchover.move_primary",
+      "package.primary_switchover.update_old_primary",
+      "package.primary_switchover.verify_old_primary_caught_up",
+      "package.primary_switchover.optional_failback",
+      "package.primary_switchover.update_candidate",
+      "package.primary_switchover.verify_final_topology",
+      "postgres.verify_replica_lag",
+      "postgres.switchover",
+      "postgres.verify_timeline"
+    ]
+  },
+  "capabilities": [
+    {
+      "kind": "doctor_check",
+      "name": "postgres-topology-doctor",
+      "doctor_checks": ["postgres.replica_lag", "postgres.timeline"]
+    },
+    {
+      "kind": "package_step",
+      "name": "postgres-primary-switchover",
+      "package_steps": [
+        {
+          "kind": "package.primary_switchover.verify_cluster_healthy",
+          "summary": "verify every Postgres member is healthy before a planned switchover",
+          "params": {
+            "profile_kind": {"type": "string"},
+            "release_id": {"type": "string", "required": true},
+            "candidate": {"type": "string", "required": true},
+            "return_primary": {"type": "boolean"},
+            "original_primary": {"type": "string"},
+            "maxReplicaLagBytes": {"type": "integer"},
+            "member_admin_urls": {"type": "object"},
+            "admin_url_template": {"type": "string"}
+          },
+          "risk": "low",
+          "reversibility": "reversible"
+        },
+        {
+          "kind": "package.primary_switchover.verify_candidate_caught_up",
+          "summary": "gate planned switchover on candidate health and replica lag",
+          "params": {
+            "profile_kind": {"type": "string"},
+            "release_id": {"type": "string", "required": true},
+            "candidate": {"type": "string", "required": true},
+            "return_primary": {"type": "boolean"},
+            "original_primary": {"type": "string"},
+            "maxReplicaLagBytes": {"type": "integer"},
+            "member_admin_urls": {"type": "object"},
+            "admin_url_template": {"type": "string"}
+          },
+          "risk": "low",
+          "reversibility": "reversible"
+        },
+        {
+          "kind": "package.primary_switchover.move_primary",
+          "summary": "perform a planned Postgres switchover to the caught-up candidate",
+          "params": {
+            "profile_kind": {"type": "string"},
+            "release_id": {"type": "string", "required": true},
+            "candidate": {"type": "string", "required": true},
+            "return_primary": {"type": "boolean"},
+            "original_primary": {"type": "string"},
+            "maxReplicaLagBytes": {"type": "integer"},
+            "member_admin_urls": {"type": "object"},
+            "admin_url_template": {"type": "string"}
+          },
+          "risk": "high",
+          "reversibility": "partially_reversible"
+        },
+        {
+          "kind": "package.primary_switchover.update_old_primary",
+          "summary": "update the old Postgres primary after it becomes a replica",
+          "params": {
+            "profile_kind": {"type": "string"},
+            "release_id": {"type": "string", "required": true},
+            "candidate": {"type": "string", "required": true},
+            "return_primary": {"type": "boolean"},
+            "original_primary": {"type": "string"},
+            "maxReplicaLagBytes": {"type": "integer"},
+            "member_admin_urls": {"type": "object"},
+            "admin_url_template": {"type": "string"}
+          },
+          "risk": "medium",
+          "reversibility": "compensatable"
+        },
+        {
+          "kind": "package.primary_switchover.verify_old_primary_caught_up",
+          "summary": "verify the old primary has rejoined and caught up",
+          "params": {
+            "profile_kind": {"type": "string"},
+            "release_id": {"type": "string", "required": true},
+            "candidate": {"type": "string", "required": true},
+            "return_primary": {"type": "boolean"},
+            "original_primary": {"type": "string"},
+            "maxReplicaLagBytes": {"type": "integer"},
+            "member_admin_urls": {"type": "object"},
+            "admin_url_template": {"type": "string"}
+          },
+          "risk": "low",
+          "reversibility": "reversible"
+        },
+        {
+          "kind": "package.primary_switchover.optional_failback",
+          "summary": "optionally move the primary role back after the old primary is updated",
+          "params": {
+            "profile_kind": {"type": "string"},
+            "release_id": {"type": "string", "required": true},
+            "candidate": {"type": "string", "required": true},
+            "return_primary": {"type": "boolean"},
+            "original_primary": {"type": "string"},
+            "maxReplicaLagBytes": {"type": "integer"},
+            "member_admin_urls": {"type": "object"},
+            "admin_url_template": {"type": "string"}
+          },
+          "risk": "medium",
+          "reversibility": "partially_reversible"
+        },
+        {
+          "kind": "package.primary_switchover.update_candidate",
+          "summary": "update the temporary primary after failback or final topology selection",
+          "params": {
+            "profile_kind": {"type": "string"},
+            "release_id": {"type": "string", "required": true},
+            "candidate": {"type": "string", "required": true},
+            "return_primary": {"type": "boolean"},
+            "original_primary": {"type": "string"},
+            "maxReplicaLagBytes": {"type": "integer"},
+            "member_admin_urls": {"type": "object"},
+            "admin_url_template": {"type": "string"}
+          },
+          "risk": "medium",
+          "reversibility": "compensatable"
+        },
+        {
+          "kind": "package.primary_switchover.verify_final_topology",
+          "summary": "verify final primary and replicas are caught up",
+          "params": {
+            "profile_kind": {"type": "string"},
+            "release_id": {"type": "string", "required": true},
+            "candidate": {"type": "string", "required": true},
+            "return_primary": {"type": "boolean"},
+            "original_primary": {"type": "string"},
+            "expected_primary": {"type": "string"},
+            "maxReplicaLagBytes": {"type": "integer"},
+            "member_admin_urls": {"type": "object"},
+            "admin_url_template": {"type": "string"}
+          },
+          "risk": "low",
+          "reversibility": "reversible"
+        }
+      ]
+    },
+    {
+      "kind": "package_step",
+      "name": "postgres-safety-steps",
+      "package_steps": [
+        {
+          "kind": "postgres.verify_replica_lag",
+          "summary": "verify a Postgres replica is within the configured lag budget",
+          "params": {
+            "candidate": {"type": "string", "required": true},
+            "maxReplicaLagBytes": {"type": "integer"},
+            "member_admin_urls": {"type": "object"},
+            "admin_url_template": {"type": "string"}
+          },
+          "result": {
+            "lag_bytes": {"type": "integer"},
+            "timeline": {"type": "string"}
+          },
+          "risk": "low",
+          "reversibility": "reversible"
+        },
+        {
+          "kind": "postgres.switchover",
+          "summary": "run a planned Postgres switchover after safety checks pass",
+          "params": {
+            "candidate": {"type": "string", "required": true},
+            "emergency": {"type": "boolean"},
+            "maxReplicaLagBytes": {"type": "integer"},
+            "member_admin_urls": {"type": "object"},
+            "admin_url_template": {"type": "string"}
+          },
+          "risk": "high",
+          "reversibility": "partially_reversible"
+        },
+        {
+          "kind": "postgres.verify_timeline",
+          "summary": "verify the promoted timeline and old primary rejoin state",
+          "params": {
+            "expected_primary": {"type": "string", "required": true},
+            "candidate": {"type": "string"},
+            "return_primary": {"type": "boolean"},
+            "maxReplicaLagBytes": {"type": "integer"},
+            "member_admin_urls": {"type": "object"},
+            "admin_url_template": {"type": "string"}
+          },
+          "risk": "low",
+          "reversibility": "reversible"
+        }
+      ]
+    }
+  ]
+}

@@ -14,11 +14,12 @@ type statefulPackageValidationRow struct {
 	Fixture   string
 	Profile   string
 	Status    string
+	Actual    bool
 }
 
 func statefulPackageValidationMatrix() []statefulPackageValidationRow {
 	return []statefulPackageValidationRow{
-		{Package: "postgres-ha", Mode: "self-managed", OpsemMode: "primary-replica", Fixture: "postgres-ha", Profile: "primary-switchover-update", Status: coverageCovered},
+		{Package: "postgres-ha", Mode: "self-managed", OpsemMode: "primary-replica", Fixture: "postgres-ha", Profile: "primary-switchover-update", Status: coverageCovered, Actual: true},
 		{Package: "mysql-ha", Mode: "self-managed", OpsemMode: "primary-replica", Fixture: "mysql-ha", Profile: "primary-switchover-update", Status: coverageCovered},
 		{Package: "kafka", Mode: "self-managed", OpsemMode: "partition-isr", Fixture: "kafka", Profile: "partition-quorum-rolling-update", Status: coverageCovered},
 		{Package: "nats-jetstream", Mode: "self-managed", OpsemMode: "raft-groups", Fixture: "nats-jetstream", Profile: "raft-group-rolling-update", Status: coverageCovered},
@@ -52,6 +53,9 @@ func TestStatefulPackageValidationMatrixData(t *testing.T) {
 		case coverageCovered:
 			covered++
 			assertPackageFixtureExists(t, row.Fixture)
+			if row.Actual {
+				assertActualPackageExists(t, row.Package)
+			}
 		case coverageNotImplemented:
 			if packageFixtureExists(row.Fixture) {
 				t.Fatalf("package fixture %s exists but matrix still marks it not_implemented", row.Fixture)
@@ -78,6 +82,14 @@ func assertPackageFixtureExists(t *testing.T, fixture string) {
 	t.Helper()
 	if !packageFixtureExists(fixture) {
 		t.Fatalf("package fixture %s is missing", fixture)
+	}
+}
+
+func assertActualPackageExists(t *testing.T, pkg string) {
+	t.Helper()
+	info, err := os.Stat(filepath.Join("..", "..", "packages", pkg, "skiff-package.json"))
+	if err != nil || info.IsDir() {
+		t.Fatalf("actual package %s is missing", pkg)
 	}
 }
 

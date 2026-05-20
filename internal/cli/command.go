@@ -85,6 +85,9 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 	case "authz":
 		return runAuthz(binary, root.Args, root, stdout, stderr)
 	case "bootstrap":
+		if binary == "skiff-runner" {
+			return runRunnerBootstrap(binary, root.Args, root, stdout, stderr)
+		}
 		return runBootstrap(binary, root.Args, stdout, stderr)
 	case "compile":
 		return runCompile(binary, root.Args, stdout, stderr)
@@ -148,6 +151,13 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runRollback(binary, root.Args, root, stdout, stderr)
 	case "rollout":
 		return runRollout(binary, root.Args, root, stdout, stderr)
+	case "run":
+		if binary == "skiff-runner" {
+			return runRunnerRun(binary, root.Args, root, stdout, stderr)
+		}
+		fmt.Fprintf(stderr, "%s: unknown command %q\n", binary, root.Command)
+		printUsage(stderr, binary)
+		return ExitUserError
 	case "saga":
 		return runSaga(binary, root.Args, root, stdout, stderr)
 	case "solve":
@@ -2112,8 +2122,8 @@ func printBootstrapUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  --hosted-zone-id <zone>           Optional; Route53 zone override")
 	fmt.Fprintln(w, "  --certificate-arn <arn>           Optional; reuse an ACM cert instead of creating one")
 	fmt.Fprintln(w, "  --runner-ami-id <ami>              Optional; custom runner AMI")
-	fmt.Fprintln(w, "  --runner-ami-ssm-parameter <path>  Optional; defaults to AL2023 x86_64")
-	fmt.Fprintln(w, "  --runner-install-version <tag>     Optional; defaults to v0.1.0 with the public AL2023 AMI")
+	fmt.Fprintln(w, "  --runner-ami-ssm-parameter <path>  Optional; defaults to Skiff AL2023 x86_64")
+	fmt.Fprintln(w, "  --runner-install-version <tag>     Optional; used with the public AL2023 fallback AMI")
 	fmt.Fprintln(w, "  --dry-run")
 	fmt.Fprintln(w, "  --emit terraform")
 	fmt.Fprintln(w, "  --out <dir>                       Write generated artifacts and teardown script")

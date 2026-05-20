@@ -76,6 +76,35 @@ func TestRunnerImageInputsAndSkiffdRecipeAreValid(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "build", "runner-image", "packer.pkr.hcl")); err != nil {
 		t.Fatalf("packer template missing: %v", err)
 	}
+	packerBody, err := os.ReadFile(filepath.Join(root, "build", "runner-image", "packer.pkr.hcl"))
+	if err != nil {
+		t.Fatalf("read packer template: %v", err)
+	}
+	packerText := string(packerBody)
+	for _, required := range []string{
+		`source "amazon-ebs" "runner_amd64"`,
+		`source "amazon-ebs" "runner_arm64"`,
+		`al2023-ami-2023.*-kernel-6.1-x86_64`,
+		`al2023-ami-2023.*-kernel-6.1-arm64`,
+		`skiff.dev/version`,
+		`skiff.dev/provenance-commit`,
+		`/skiff/runner/ami/al2023`,
+		`runner-image-amd64-manifest.json`,
+		`runner-image-arm64-manifest.json`,
+	} {
+		if !strings.Contains(packerText, required) {
+			t.Fatalf("packer template missing %q:\n%s", required, packerText)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, ".github", "workflows", "runner-image.yml")); err != nil {
+		t.Fatalf("runner image workflow missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "scripts", "publish-runner-ami-ssm.sh")); err != nil {
+		t.Fatalf("runner AMI SSM publish script missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "scripts", "deprecate-runner-amis.sh")); err != nil {
+		t.Fatalf("runner AMI deprecation script missing: %v", err)
+	}
 	doc, err := spec.LoadFile(filepath.Join(root, "examples", "skiffd", "skiff.yaml"), spec.DecodeOptions{})
 	if err != nil {
 		t.Fatalf("load skiffd recipe: %v", err)

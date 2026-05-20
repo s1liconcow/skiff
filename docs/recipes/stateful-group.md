@@ -194,6 +194,24 @@ Resume from object state:
 skiff ops resume saga_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
 ```
 
+## Package-Specific Topology Operations
+
+Package-backed StatefulGroups add topology operations that are specific to the
+data system. These still use the same durable operation and saga object layout,
+but the profile names and package steps come from the locked package.
+
+Examples:
+
+```bash
+skiff ops run payments-db primary-switchover-update --param release_id=rel_01J... --param candidate=payments-db-1 --approval-id approval_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+skiff ops run orders-kafka partition-quorum-rolling-update --param release_id=rel_01J... --param partition_selector={} --approval-id approval_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+skiff ops run cache-cluster slot-aware-failover-update --param release_id=rel_01J... --param slot_selector={} --approval-id approval_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+```
+
+Use `skiff ops plan` before `run` to inspect risk, reversibility, package
+provenance, and the rendered graph. Use `skiff saga inspect` only for direct
+graph recovery after an operation has already been created.
+
 ## Backup And Restore
 
 Backups create immutable backup records and append saga events. Restores are

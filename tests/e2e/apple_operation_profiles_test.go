@@ -17,6 +17,7 @@ import (
 
 	"github.com/s1liconcow/skiff/internal/objstore"
 	opsstate "github.com/s1liconcow/skiff/internal/ops"
+	"github.com/s1liconcow/skiff/internal/plugins"
 	"github.com/s1liconcow/skiff/internal/provider/applecontainer"
 	sagastate "github.com/s1liconcow/skiff/internal/saga"
 	"github.com/s1liconcow/skiff/internal/saga/steps"
@@ -71,14 +72,15 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 
 	scenarios := []opsemProfileScenario{
 		{
-			Mode:       "primary-replica",
-			Service:    "postgres-primary",
-			Fixture:    "postgres-ha",
-			Profile:    "primary-switchover-update",
-			Operation:  "op_opsem_primary",
-			Saga:       "saga_opsem_primary",
-			Expected:   schema.SagaSucceeded,
-			ParamPairs: []string{"release_id=rel_primary", `candidate="1"`, "return_primary=true"},
+			Mode:          "primary-replica",
+			Service:       "postgres-primary",
+			Fixture:       "postgres-ha",
+			Profile:       "primary-switchover-update",
+			Operation:     "op_opsem_primary",
+			Saga:          "saga_opsem_primary",
+			Expected:      schema.SagaSucceeded,
+			ActualPackage: true,
+			ParamPairs:    []string{"release_id=rel_primary", `candidate="1"`, "return_primary=true"},
 		},
 		{
 			Mode:       "primary-replica",
@@ -110,6 +112,7 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 			Expected:                schema.SagaFailed,
 			UnsafeFailure:           "replica-lag-too-high",
 			InjectFailureBeforeKind: "package.primary_switchover.verify_candidate_caught_up",
+			ActualPackage:           true,
 			ParamPairs:              []string{"release_id=rel_primary", `candidate="1"`, "return_primary=true"},
 		},
 		{
@@ -236,7 +239,7 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 
 			lockfile := filepath.Join(report.reportDir, sanitizeProviderID(scenario.Operation)+"-skiff.lock.json")
 			cacheRoot := filepath.Join(report.reportDir, "package-cache", sanitizeProviderID(scenario.Operation))
-			lockOpsemProfilePackage(t, report, lockfile, cacheRoot, scenario.Fixture)
+			lockOpsemProfilePackage(t, report, lockfile, cacheRoot, scenario)
 
 			planOut := runOpsemProfilePlan(t, report, scenario, lockfile, cacheRoot, traceID)
 			if planOut.WouldWrite || planOut.Package == nil || planOut.Package.Digest == "" || len(planOut.Profile.Steps) == 0 {
@@ -260,21 +263,36 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 			}
 
 			graph := assertRenderedPackageGraph(t, ctx, store, scenario.Saga)
-			runner := &opsemSemanticRunner{
-				service:                 scenario.Service,
-				mode:                    scenario.Mode,
-				portBase:                portBase,
-				waitKind:                scenario.WaitKind,
-				waited:                  map[string]bool{},
-				injectFailureBeforeKind: scenario.InjectFailureBeforeKind,
-				injectFailure:           scenario.UnsafeFailure,
+			var execution *sagastate.ExecutionResult
+			var mutations []string
+			if scenario.ActualPackage {
+				ensurePostgresHAPluginOnPath(t)
+				setPostgresHAAdminURLs(t, portBase)
+				runner := &actualPostgresPackageRunner{
+					t:        t,
+					scenario: scenario,
+					portBase: portBase,
+				}
+				execution = executeActualPostgresProfileSaga(t, ctx, store, graph, scenario.Saga, runner)
+				mutations = runner.mutations
+			} else {
+				runner := &opsemSemanticRunner{
+					service:                 scenario.Service,
+					mode:                    scenario.Mode,
+					portBase:                portBase,
+					waitKind:                scenario.WaitKind,
+					waited:                  map[string]bool{},
+					injectFailureBeforeKind: scenario.InjectFailureBeforeKind,
+					injectFailure:           scenario.UnsafeFailure,
+				}
+				execution = executeOpsemProfileSaga(t, ctx, store, graph, scenario.Saga, runner)
+				mutations = runner.mutations
 			}
-			execution := executeOpsemProfileSaga(t, ctx, store, graph, scenario.Saga, runner)
 			if execution.Status != scenario.Expected {
 				t.Fatalf("saga status = %s, want %s; execution=%+v", execution.Status, scenario.Expected, execution)
 			}
-			if scenario.UnsafeFailure != "" && len(runner.mutations) != 0 {
-				t.Fatalf("unsafe scenario mutated live members before failing: %+v", runner.mutations)
+			if scenario.UnsafeFailure != "" && len(mutations) != 0 {
+				t.Fatalf("unsafe scenario mutated live members before failing: %+v", mutations)
 			}
 			if scenario.UnsafeFailure != "" {
 				report.fact("blocked_unsafe_scenario", fmt.Sprintf("%s blocked %s before member mutation", scenario.Service, scenario.UnsafeFailure))
@@ -311,6 +329,7 @@ type opsemProfileScenario struct {
 	UnsafeFailure           string
 	InjectFailureBeforeKind string
 	WaitKind                string
+	ActualPackage           bool
 	ParamPairs              []string
 }
 
@@ -344,17 +363,30 @@ type opsemEventWatchOutput struct {
 	LastEventID string        `json:"last_event_id,omitempty"`
 }
 
-func lockOpsemProfilePackage(t *testing.T, report *e2eReport, lockfile, cacheRoot, fixture string) {
+func lockOpsemProfilePackage(t *testing.T, report *e2eReport, lockfile, cacheRoot string, scenario opsemProfileScenario) {
 	t.Helper()
 	root := repoRootForTest(t)
+	traceID := "tr_pkg_" + strings.ReplaceAll(scenario.Fixture, "-", "_")
+	if scenario.ActualPackage {
+		runSkiffCLI(t, report,
+			"pkg", "add", "skiff.dev/"+scenario.Fixture,
+			"--registry-dir", filepath.Join(root, "packages"),
+			"--lockfile", lockfile,
+			"--cache", cacheRoot,
+			"--format", "json",
+			"--trace-id", traceID,
+		)
+		report.fact("opsem_actual_package", "locked first-party package "+scenario.Fixture+" into "+lockfile)
+		return
+	}
 	runSkiffCLI(t, report,
-		"pkg", "add", "file://"+filepath.Join(root, "tests", "fixtures", "packages", fixture),
+		"pkg", "add", "file://"+filepath.Join(root, "tests", "fixtures", "packages", scenario.Fixture),
 		"--lockfile", lockfile,
 		"--cache", cacheRoot,
 		"--format", "json",
-		"--trace-id", "tr_pkg_"+strings.ReplaceAll(fixture, "-", "_"),
+		"--trace-id", traceID,
 	)
-	report.fact("opsem_package_fixture", "locked "+fixture+" into "+lockfile)
+	report.fact("opsem_package_fixture", "locked "+scenario.Fixture+" into "+lockfile)
 }
 
 func runOpsemProfilePlan(t *testing.T, report *e2eReport, scenario opsemProfileScenario, lockfile, cacheRoot, traceID string) opsemOpsProfileOutput {
@@ -477,6 +509,148 @@ func executeOpsemProfileSaga(t *testing.T, ctx context.Context, store objstore.O
 		t.Fatalf("resumed saga status = %s, want succeeded: %+v", second.Status, second)
 	}
 	return second
+}
+
+func executeActualPostgresProfileSaga(t *testing.T, ctx context.Context, store objstore.ObjectStore, graph schema.SagaGraph, sagaID string, runner *actualPostgresPackageRunner) *sagastate.ExecutionResult {
+	t.Helper()
+	sagas := sagastate.NewStore(store)
+	executor := &sagastate.Executor{
+		Store:   sagas,
+		Steps:   actualPostgresPackageStepMap(t, graph, runner),
+		Owner:   "postgres-ha-actual-package-e2e",
+		EventID: sequentialEventID(sagaID),
+	}
+	result, err := executor.Execute(ctx, sagaID)
+	if err != nil {
+		t.Fatalf("execute actual postgres-ha package saga: %v", err)
+	}
+	return result
+}
+
+func actualPostgresPackageStepMap(t *testing.T, graph schema.SagaGraph, runner *actualPostgresPackageRunner) map[string]steps.Step {
+	t.Helper()
+	root := repoRootForTest(t)
+	registry, err := plugins.LoadRegistry(context.Background(), plugins.RegistryOptions{
+		Paths: []string{filepath.Join(root, "packages", "postgres-ha", "plugin.json")},
+	})
+	if err != nil {
+		t.Fatalf("load postgres-ha plugin registry: %v", err)
+	}
+	host := plugins.NewHost(registry, plugins.CommandRunner{Timeout: 30 * time.Second})
+	available := plugins.PackageSteps(host)
+	out := make(map[string]steps.Step)
+	for _, node := range graph.Nodes {
+		step, ok := available[node.Kind]
+		if !ok {
+			t.Fatalf("actual postgres-ha package does not provide step %s", node.Kind)
+		}
+		out[node.Kind] = actualPostgresStep{inner: step, runner: runner}
+	}
+	return out
+}
+
+type actualPostgresPackageRunner struct {
+	t               *testing.T
+	scenario        opsemProfileScenario
+	portBase        int
+	injectedFailure bool
+	mutations       []string
+}
+
+type actualPostgresStep struct {
+	inner  steps.Step
+	runner *actualPostgresPackageRunner
+}
+
+func (s actualPostgresStep) Kind() string {
+	return s.inner.Kind()
+}
+
+func (s actualPostgresStep) ValidateParams(ctx context.Context, params json.RawMessage) error {
+	return s.inner.ValidateParams(ctx, params)
+}
+
+func (s actualPostgresStep) Plan(ctx context.Context, req steps.StepRequest) (*steps.StepPlan, error) {
+	return s.inner.Plan(ctx, req)
+}
+
+func (s actualPostgresStep) Run(ctx context.Context, req steps.StepRequest) (*steps.StepResult, error) {
+	s.runner.beforeRun(ctx, req.Node.Kind)
+	result, err := s.inner.Run(ctx, req)
+	s.runner.afterRun(req.Node.Kind, result)
+	return result, err
+}
+
+func (s actualPostgresStep) Resume(ctx context.Context, req steps.StepRequest) (*steps.StepResult, error) {
+	return s.inner.Resume(ctx, req)
+}
+
+func (s actualPostgresStep) Compensate(ctx context.Context, req steps.StepRequest, result schema.StepResult) (*steps.StepResult, error) {
+	return s.inner.Compensate(ctx, req, result)
+}
+
+func (s actualPostgresStep) Doctor(ctx context.Context, req steps.StepRequest) ([]steps.Finding, error) {
+	return s.inner.Doctor(ctx, req)
+}
+
+func (r *actualPostgresPackageRunner) beforeRun(ctx context.Context, kind string) {
+	if r.scenario.InjectFailureBeforeKind != kind || r.scenario.UnsafeFailure == "" || r.injectedFailure {
+		return
+	}
+	opsemPost(r.t, ctx, opsemMemberPort(r.portBase, 1), "/admin/fail", map[string]string{"type": r.scenario.UnsafeFailure})
+	r.injectedFailure = true
+}
+
+func (r *actualPostgresPackageRunner) afterRun(kind string, result *steps.StepResult) {
+	if result == nil || result.Status != steps.StatusSucceeded || !postgresMutatingKind(kind) {
+		return
+	}
+	r.mutations = append(r.mutations, kind)
+}
+
+func postgresMutatingKind(kind string) bool {
+	switch kind {
+	case "package.primary_switchover.move_primary",
+		"package.primary_switchover.update_old_primary",
+		"package.primary_switchover.optional_failback",
+		"package.primary_switchover.update_candidate",
+		"postgres.switchover":
+		return true
+	default:
+		return false
+	}
+}
+
+func ensurePostgresHAPluginOnPath(t *testing.T) {
+	t.Helper()
+	root := repoRootForTest(t)
+	outDir := t.TempDir()
+	outputPath := filepath.Join(outDir, "postgres-ha-plugin")
+	cmd := exec.Command("go", "build", "-o", outputPath, "./cmd/postgres-ha-plugin")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(),
+		"GOCACHE="+filepath.Join(root, ".cache", "go-build"),
+		"GOMODCACHE="+filepath.Join(root, ".cache", "gomod"),
+	)
+	body, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build postgres-ha-plugin: %v\n%s", err, string(body))
+	}
+	t.Setenv("PATH", outDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func setPostgresHAAdminURLs(t *testing.T, portBase int) {
+	t.Helper()
+	urls := map[string]string{}
+	for member := 0; member < 3; member++ {
+		urls[strconv.Itoa(member)] = fmt.Sprintf("http://127.0.0.1:%d", opsemMemberPort(portBase, member))
+	}
+	body, err := json.Marshal(urls)
+	if err != nil {
+		t.Fatalf("marshal postgres admin URLs: %v", err)
+	}
+	t.Setenv("SKIFF_POSTGRES_HA_MEMBER_ADMIN_URLS", string(body))
+	t.Setenv("SKIFF_POSTGRES_HA_MAX_REPLICA_LAG_BYTES", "0")
 }
 
 func opsemPackageStepMap(t *testing.T, graph schema.SagaGraph, runner *opsemSemanticRunner) map[string]steps.Step {

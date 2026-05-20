@@ -308,7 +308,10 @@ Prerequisites:
   client; `--emit terraform` writes an equivalent Terraform backend when you
   want Terraform state.
 - No custom AMI is required for this quickstart. Bootstrap defaults runner VMs
-  to AWS's public Amazon Linux 2023 x86_64 SSM AMI parameter and cloud-init
+  to Skiff's public runner AMI SSM parameter for Amazon Linux 2023 x86_64,
+  `/skiff/runner/ami/al2023/x86_64/stable`. If that parameter has not been
+  published in your target region yet, pass AWS's public Amazon Linux 2023
+  fallback with `--runner-ami-ssm-parameter`; that fallback cloud-init path
   installs a pinned Skiff runner release on first boot.
 - A real digest-pinned artifact ref that the runner VM can fetch. Do not deploy
   the placeholder `registry.example.com` artifact from the repository examples.
@@ -402,10 +405,11 @@ From here, commands that load Skiff config get `mode`, `env`, `provider`,
 context.
 The deploy path reads VPC, subnet, ingress, and runner defaults from the
 bootstrap-written `envs/<env>/root.json` object. That root object includes the
-runner AMI SSM parameter
-`/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64` and the
-pinned runner install metadata used by launch-template user-data. For public
-DNS, the root object's `ingress.base_domain` is the environment ingress name,
+runner AMI SSM parameter `/skiff/runner/ami/al2023/x86_64/stable`. Official
+Skiff runner AMIs already contain `skiff-runner` and `skiff-worker`; if you
+explicitly choose the AWS public AL2023 fallback parameter, the root object also
+contains the pinned runner install metadata used by launch-template user-data.
+For public DNS, the root object's `ingress.base_domain` is the environment ingress name,
 `ingress.default_host_template` defaults services to
 `{service}.quickstart.example.com`, and `provider_dns_name` keeps the raw ALB
 hostname visible for debugging.

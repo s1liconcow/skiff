@@ -85,6 +85,103 @@ func TestPkgCommandFamilyJSONFlow(t *testing.T) {
 	}
 }
 
+func TestPkgAddActualFirstPartyPostgresHAFromRegistry(t *testing.T) {
+	root := filepath.Join("..", "..")
+	lockfile := filepath.Join(t.TempDir(), "skiff.lock.json")
+	cache := filepath.Join(t.TempDir(), "cache")
+
+	add := runPkgJSON(t, []string{
+		"pkg", "add", "skiff.dev/postgres-ha",
+		"--registry-dir", filepath.Join(root, "packages"),
+		"--lockfile", lockfile,
+		"--cache", cache,
+		"--format", "json",
+		"--trace-id", "tr_pkg_actual_postgres_add",
+	})
+	var addOut pkgCommandOutput
+	decodePkgJSON(t, add, &addOut)
+	if !addOut.OK || addOut.Package.Name != "postgres-ha" || addOut.Entry == nil || addOut.Entry.Ref != "skiff.dev/postgres-ha" || addOut.Entry.Digest == "" {
+		t.Fatalf("unexpected actual postgres package add output: %+v", addOut)
+	}
+
+	explain := runPkgJSON(t, []string{
+		"pkg", "explain", "postgres-ha",
+		"--lockfile", lockfile,
+		"--cache", cache,
+		"--format", "json",
+		"--trace-id", "tr_pkg_actual_postgres_explain",
+	})
+	var explainOut pkgCommandOutput
+	decodePkgJSON(t, explain, &explainOut)
+	if !explainOut.OK || explainOut.Explanation == nil || explainOut.Explanation.Plugin == nil {
+		t.Fatalf("unexpected actual postgres package explain output: %+v", explainOut)
+	}
+	if got := explainOut.Explanation.Plugin.Runtime.Command; len(got) != 1 || got[0] != "postgres-ha-plugin" {
+		t.Fatalf("plugin command = %+v, want postgres-ha-plugin", got)
+	}
+	if !containsString(explainOut.Explanation.Exports.PackageSteps, "postgres.switchover") ||
+		!containsString(explainOut.Explanation.Exports.PackageSteps, "package.primary_switchover.verify_candidate_caught_up") {
+		t.Fatalf("actual postgres package missing switchover steps: %+v", explainOut.Explanation.Exports.PackageSteps)
+	}
+
+	verify := runPkgJSON(t, []string{
+		"pkg", "verify", "postgres-ha",
+		"--conformance",
+		"--lockfile", lockfile,
+		"--cache", cache,
+		"--format", "json",
+		"--trace-id", "tr_pkg_actual_postgres_verify",
+	})
+	var verifyOut pkgVerifyOutput
+	decodePkgJSON(t, verify, &verifyOut)
+	if !verifyOut.OK || verifyOut.Conformance == nil || !verifyOut.Conformance.OK {
+		t.Fatalf("unexpected actual postgres package verify output: %+v", verifyOut)
+	}
+
+	specPath := filepath.Join(t.TempDir(), "skiff.yaml")
+	if err := os.WriteFile(specPath, []byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: Stack
+metadata:
+  name: payments
+  env: dev
+stack:
+  services:
+    - name: api
+      artifact:
+        type: oci
+        ref: registry.example.com/payments-api:latest
+      runtime:
+        port: 8080
+        health:
+          path: /healthz
+  dependencies:
+    - name: db
+      uses: skiff.dev/postgres-ha
+      version: "1.0.0"
+      config:
+        mode: managed
+        engine: postgres
+        version: "16"
+        maxReplicaLagBytes: 1048576
+  bindings:
+    - from: api
+      to: db
+      as: DATABASE_URL
+`), 0o644); err != nil {
+		t.Fatalf("write actual package stack spec: %v", err)
+	}
+	compile := runCLIJSON(t, []string{"compile", specPath, "--lockfile", lockfile, "--cache", cache, "--format", "json", "--trace-id", "tr_pkg_actual_postgres_compile"})
+	var compileOut compileOutput
+	decodePkgJSON(t, compile, &compileOut)
+	if !compileOut.OK || compileOut.Graph == nil || len(compileOut.Graph.Resources.ManagedDatabases) != 1 || len(compileOut.Graph.Resources.PackageOperations) != 1 {
+		t.Fatalf("actual postgres package did not compile to database and package operations: %+v", compileOut)
+	}
+	if compileOut.Graph.Resources.PackageOperations[0].Mode != "managed" || compileOut.Graph.Resources.RuntimeManifests[0].Env["DATABASE_URL"] == "" {
+		t.Fatalf("actual postgres package compile output missing managed mode/binding: %+v", compileOut.Graph.Resources)
+	}
+}
+
 func TestPkgAddDuplicateJSONErrorIsAgentSafe(t *testing.T) {
 	dir := writePkgCLIFixture(t, "redis-ha")
 	root := t.TempDir()

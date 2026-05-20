@@ -1,0 +1,137 @@
+name: runner-image
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Skiff release tag to bake into the runner AMI"
+        required: true
+        type: string
+      region:
+        description: "Primary AWS region for the Packer build"
+        required: true
+        default: "us-west-2"
+        type: string
+      copy_regions:
+        description: "Optional JSON array of extra regions for AMI copies"
+        required: false
+        default: "[]"
+        type: string
+      channel:
+        description: "SSM channel parameter to update"
+        required: true
+        default: "stable"
+        type: string
+      publish_ssm:
+        description: "Publish version and channel SSM parameters"
+        required: true
+        default: false
+        type: boolean
+      deprecate_previous:
+        description: "Schedule deprecation for older Skiff runner AMIs after publication"
+        required: true
+        default: false
+        type: boolean
+      aws_role_arn:
+        description: "AWS role to assume for Packer and SSM publication"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: runner-image-${{ inputs.tag }}-${{ inputs.region }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build runner AMIs
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Validate tag checkout
+        shell: bash
+        run: |
+          case "${{ inputs.tag }}" in
+            v*) ;;
+            *)
+              echo "::error::Runner image tag must start with v"
+              exit 1
+              ;;
+          esac
+          git rev-parse --verify "refs/tags/${{ inputs.tag }}"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "${{ inputs.tag }}^{commit}")"
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Set up Packer
+        uses: hashicorp/setup-packer@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ inputs.aws_role_arn }}
+          aws-region: ${{ inputs.region }}
+
+      - name: Build Linux release archives
+        env:
+          PLATFORMS: linux/amd64 linux/arm64
+        run: scripts/build-release.sh "${{ inputs.tag }}"
+
+      - name: Validate runner image template
+        run: |
+          packer init build/runner-image
+          packer validate \
+            -var "region=${{ inputs.region }}" \
+            -var 'ami_regions=${{ inputs.copy_regions }}' \
+            -var "skiff_version=${{ inputs.tag }}" \
+            -var "artifact_dir=$PWD/dist" \
+            -var "channel=${{ inputs.channel }}" \
+            -var "provenance_commit=${{ github.sha }}" \
+            build/runner-image/packer.pkr.hcl
+
+      - name: Build runner AMIs
+        run: |
+          packer build \
+            -var "region=${{ inputs.region }}" \
+            -var 'ami_regions=${{ inputs.copy_regions }}' \
+            -var "skiff_version=${{ inputs.tag }}" \
+            -var "artifact_dir=$PWD/dist" \
+            -var "channel=${{ inputs.channel }}" \
+            -var "provenance_commit=${{ github.sha }}" \
+            build/runner-image/packer.pkr.hcl
+
+      - name: Publish SSM parameters
+        if: ${{ inputs.publish_ssm }}
+        run: scripts/publish-runner-ami-ssm.sh dist/runner-image-*-manifest.json
+
+      - name: Schedule old AMI deprecation
+        if: ${{ inputs.publish_ssm && inputs.deprecate_previous }}
+        env:
+          SKIFF_RUNNER_AMI_REGIONS: ${{ inputs.region }}
+          SKIFF_RUNNER_AMI_DEPRECATE: "1"
+        run: scripts/deprecate-runner-amis.sh
+
+      - name: Upload runner image manifests
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: runner-image-${{ inputs.tag }}-${{ inputs.region }}
+          path: |
+            dist/runner-image-*-manifest.json
+            dist/skiff_${{ inputs.tag }}_linux_*.tar.gz
+            dist/checksums.txt
+          if-no-files-found: ignore

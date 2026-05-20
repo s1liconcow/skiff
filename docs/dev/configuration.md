@@ -108,7 +108,10 @@ AWS live-apply inputs are provider configuration, not service-spec fields. Set
 environment root object, `awsVpcId`, `awsSubnetIds`, and `awsAmiId` are required
 for live target groups, Auto Scaling Groups, and launch templates. A managed
 `skiff bootstrap aws` environment root can supply those defaults from object
-state, including a runner AMI SSM parameter. When bootstrapped with
+state, including a runner AMI SSM parameter. The default official x86_64
+parameter is `/skiff/runner/ami/al2023/x86_64/stable`; the AWS public AL2023
+fallback remains available through `--runner-ami-ssm-parameter` when an
+official AMI has not been published in a target region. When bootstrapped with
 `--ingress public` or `--ingress internal-http`, the environment root can also
 supply the ALB listener ARN and load-balancer security group. `awsAlbListenerArn`
 is required only when the service has an ingress listener rule and no

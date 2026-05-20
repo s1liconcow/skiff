@@ -975,6 +975,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+RemainAfterExit=yes
 Environment=SKIFF_RUNNER_USER_DATA=/etc/skiff/runner.json
 ExecStart=/usr/local/bin/skiff-runner bootstrap --user-data /etc/skiff/runner.json --format json
 ExecStart=/usr/local/bin/skiff-runner run --user-data /etc/skiff/runner.json --format json

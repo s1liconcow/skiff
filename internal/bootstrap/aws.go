@@ -26,7 +26,8 @@ const (
 	IngressPublic       = "public"
 	IngressInternalHTTP = "internal-http"
 
-	DefaultRunnerAMISSMParameter  = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
+	DefaultRunnerAMISSMParameter  = "/skiff/runner/ami/al2023/x86_64/stable"
+	FallbackRunnerAMISSMParameter = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
 	DefaultRunnerInstallVersion   = "v0.1.0"
 	defaultRunnerInstallScriptURL = "https://raw.githubusercontent.com/s1liconcow/skiff/%s/scripts/install.sh"
 )
@@ -642,10 +643,12 @@ func (opts AWSOptions) withDefaults() AWSOptions {
 	if opts.Ingress == "" {
 		opts.Ingress = IngressPrivate
 	}
+	defaultedRunnerAMISSMParameter := false
 	if opts.RunnerAMIID == "" && opts.RunnerAMISSMParameter == "" {
 		opts.RunnerAMISSMParameter = DefaultRunnerAMISSMParameter
+		defaultedRunnerAMISSMParameter = true
 	}
-	if opts.RunnerAMIID == "" && opts.RunnerInstallVersion == "" {
+	if opts.RunnerAMIID == "" && opts.RunnerInstallVersion == "" && shouldInstallRunnerOnFirstBoot(opts.RunnerAMISSMParameter, defaultedRunnerAMISSMParameter) {
 		opts.RunnerInstallVersion = DefaultRunnerInstallVersion
 	}
 	if opts.RunnerInstallVersion != "" && opts.RunnerInstallScriptURL == "" {
@@ -854,6 +857,13 @@ func normalizeAMISSMParameter(value string) string {
 
 func defaultInstallScriptURL(version string) string {
 	return fmt.Sprintf(defaultRunnerInstallScriptURL, version)
+}
+
+func shouldInstallRunnerOnFirstBoot(amiSSMParameter string, defaulted bool) bool {
+	if defaulted {
+		return false
+	}
+	return normalizeAMISSMParameter(amiSSMParameter) == FallbackRunnerAMISSMParameter
 }
 
 func validateRunnerInstallVersion(value string) error {

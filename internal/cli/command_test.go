@@ -634,8 +634,11 @@ func TestBootstrapAWSManagedNetworkDryRunJSON(t *testing.T) {
 	if got.Plan.RootConfig.Ingress == nil || got.Plan.RootConfig.Ingress.Type != "private" {
 		t.Fatalf("private ingress missing from root config: %+v", got.Plan.RootConfig)
 	}
-	if got.Plan.RootConfig.Runner == nil || got.Plan.RootConfig.Runner.AMISSMParameter == "" || got.Plan.RootConfig.Runner.InstallVersion == "" {
+	if got.Plan.RootConfig.Runner == nil || got.Plan.RootConfig.Runner.AMISSMParameter == "" {
 		t.Fatalf("runner defaults missing from root config: %+v", got.Plan.RootConfig.Runner)
+	}
+	if got.Plan.RootConfig.Runner.InstallVersion != "" {
+		t.Fatalf("official runner AMI should not need first-boot install: %+v", got.Plan.RootConfig.Runner)
 	}
 	hasVPC := false
 	hasNAT := false
@@ -832,8 +835,7 @@ func TestBootstrapAWSManagedNetworkEmitTerraform(t *testing.T) {
 		`resource "aws_nat_gateway" "skiff"`,
 		`resource "aws_s3_object" "skiff_env_root"`,
 		`private_subnet_ids = aws_subnet.skiff_private[*].id`,
-		`ami_ssm_parameter = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"`,
-		`install_version = "v0.1.0"`,
+		`ami_ssm_parameter = "/skiff/runner/ami/al2023/x86_64/stable"`,
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("terraform output missing %q:\n%s", want, stdout.String())
