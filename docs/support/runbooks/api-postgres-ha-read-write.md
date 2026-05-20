@@ -4,9 +4,17 @@ Use this runbook to deploy the orders API example, provision Postgres through
 the installable `skiff.dev/postgres-ha` package, verify database reads/writes,
 and run the package-exposed `primary-switchover-update` stateful operation.
 
-This is one runbook for AWS and Apple Silicon. Pick a provider profile, then run
-the common commands unchanged. The API and the operation use the same
-`postgres-ha` package dependency:
+The happy path is convention-first:
+
+- Skiff configuration comes from one selected context.
+- Package lock/cache paths use the defaults: `skiff.lock.json` and
+  `.skiff/packages/cache`.
+- The stack spec is `orders-api-postgres-ha.skiff.yaml`.
+- The environment is `prod`.
+- The package-created StatefulGroup is `orders-db`.
+- The API `DATABASE_URL` points at the `orders-db` package secret reference.
+
+The API and the operation use the same `postgres-ha` package dependency:
 
 - the stack declares `db` as `skiff.dev/postgres-ha` in `mode: self-managed`
 - Skiff compiles that dependency into the `orders-db` StatefulGroup
@@ -27,64 +35,75 @@ because it exposes JSON-RPC methods that actually touch Postgres.
 - `IMAGE_REF` points at an orders API OCI image the selected provider can pull.
 - `POSTGRES_HA_IMAGE_REF` points at a real self-managed `postgres-ha` OCI image
   that exposes the package admin API on port `8008`.
-- `POSTGRES_HA_DATABASE_URL` is the connection URL secret reference exported by
-  the `orders-db` `postgres-ha` package instance. Do not put plaintext database
-  credentials in the stack spec, generated manifests, logs, or shell history.
-- For AWS, bootstrap the environment first and use an isolated state bucket.
+- `secret://stateful/orders-db/connection-url` resolves to the connection URL
+  exported by the `orders-db` `postgres-ha` package instance. Do not put
+  plaintext database credentials in the stack spec, generated manifests, logs,
+  or shell history.
+- For AWS, bootstrap the environment first and use the state bucket and region
+  from that context.
 - For Apple Silicon, Apple Container must be installed and object state must
   point at an S3-compatible endpoint such as local RustFS.
 
-## Choose Provider Profile
+## Configure Skiff
+
+Create a runbook-local config once. Edit the AWS `region` and `state` values if
+bootstrap chose different names.
+
+```bash
+cat > .skiff-postgres-ha.config <<'EOF'
+apiVersion: skiff.dev/v1alpha1
+kind: SkiffConfig
+current-context: postgres-ha-aws
+contexts:
+  - name: postgres-ha-aws
+    context:
+      mode: direct
+      env: prod
+      provider: aws
+      region: us-west-2
+      state: s3://skiff-state-prod
+  - name: postgres-ha-apple
+    context:
+      mode: direct
+      env: prod
+      provider: apple-container
+      region: local
+      state: s3://skiff-apple-postgres-ha
+EOF
+
+export SKIFF_CONFIG=$PWD/.skiff-postgres-ha.config
+```
+
+Choose one provider profile.
 
 AWS:
 
 ```bash
-export SKIFF_ENV=prod
-export SKIFF_PROVIDER=aws
-export SKIFF_REGION=${AWS_REGION:-us-west-2}
-export AWS_REGION=$SKIFF_REGION
-export AWS_DEFAULT_REGION=$SKIFF_REGION
-export SKIFF_STATE=s3://skiff-state-prod
-export INGRESS_TYPE=${INGRESS_TYPE:-internal-http}
-export IMAGE_REF=123456789012.dkr.ecr.$SKIFF_REGION.amazonaws.com/orders-rpc@sha256:...
-export POSTGRES_HA_IMAGE_REF=123456789012.dkr.ecr.$SKIFF_REGION.amazonaws.com/postgres-ha@sha256:...
-export POSTGRES_HA_DATABASE_URL=secret://stateful/orders-db/connection-url
+export SKIFF_CONTEXT=postgres-ha-aws
+export IMAGE_REF=123456789012.dkr.ecr.us-west-2.amazonaws.com/orders-rpc@sha256:...
+export POSTGRES_HA_IMAGE_REF=123456789012.dkr.ecr.us-west-2.amazonaws.com/postgres-ha@sha256:...
 export API_URL=https://orders-api.example.com
 ```
 
 Apple Silicon:
 
 ```bash
-export SKIFF_ENV=prod
-export SKIFF_PROVIDER=apple-container
-export SKIFF_REGION=local
+export SKIFF_CONTEXT=postgres-ha-apple
 export AWS_REGION=us-east-1
 export AWS_DEFAULT_REGION=us-east-1
 export AWS_ACCESS_KEY_ID=skiffdev
 export AWS_SECRET_ACCESS_KEY=skiffdevsecret
 export SKIFF_AWS_ENDPOINT=http://127.0.0.1:9000
 export SKIFF_AWS_S3_PATH_STYLE=true
-export SKIFF_STATE=s3://skiff-apple-postgres-ha
-export INGRESS_TYPE=${INGRESS_TYPE:-internal-http}
 export IMAGE_REF=localhost/orders-rpc:apple
 export POSTGRES_HA_IMAGE_REF=localhost/postgres-ha:apple
-export POSTGRES_HA_DATABASE_URL=secret://stateful/orders-db/connection-url
 export API_URL=http://127.0.0.1:8080
 ```
 
-Common variables:
+Confirm Skiff sees the intended context:
 
 ```bash
-export TRACE_ID=tr_orders_api_db_postgres_ha
-export LOCKFILE=$PWD/skiff.lock.json
-export PKG_CACHE=$PWD/.skiff/packages/cache
-export API_SPEC=/tmp/orders-api-postgres-ha.skiff.yaml
-export POSTGRES_HA_TARGET=orders-db
-export POSTGRES_HA_OPERATION=primary-switchover-update
-export POSTGRES_HA_OP_ID=op_orders_db_primary_switchover
-export POSTGRES_HA_SAGA_ID=saga_orders_db_primary_switchover
-export POSTGRES_HA_RELEASE_ID=rel_orders_db_$(date +%Y%m%d%H%M%S)
-export POSTGRES_HA_CANDIDATE=1
+skiff config show
 ```
 
 ## Install The Postgres HA Package
@@ -93,16 +112,14 @@ Install the package plugin and lock the package from this checkout:
 
 ```bash
 go install ./cmd/postgres-ha-plugin
+skiff pkg add skiff.dev/postgres-ha --registry-dir packages
+skiff pkg verify postgres-ha --conformance
+```
 
-skiff pkg add skiff.dev/postgres-ha \
-  --registry-dir packages \
-  --lockfile "$LOCKFILE" \
-  --cache "$PKG_CACHE"
+If the package is already locked, refresh it instead:
 
-skiff pkg verify postgres-ha \
-  --conformance \
-  --lockfile "$LOCKFILE" \
-  --cache "$PKG_CACHE"
+```bash
+skiff pkg update postgres-ha --registry-dir packages
 ```
 
 ## Write The Stack Spec
@@ -113,12 +130,12 @@ connection URL into the service as `DATABASE_URL`; the package operation later
 targets that same compiled `orders-db` StatefulGroup.
 
 ```bash
-cat > "$API_SPEC" <<EOF
+cat > orders-api-postgres-ha.skiff.yaml <<EOF
 apiVersion: skiff.dev/v1alpha1
 kind: Stack
 metadata:
   name: orders
-  env: ${SKIFF_ENV}
+  env: prod
 stack:
   services:
     - name: api
@@ -137,14 +154,14 @@ stack:
         max: 4
       network:
         ingress:
-          type: ${INGRESS_TYPE}
+          type: internal-http
   dependencies:
     - name: db
       uses: skiff.dev/postgres-ha
       version: "1.0.0"
       config:
         mode: self-managed
-        endpoint: ${POSTGRES_HA_DATABASE_URL}
+        endpoint: secret://stateful/orders-db/connection-url
         replicas: 3
         maxReplicaLagBytes: 65536
         volume:
@@ -175,24 +192,12 @@ EOF
 ## Validate And Preview
 
 ```bash
-skiff validate "$API_SPEC" \
-  --lockfile "$LOCKFILE" \
-  --cache "$PKG_CACHE"
-
-skiff explain "$API_SPEC" \
-  --provider "$SKIFF_PROVIDER" \
-  --region "$SKIFF_REGION" \
-  --state "$SKIFF_STATE" \
-  --lockfile "$LOCKFILE" \
-  --cache "$PKG_CACHE"
-
-skiff ops list "$POSTGRES_HA_TARGET" \
-  --target-kind StatefulGroup \
-  --lockfile "$LOCKFILE" \
-  --cache "$PKG_CACHE"
+skiff validate orders-api-postgres-ha.skiff.yaml
+skiff plan orders-api-postgres-ha.skiff.yaml
+skiff ops list orders-db
 ```
 
-The preview should show visible provider primitives for the API and the
+The plan should show visible provider primitives for the API and the
 self-managed Postgres HA StatefulGroup generated from the package dependency.
 The operation list should include `primary-switchover-update` with
 `postgres-ha` package provenance.
@@ -200,15 +205,7 @@ The operation list should include `primary-switchover-update` with
 ## Deploy
 
 ```bash
-skiff deploy "$API_SPEC" \
-  --direct \
-  --state "$SKIFF_STATE" \
-  --env "$SKIFF_ENV" \
-  --provider "$SKIFF_PROVIDER" \
-  --region "$SKIFF_REGION" \
-  --lockfile "$LOCKFILE" \
-  --cache "$PKG_CACHE" \
-  --trace-id "$TRACE_ID"
+skiff deploy orders-api-postgres-ha.skiff.yaml
 ```
 
 Record the deploy operation ID, API release ID, `orders-db` StatefulGroup
@@ -218,34 +215,13 @@ operation.
 
 ## Verify Service And Database Health
 
-Use direct mode to confirm service and stateful target health:
+Use direct mode from the selected context to confirm service and stateful target
+health:
 
 ```bash
-skiff status orders-api \
-  --fresh \
-  --direct \
-  --state "$SKIFF_STATE" \
-  --env "$SKIFF_ENV" \
-  --provider "$SKIFF_PROVIDER" \
-  --region "$SKIFF_REGION" \
-  --trace-id "$TRACE_ID"
-
-skiff doctor orders-api \
-  --fresh \
-  --direct \
-  --state "$SKIFF_STATE" \
-  --env "$SKIFF_ENV" \
-  --provider "$SKIFF_PROVIDER" \
-  --region "$SKIFF_REGION" \
-  --trace-id "$TRACE_ID"
-
-skiff stateful status "$POSTGRES_HA_TARGET" \
-  --direct \
-  --state "$SKIFF_STATE" \
-  --env "$SKIFF_ENV" \
-  --provider "$SKIFF_PROVIDER" \
-  --region "$SKIFF_REGION" \
-  --trace-id "$TRACE_ID"
+skiff status orders-api
+skiff doctor orders-api
+skiff stateful status orders-db
 ```
 
 For an internal load balancer, run the HTTP requests from inside the provider
@@ -288,60 +264,26 @@ insert a row, can query rows back, and can count rows from Postgres.
 
 ## Run The Postgres HA Stateful Operation
 
-Plan the package operation without writing object state:
+Plan and run the package operation against the same `orders-db` package target:
 
 ```bash
-skiff ops plan "$POSTGRES_HA_TARGET" "$POSTGRES_HA_OPERATION" \
-  --target-kind StatefulGroup \
-  --lockfile "$LOCKFILE" \
-  --cache "$PKG_CACHE" \
-  --operation-id "$POSTGRES_HA_OP_ID" \
-  --saga-id "$POSTGRES_HA_SAGA_ID" \
-  --param release_id="$POSTGRES_HA_RELEASE_ID" \
-  --param "candidate=\"$POSTGRES_HA_CANDIDATE\"" \
-  --param return_primary=true
+release_id=rel_orders_db_$(date +%Y%m%d%H%M%S)
+
+skiff ops plan orders-db primary-switchover-update \
+  --param release_id="$release_id" \
+  --param candidate=member-1
+
+skiff ops run orders-db primary-switchover-update \
+  --param release_id="$release_id" \
+  --param candidate=member-1
 ```
 
-Run the operation through direct mode:
+Inspect the durable operation and saga objects using the IDs printed by
+`skiff ops run`:
 
 ```bash
-skiff ops run "$POSTGRES_HA_TARGET" "$POSTGRES_HA_OPERATION" \
-  --direct \
-  --state "$SKIFF_STATE" \
-  --env "$SKIFF_ENV" \
-  --provider "$SKIFF_PROVIDER" \
-  --region "$SKIFF_REGION" \
-  --target-kind StatefulGroup \
-  --lockfile "$LOCKFILE" \
-  --cache "$PKG_CACHE" \
-  --operation-id "$POSTGRES_HA_OP_ID" \
-  --saga-id "$POSTGRES_HA_SAGA_ID" \
-  --param release_id="$POSTGRES_HA_RELEASE_ID" \
-  --param "candidate=\"$POSTGRES_HA_CANDIDATE\"" \
-  --param return_primary=true \
-  --yes \
-  --trace-id "$TRACE_ID"
-```
-
-Inspect the durable operation and saga objects:
-
-```bash
-skiff ops inspect "$POSTGRES_HA_OP_ID" \
-  --service "$POSTGRES_HA_TARGET" \
-  --direct \
-  --state "$SKIFF_STATE" \
-  --env "$SKIFF_ENV" \
-  --provider "$SKIFF_PROVIDER" \
-  --region "$SKIFF_REGION" \
-  --trace-id "$TRACE_ID"
-
-skiff saga inspect "$POSTGRES_HA_SAGA_ID" \
-  --direct \
-  --state "$SKIFF_STATE" \
-  --env "$SKIFF_ENV" \
-  --provider "$SKIFF_PROVIDER" \
-  --region "$SKIFF_REGION" \
-  --trace-id "$TRACE_ID"
+skiff ops inspect <operation-id> --service orders-db
+skiff saga inspect <saga-id>
 ```
 
 Expected result: Skiff writes immutable operation intent, saga intent, saga
@@ -356,24 +298,9 @@ and verifies the final topology.
 Collect state before mutating:
 
 ```bash
-skiff logs orders-api \
-  --since 20m \
-  --direct \
-  --state "$SKIFF_STATE" \
-  --env "$SKIFF_ENV" \
-  --provider "$SKIFF_PROVIDER" \
-  --region "$SKIFF_REGION" \
-  --trace-id "$TRACE_ID"
-
-skiff ops events orders-api \
-  --direct \
-  --state "$SKIFF_STATE" \
-  --trace-id "$TRACE_ID"
-
-skiff ops events "$POSTGRES_HA_TARGET" \
-  --direct \
-  --state "$SKIFF_STATE" \
-  --trace-id "$TRACE_ID"
+skiff logs orders-api --since 20m
+skiff ops events orders-api
+skiff ops events orders-db
 ```
 
 Common checks:
@@ -394,15 +321,7 @@ Common checks:
 If the application release is bad and a previous stable release exists:
 
 ```bash
-skiff rollback orders-api \
-  --to previous-stable \
-  --direct \
-  --state "$SKIFF_STATE" \
-  --env "$SKIFF_ENV" \
-  --provider "$SKIFF_PROVIDER" \
-  --region "$SKIFF_REGION" \
-  --approval-id <approval-id> \
-  --trace-id "$TRACE_ID"
+skiff rollback orders-api --approval-id <approval-id>
 ```
 
 This rolls back the API release. It does not rewind database writes. Use an
@@ -410,7 +329,8 @@ explicit database restore operation when data must move.
 
 ## Evidence To Save
 
-- provider profile values
+- selected Skiff context
+- API and `postgres-ha` image refs
 - single API stack spec with the self-managed `postgres-ha` package dependency
 - `skiff.lock.json` package entry for `postgres-ha`
 - API deploy operation ID and release ID
@@ -420,6 +340,6 @@ explicit database restore operation when data must move.
 - `orders.add` response
 - `orders.list` response showing the inserted order
 - `curl /metrics` output showing the order count
-- `POSTGRES_HA_OP_ID` and `POSTGRES_HA_SAGA_ID`
+- operation and saga IDs from `skiff ops run`
 - `postgres-ha` package digest from the operation plan
 - `primary-switchover-update` plan/run/inspect output
