@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Skiff - SRE-approved cloud operations without Kubernetes cost</title>
-  <meta name="description" content="Skiff gives teams secure-by-default, SRE-approved cloud operations for stateful and stateless services without Kubernetes cost, complexity, or gigabytes of YAML." />
+  <title>Skiff - cloud operations without Kubernetes overhead</title>
+  <meta name="description" content="Skiff helps teams run stateful and stateless services on native cloud primitives with signed releases, typed runbooks, and durable object-store state, without running Kubernetes." />
   <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="%2372dfff"/><path d="M16 5v18" stroke="%2306101a" stroke-width="1.35" stroke-linecap="round"/><path d="M15 7 7 22h8V7Z" fill="%2306101a" fill-opacity=".18" stroke="%2306101a" stroke-width="2" stroke-linejoin="round"/><path d="M17 10l8 12h-8V10Z" fill="%2306101a" fill-opacity=".12" stroke="%2306101a" stroke-width="2" stroke-linejoin="round"/><path d="M6 23h20l-3.5 4h-13L6 23Z" fill="%2306101a" fill-opacity=".16" stroke="%2306101a" stroke-width="2" stroke-linejoin="round"/></svg>' />
   <style>
     :root {
@@ -1642,11 +1642,11 @@
 
       <div class="wrap hero-content">
         <div class="eyebrow"><span class="pulse"></span> Kubernetes-class operational leverage without Kubernetes-class cost</div>
-        <h1>Deploy like a platform team without becoming one.</h1>
+        <h1>Skiff gives small teams platform-grade deploys and operations.</h1>
         <p class="hero-subtitle">
-          Skiff gives teams a well-paved operational path for stateless and stateful services:
+          Skiff gives teams one operating path for stateless and stateful services:
           least-privilege permissions, signed releases, canary deploys, runbooks as code,
-          built-in observability, and agent-safe recovery with only object storage as a dependency.
+          agent-readable command output, and native cloud primitives without a cluster control plane.
         </p>
         <div class="hero-actions">
           <a class="btn primary" href="#paved-road">See the operating model</a>
@@ -1654,10 +1654,10 @@
           <a class="btn" href="#secure">Review the security posture</a>
         </div>
         <div class="hero-proof" aria-label="Skiff operating outcomes">
-          <div class="proof-item"><b>Deploy safely</b><span>Canaries, health gates, release signatures, and auditable promotion are standard.</span></div>
-          <div class="proof-item"><b>Recover Automatically</b><span>Agent-first UX makes it easy to diagnose and repair service issues.</span></div>
+          <div class="proof-item"><b>Deploy safely</b><span>Canaries, health gates, release signatures, and controlled promotion are standard.</span></div>
+          <div class="proof-item"><b>Use native cloud primitives</b><span>Skiff works with VMs, autoscaling groups, target groups, IAM roles, and log groups.</span></div>
           <div class="proof-item"><b>Operate stateful work</b><span>Backups, restores, failovers, and migrations become explicit typed runbooks.</span></div>
-          <div class="proof-item"><b>Secure and Reliable by Default</b><span>Best-practice IAM, object-storage durability, signed releases, and explicit rollback or recovery paths.</span></div>
+          <div class="proof-item"><b>Agent-safe by default</b><span>JSON output, risk labels, approval gates, and human escalation are part of the command surface.</span></div>
         </div>
       </div>
 
@@ -1674,8 +1674,8 @@
           <div class="cuj-step-list">
             <div class="cuj-step" data-phase="0"><span class="step-index">01</span><span>Ship a signed release through canary</span><span class="step-status">safe</span></div>
             <div class="cuj-step" data-phase="1"><span class="step-index">02</span><span>Observe live health and customer impact</span><span class="step-status">fresh</span></div>
-            <div class="cuj-step" data-phase="2"><span class="step-index">03</span><span>Run a typed repair with approval gates</span><span class="step-status">bounded</span></div>
-            <div class="cuj-step" data-phase="3"><span class="step-index">04</span><span>Audit every action with traceable evidence</span><span class="step-status">done</span></div>
+            <div class="cuj-step" data-phase="2"><span class="step-index">03</span><span>Classify repair risk before action</span><span class="step-status">bounded</span></div>
+            <div class="cuj-step" data-phase="3"><span class="step-index">04</span><span>Escalate risky work to humans</span><span class="step-status">gated</span></div>
           </div>
         </div>
       </aside>
@@ -1686,19 +1686,20 @@
         <div class="section-head">
           <div>
             <div class="kicker">The problem</div>
-            <h2>Teams want operational leverage, not a second platform to operate.</h2>
+            <h2>Teams want the operating habits, without a second platform to run.</h2>
           </div>
           <p class="section-lede">
-            Kubernetes can deliver good operational patterns, but the path often starts with controllers, CRDs,
-            clusters, policy glue, observability glue, deployment glue, and enough YAML to hide the actual customer journey.
+            Kubernetes can deliver good operational patterns, but teams often pay for them with controllers, CRDs,
+            clusters, custom policy layers, observability wiring, bespoke rollout scripts, and enough YAML to bury
+            the customer journey.
           </p>
         </div>
 
         <div class="split">
           <div class="copy-column">
-            <div class="copy-card"><b>The expensive part is not orchestration.</b><span>It is the organizational work of making every deploy, incident, rollback, secret rotation, and restore safe by default.</span></div>
-            <div class="copy-card"><b>Skiff packages the operating model.</b><span>It turns common production journeys into explicit commands and runbooks with evidence, approvals, and recovery paths.</span></div>
-            <div class="copy-card"><b>Cloud primitives stay visible.</b><span>Operators still see load balancers, autoscaling groups, IAM roles, log groups, and provider IDs.</span></div>
+            <div class="copy-card"><b>The real cost is operational discipline.</b><span>Every deploy, incident, rollback, secret rotation, and restore needs a safe default path.</span></div>
+            <div class="copy-card"><b>Skiff turns production work into commands.</b><span>Common journeys become explicit runbooks with checks, approvals, and concrete next steps.</span></div>
+            <div class="copy-card"><b>Cloud primitives stay native.</b><span>Skiff uses load balancers, autoscaling groups, IAM roles, and log groups without burying them under a cluster model.</span></div>
           </div>
 
           <div class="viz" aria-label="Comparison between kube tax and Skiff paved road">
@@ -1717,7 +1718,7 @@
                   </div>
                   <div class="tax-label">
                     <div class="tax-pill" data-phase="0"><span>Policy templates</span><span>custom</span></div>
-                    <div class="tax-pill" data-phase="1"><span>Rollout glue</span><span>manual</span></div>
+                    <div class="tax-pill" data-phase="1"><span>Rollout scripts</span><span>manual</span></div>
                     <div class="tax-pill" data-phase="2"><span>Recovery docs</span><span>stale</span></div>
                     <div class="tax-pill" data-phase="3"><span>Audit trails</span><span>scattered</span></div>
                   </div>
@@ -1726,16 +1727,16 @@
                   <div class="side-title"><span>Skiff road</span><span>one path</span></div>
                   <div class="road-line"></div>
                   <div class="road-item" data-phase="0"><span class="road-dot">01</span><span class="road-card"><b>Bootstrap guardrails</b><span>secure defaults, least privilege, context ready</span></span></div>
-                  <div class="road-item" data-phase="1"><span class="road-dot">02</span><span class="road-card"><b>Canary and observe</b><span>health, metrics, logs, provider IDs</span></span></div>
-                  <div class="road-item" data-phase="2"><span class="road-dot">03</span><span class="road-card"><b>Runbooks As Code</b><span>agent-first UX with approval gates</span></span></div>
-                  <div class="road-item" data-phase="3"><span class="road-dot">04</span><span class="road-card"><b>Audit evidence</b><span>actor, trace, risk, summary</span></span></div>
+                  <div class="road-item" data-phase="1"><span class="road-dot">02</span><span class="road-card"><b>Canary and observe</b><span>health, metrics, logs, target groups</span></span></div>
+                  <div class="road-item" data-phase="2"><span class="road-dot">03</span><span class="road-card"><b>Agent-safe runbooks</b><span>JSON, risk labels, approvals</span></span></div>
+                  <div class="road-item" data-phase="3"><span class="road-dot">04</span><span class="road-card"><b>Recorded changes</b><span>actor, trace, risk, summary</span></span></div>
                 </div>
               </div>
               <div class="viz-note">
-                <p class="story-note" data-phase="0"><b>The first win is not fewer files.</b><span>It is that secure bootstrap, signing, identity, logs, and deploy shape are on the paved road before the first service ships.</span></p>
-                <p class="story-note" data-phase="1"><b>Deploys stop being bespoke glue.</b><span>The operator sees release evidence, traffic state, health gates, and the business-safe next step instead of stitching together unrelated consoles.</span></p>
+                <p class="story-note" data-phase="0"><b>The first win is safer defaults.</b><span>Secure bootstrap, signing, identity, logs, and deploy shape are ready before the first service ships.</span></p>
+                <p class="story-note" data-phase="1"><b>Deploys become a known procedure.</b><span>The operator sees the release, traffic state, health gates, and the business-safe next step instead of bouncing across unrelated consoles.</span></p>
                 <p class="story-note" data-phase="2"><b>Daily operations are designed before the incident.</b><span>Every long-running operation is resumable and every repair has explicit risk and reversibility.</span></p>
-                <p class="story-note" data-phase="3"><b>The audit trail is a product feature.</b><span>Mutating production operations leave structured evidence for humans, SRE review, and agents.</span></p>
+                <p class="story-note" data-phase="3"><b>Changes are easy to review.</b><span>Mutating production operations record who acted, what changed, where it ran, and how risky it was.</span></p>
               </div>
             </div>
           </div>
@@ -1748,12 +1749,12 @@
         <div class="section-head">
           <div>
             <div class="kicker">Stateful and stateless</div>
-            <h2>One operating road for services that scale out and services that hold state.</h2>
+            <h2>One operating model for services that scale out and services that hold state.</h2>
           </div>
           <p class="section-lede">
             Stateless web APIs, workers, queues, databases, and stateful members need different runbooks.
-            They still need the same operational contract: secure identity, release evidence, health checks,
-            recovery commands, and audit records.
+            They still need the same operational contract: secure identity, safe deploys, health checks,
+            scoped recovery commands, and recorded changes.
           </p>
         </div>
 
@@ -1789,23 +1790,23 @@
                   <div class="service-runway">
                     <div class="runway-cell" data-phase="0"><b>Scoped access</b><span>state refs only</span></div>
                     <div class="runway-cell" data-phase="1"><b>Change window</b><span>approval gate</span></div>
-                    <div class="runway-cell" data-phase="2"><b>Backup proof</b><span>fresh restore point</span></div>
+                    <div class="runway-cell" data-phase="2"><b>Backup freshness</b><span>known restore point</span></div>
                     <div class="runway-cell" data-phase="3"><b>Failover</b><span>typed saga</span></div>
                   </div>
                 </div>
               </div>
               <div class="viz-note">
                 <p class="story-note" data-phase="0"><b>Identity starts narrow.</b><span>Workloads get only the cloud permissions they need. Operators get scoped deploy and recovery permissions, not a blanket cluster-admin escape hatch.</span></p>
-                <p class="story-note" data-phase="1"><b>Deploy paths differ, evidence stays consistent.</b><span>A web API can canary through target groups while a stateful member uses explicit approval and preflight checks.</span></p>
-                <p class="story-note" data-phase="2"><b>Observability is attached to the journey.</b><span>Status, logs, health, backups, and provider IDs show up in the same operational context.</span></p>
+                <p class="story-note" data-phase="1"><b>Deploy paths match the workload.</b><span>A web API can canary through target groups while a stateful member uses explicit approval and preflight checks.</span></p>
+                <p class="story-note" data-phase="2"><b>Observability is attached to the journey.</b><span>Status, logs, health, backups, and cloud resources show up in the same operational context.</span></p>
                 <p class="story-note" data-phase="3"><b>Recovery is an executable runbook.</b><span>Rollback, failover, drain, restore, and resume are typed actions with risk and reversibility.</span></p>
               </div>
             </div>
           </div>
 
           <div class="copy-column">
-            <div class="copy-card"><b>Skiff is not only for stateless apps.</b><span>It treats stateful operations as first-class customer journeys: backup, restore, failover, maintenance, migration, and repair.</span></div>
-            <div class="copy-card"><b>The operator does not memorize provider trivia.</b><span>Skiff keeps cloud resource IDs visible while packaging the safe sequence as a runbook.</span></div>
+            <div class="copy-card"><b>Stateful work gets first-class treatment.</b><span>Backup, restore, failover, maintenance, migration, and repair are part of the product model.</span></div>
+            <div class="copy-card"><b>Operators keep the cloud model.</b><span>Skiff packages the safe sequence as a runbook without pretending AWS is a cluster.</span></div>
             <div class="copy-card"><b>One VM runs one workload replica by default.</b><span>The isolation boundary stays simple enough for SREs and agents to reason about during incidents.</span></div>
           </div>
         </div>
@@ -1817,10 +1818,10 @@
         <div class="section-head">
           <div>
             <div class="kicker">Secure by default</div>
-            <h2>The happy path already includes the controls SREs ask for later.</h2>
+            <h2>The default path includes the controls SREs ask for later.</h2>
           </div>
           <p class="section-lede">
-            Skiff bakes the production checklist into the workflow: least privilege, release signatures,
+            Skiff puts the production checklist into the workflow: least privilege, release signatures,
             immutable history, secret references, approval gates, and audit records. Teams do not have to
             remember the secure version of the command under pressure.
           </p>
@@ -1845,15 +1846,15 @@
                 <div class="gate" data-phase="0"><span class="gate-icon">1</span><b>Least privilege IAM</b><span>Scoped roles for deployer, runner, and operator actions.</span></div>
                 <div class="gate" data-phase="1"><span class="gate-icon">2</span><b>Signed releases</b><span>Manifest, digest, service, environment, and expiry are verified.</span></div>
                 <div class="gate" data-phase="1 2"><span class="gate-icon">3</span><b>Digest-pinned artifacts</b><span>Production workloads run what was approved, not a mutable tag.</span></div>
-                <div class="gate" data-phase="2"><span class="gate-icon">4</span><b>No SSH-first debug</b><span>Diagnostics start with scoped logs, status, and audited sessions.</span></div>
+                <div class="gate" data-phase="2"><span class="gate-icon">4</span><b>No SSH-first debug</b><span>Diagnostics start with scoped logs, status, and reviewable sessions.</span></div>
                 <div class="gate" data-phase="2 3"><span class="gate-icon">5</span><b>Secret references</b><span>Object state points to the secure store and redacts output.</span></div>
                 <div class="gate" data-phase="3"><span class="gate-icon">6</span><b>Audit by default</b><span>Actor, trace ID, target, risk, and summary on every mutation.</span></div>
               </div>
               <div class="viz-note">
                 <p class="story-note" data-phase="0"><b>Access starts from the operation.</b><span>The service gets only what it needs, and high-risk actions require explicit approval.</span></p>
-                <p class="story-note" data-phase="1"><b>The release is evidence, not a pointer.</b><span>Skiff treats signed manifests and runtime manifests as immutable proof before rollout.</span></p>
+                <p class="story-note" data-phase="1"><b>The release is immutable, not a pointer.</b><span>Skiff verifies signed manifests and runtime manifests before rollout.</span></p>
                 <p class="story-note" data-phase="2"><b>Runtime safety does not rely on memory.</b><span>The runner can read durable state directly and verify before starting the workload.</span></p>
-                <p class="story-note" data-phase="3"><b>Audits survive handoffs.</b><span>Humans and agents get the same traceable event history when continuing an operation.</span></p>
+                <p class="story-note" data-phase="3"><b>History survives handoffs.</b><span>Humans and agents get the same traceable event stream when continuing an operation.</span></p>
               </div>
             </div>
           </div>
@@ -1869,7 +1870,7 @@
             <h2>Operational knowledge becomes typed, resumable workflows.</h2>
           </div>
           <p class="section-lede">
-            A runbook should not be a wiki page someone reads during an outage. In Skiff, canaries,
+            During an outage, a wiki runbook is too easy to misread or skip. In Skiff, canaries,
             drains, restores, failovers, rotations, and repairs are explicit sagas with typed steps,
             stored progress, compensation where possible, and clear events.
           </p>
@@ -1903,8 +1904,8 @@
               </div>
               <div class="viz-note">
                 <p class="story-note" data-phase="0"><b>Canary deploys become an operational contract.</b><span>Skiff advances only when health, logs, and SLO checks support promotion.</span></p>
-                <p class="story-note" data-phase="1"><b>Restores are not improvised.</b><span>The runbook proves backup freshness, isolates blast radius, and records the cutover plan.</span></p>
-                <p class="story-note" data-phase="2"><b>Secret rotation has a safe middle.</b><span>Stage new references, verify workloads, then revoke old credentials with audit evidence.</span></p>
+                <p class="story-note" data-phase="1"><b>Restores follow a recorded plan.</b><span>The runbook proves backup freshness, isolates blast radius, and records the cutover plan.</span></p>
+                <p class="story-note" data-phase="2"><b>Secret rotation has a safe middle.</b><span>Stage new references, verify workloads, then revoke old credentials after consumers move.</span></p>
                 <p class="story-note" data-phase="3"><b>Failover is explicit and reviewable.</b><span>Skiff separates plan, approval, route changes, validation, and compensation.</span></p>
               </div>
             </div>
@@ -1924,11 +1925,11 @@
         <div class="section-head">
           <div>
             <div class="kicker">Canary deploys</div>
-            <h2>Promotion follows evidence, not optimism.</h2>
+            <h2>Promotion waits for live signals.</h2>
           </div>
           <p class="section-lede">
             The deploy journey connects release signing, rollout traffic, target health, SLO signals,
-            logs, and audit records. The animation below shows traffic moving only as evidence clears.
+            logs, and recorded changes. The animation below shows traffic moving only as checks pass.
           </p>
         </div>
 
@@ -1954,7 +1955,7 @@
                 </div>
               </div>
               <div class="evidence-panel">
-                <h3>Evidence gates</h3>
+                <h3>Promotion checks</h3>
                 <div class="evidence-list">
                   <div class="evidence" data-phase="0 1 2 3"><span>Signed release verified</span><span>pass</span></div>
                   <div class="evidence" data-phase="0 1 2 3"><span>Runtime manifest verified</span><span>pass</span></div>
@@ -1966,10 +1967,10 @@
               </div>
             </div>
             <div class="viz-note">
-              <p class="story-note" data-phase="0"><b>Before traffic moves, release evidence is checked.</b><span>The runner verifies signatures and digests before serving, and the operation starts with a trace ID.</span></p>
+              <p class="story-note" data-phase="0"><b>Before traffic moves, the release is checked.</b><span>The runner verifies signatures and digests before serving, and the operation starts with a trace ID.</span></p>
               <p class="story-note" data-phase="1"><b>Small traffic proves the runtime path.</b><span>Skiff watches target health, logs, and SLO signals before increasing exposure.</span></p>
-              <p class="story-note" data-phase="2"><b>Promotion is a gate, not a timer.</b><span>Traffic advances when evidence is good, pauses when it is ambiguous, and recommends repair when it is unsafe.</span></p>
-              <p class="story-note" data-phase="3"><b>Completion leaves an audit trail.</b><span>The service control updates after durable state, and the operator can explain exactly what changed.</span></p>
+              <p class="story-note" data-phase="2"><b>Promotion is gated by live signals.</b><span>Traffic advances when signals are good, pauses when they are ambiguous, and recommends repair when they are unsafe.</span></p>
+              <p class="story-note" data-phase="3"><b>Completion records the change.</b><span>The service control updates after durable state, and the operator can explain exactly what changed.</span></p>
             </div>
           </div>
         </div>
@@ -1984,16 +1985,17 @@
             <h2>Status, logs, health, and next actions stay in one operational frame.</h2>
           </div>
           <p class="section-lede">
-            Skiff does not make operators assemble context from scratch. Service status is tied to the
-            operation, provider resources, trace ID, target health, logs, findings, and recommended commands.
+            Skiff keeps operators from assembling context from scratch. Service status is tied to the
+            operation, underlying cloud resources, trace ID, target health, logs, findings, and recommended commands.
+            The same context is available as JSON for agents.
           </p>
         </div>
 
         <div class="split">
           <div class="copy-column">
             <div class="copy-card"><b>Fresh reads when it matters.</b><span>Critical status can reload durable objects instead of trusting stale memory.</span></div>
-            <div class="copy-card"><b>Findings beat guesses.</b><span>Malformed state, provider drift, unhealthy targets, and risky recommendations are surfaced as explicit findings.</span></div>
-            <div class="copy-card"><b>Provider IDs stay visible.</b><span>Operators can move between Skiff and cloud consoles without decoding hidden abstractions.</span></div>
+            <div class="copy-card"><b>Findings are explicit.</b><span>Malformed state, provider drift, unhealthy targets, and risky recommendations are surfaced with context.</span></div>
+            <div class="copy-card"><b>No opaque platform layer.</b><span>Operators can move between Skiff and the AWS console without decoding a second resource model.</span></div>
           </div>
 
           <div class="viz" aria-label="Animated observability incident console">
@@ -2018,10 +2020,11 @@
                   <span class="json-line" data-phase="0 1 2 3">{</span>
                   <span class="json-line" data-phase="0 1 2 3">  "ok": false,</span>
                   <span class="json-line" data-phase="0 1 2 3">  "code": "CANARY_PAUSED",</span>
+                  <span class="json-line" data-phase="0 1 2 3">  "risk": "no",</span>
                   <span class="json-line" data-phase="1 2 3">  "facts": ["one target unhealthy", "stable still serving"],</span>
                   <span class="json-line" data-phase="2 3">  "recommended_actions": [</span>
                   <span class="json-line" data-phase="2 3">    "inspect scoped logs",</span>
-                  <span class="json-line" data-phase="2 3">    "rotate secret reference",</span>
+                  <span class="json-line" data-phase="2 3">    "request human approval",</span>
                   <span class="json-line" data-phase="3">    "resume op_01J"</span>
                   <span class="json-line" data-phase="2 3">  ]</span>
                   <span class="json-line" data-phase="0 1 2 3">}</span>
@@ -2029,8 +2032,8 @@
               </div>
               <div class="viz-note">
                 <p class="story-note" data-phase="0"><b>Detect starts from the service journey.</b><span>The operator sees rollout state and customer traffic before chasing raw telemetry.</span></p>
-                <p class="story-note" data-phase="1"><b>Correlation is built into the command output.</b><span>Trace IDs connect target health, logs, events, and provider resources.</span></p>
-                <p class="story-note" data-phase="2"><b>Recommendations are structured.</b><span>Skiff separates facts from hypotheses and marks mutating actions with risk and reversibility.</span></p>
+                <p class="story-note" data-phase="1"><b>Correlation is built into the command output.</b><span>Trace IDs connect target health, logs, events, and cloud resource IDs.</span></p>
+                <p class="story-note" data-phase="2"><b>Recommendations are structured.</b><span>Skiff separates facts from hypotheses and marks actions as no, low, medium, or high risk.</span></p>
                 <p class="story-note" data-phase="3"><b>Resume is a first-class operation.</b><span>After the fix, the same operation can continue without reconstructing state from memory.</span></p>
               </div>
             </div>
@@ -2044,12 +2047,12 @@
         <div class="section-head">
           <div>
             <div class="kicker">Agent-first tooling</div>
-            <h2>Agents get bounded commands, not production guesswork.</h2>
+            <h2>Agents get JSON, context, and human gates.</h2>
           </div>
           <p class="section-lede">
-            Agent-ready does not mean letting a bot mutate cloud resources blindly. Skiff outputs the facts,
-            trace IDs, operation IDs, safety labels, and approval requirements an agent needs to help without
-            becoming an unreviewable controller.
+            Every command supports <code>--format=json</code>. Skiff packages the facts, trace IDs,
+            operation IDs, recent events, risk labels, and approval requirements an agent needs to help
+            without becoming an unreviewable controller.
           </p>
         </div>
 
@@ -2057,43 +2060,43 @@
           <div class="viz" aria-label="Animated agent-safe operations loop">
             <div class="viz-inner">
               <div class="story-tabs" role="tablist" aria-label="Agent workflow phases">
-                <button type="button" data-step>Facts</button>
-                <button type="button" data-step>Policy</button>
-                <button type="button" data-step>Action</button>
-                <button type="button" data-step>Handoff</button>
+                <button type="button" data-step>JSON</button>
+                <button type="button" data-step>Context</button>
+                <button type="button" data-step>Risk</button>
+                <button type="button" data-step>Escalate</button>
               </div>
               <div class="agent-loop">
                 <span class="agent-link one" aria-hidden="true"></span>
                 <span class="agent-link two" aria-hidden="true"></span>
                 <div class="agent-node" data-phase="0 1">
-                  <b>Facts</b>
-                  <span>Service state, trace ID, target health, release, provider IDs, and recent events.</span>
-                  <div class="action-chip">read-only</div>
+                  <b>Machine-readable output</b>
+                  <span>Every command can return JSON with facts, findings, command suggestions, trace ID, and operation ID.</span>
+                  <div class="action-chip">--format=json</div>
                 </div>
                 <div class="agent-node" data-phase="1 2">
-                  <b>Policy and risk</b>
-                  <span>Safety classification, reversibility, required approval, and blast radius.</span>
-                  <div class="action-chip">bounded</div>
+                  <b>Problem context</b>
+                  <span>Skiff collects service state, target health, recent events, release data, and cloud resource IDs in one answer.</span>
+                  <div class="action-chip">context</div>
                 </div>
                 <div class="agent-node" data-phase="2 3">
-                  <b>Next command</b>
-                  <span>A concrete CLI command with JSON output, operation ID, and resume instructions.</span>
-                  <div class="action-chip">audited</div>
+                  <b>Risk and approval</b>
+                  <span>Actions are labeled no, low, medium, or high risk. High-risk work can require two-party authorization.</span>
+                  <div class="action-chip">human gate</div>
                 </div>
               </div>
               <div class="viz-note">
-                <p class="story-note" data-phase="0"><b>Agents start with facts.</b><span>Skiff output is designed so an agent can continue after interruption without scraping prose.</span></p>
-                <p class="story-note" data-phase="1"><b>Risk is explicit.</b><span>Mutating actions carry safety, reversibility, target, trace ID, and approval requirements.</span></p>
-                <p class="story-note" data-phase="2"><b>Commands are the interface.</b><span>Agents recommend or run bounded CLI actions rather than inventing hidden reconciliation loops.</span></p>
-                <p class="story-note" data-phase="3"><b>Handoffs are durable.</b><span>Operation and saga IDs let another human or agent resume from object state and events.</span></p>
+                <p class="story-note" data-phase="0"><b>Agents do not scrape prose.</b><span>JSON mode is a stable interface for status, doctor output, recommendations, and errors.</span></p>
+                <p class="story-note" data-phase="1"><b>Skiff manages the context packet.</b><span>The agent gets the service, operation, trace, cloud resources, recent events, and next commands together.</span></p>
+                <p class="story-note" data-phase="2"><b>Risk is explicit.</b><span>Commands are classified before they run, including whether they mutate state and how reversible they are.</span></p>
+                <p class="story-note" data-phase="3"><b>Escalation is part of the flow.</b><span>Agent escalations to humans and two-party authorization are built into high-risk operations.</span></p>
               </div>
             </div>
           </div>
 
           <div class="copy-column">
-            <div class="copy-card"><b>Agent outputs are structured.</b><span>Facts, hypotheses, recommendations, mutating flags, safety, reversibility, trace ID, and operation ID are separate fields.</span></div>
-            <div class="copy-card"><b>Direct mode remains available.</b><span>When the facade is down, the CLI can read durable state and recover without asking a database for permission.</span></div>
-            <div class="copy-card"><b>No mystery controller is required.</b><span>Skiff favors explicit sagas and auditable operations over hidden always-running automation.</span></div>
+            <div class="copy-card"><b>Every command has JSON mode.</b><span>Agents can parse facts, hypotheses, recommendations, mutating flags, trace IDs, and operation IDs without screen scraping.</span></div>
+            <div class="copy-card"><b>Agent safety is first-class.</b><span>Recommended actions carry no, low, medium, or high risk labels, plus reversibility and approval requirements.</span></div>
+            <div class="copy-card"><b>Humans stay in the loop.</b><span>High-risk actions and agent escalations can require two-party authorization before Skiff runs them.</span></div>
           </div>
         </div>
       </div>
@@ -2107,16 +2110,16 @@
             <h2>Adopt the operating model without rewriting your whole cloud estate.</h2>
           </div>
           <p class="section-lede">
-            Skiff is AWS-first and designed to meet existing teams where they are. Import known cloud shape,
-            keep provider resources visible, and add paved operational journeys one service at a time.
+            Skiff is AWS-first and works against existing cloud accounts. Import known cloud shape,
+            keep native cloud resources in the model, and add paved operational journeys one service at a time.
           </p>
         </div>
 
         <div class="split">
           <div class="copy-column">
-            <div class="copy-card"><b>Start with a service, not a migration crusade.</b><span>Bring one API, worker, or stateful member under signed release and operational runbooks.</span></div>
+            <div class="copy-card"><b>Start with one service.</b><span>Bring one API, worker, or stateful member under signed release and operational runbooks.</span></div>
             <div class="copy-card"><b>Keep Terraform where it helps.</b><span>Terraform can express infrastructure shape while Skiff owns the operational journey.</span></div>
-            <div class="copy-card"><b>Make billable resources visible.</b><span>State buckets, NAT gateways, load balancers, certificates, autoscaling groups, and log groups remain visible in output.</span></div>
+            <div class="copy-card"><b>Billable resources stay explicit.</b><span>State buckets, NAT gateways, load balancers, certificates, autoscaling groups, and log groups remain named in output.</span></div>
           </div>
 
           <div class="viz" aria-label="Animated Skiff adoption bridge">
@@ -2143,14 +2146,14 @@
                 <div class="target-stack">
                   <div class="outcome-card" data-phase="1"><b>Skiff context</b><span>state root, signer, region, env</span></div>
                   <div class="outcome-card" data-phase="2"><b>Signed release path</b><span>canary, logs, health, audit</span></div>
-                  <div class="outcome-card" data-phase="3"><b>Operational portfolio</b><span>runbooks, direct recovery, agents</span></div>
+                  <div class="outcome-card" data-phase="3"><b>Operational portfolio</b><span>runbooks, agents, break-glass CLI</span></div>
                 </div>
               </div>
               <div class="viz-note">
                 <p class="story-note" data-phase="0"><b>Discovery makes the cloud shape legible.</b><span>Skiff does not hide existing primitives or require teams to pretend the cloud is a cluster.</span></p>
                 <p class="story-note" data-phase="1"><b>Bootstrap installs secure defaults.</b><span>The environment gets state, signing, IAM, logs, and context without exposing low-level IDs on the happy path.</span></p>
-                <p class="story-note" data-phase="2"><b>The first service proves the path.</b><span>Operators get canary deploys, release verification, status, logs, doctor output, and direct recovery.</span></p>
-                <p class="story-note" data-phase="3"><b>Expansion is additive.</b><span>Each new service adds typed operations and audit evidence instead of another pile of bespoke YAML.</span></p>
+                <p class="story-note" data-phase="2"><b>The first service proves the path.</b><span>Operators get canary deploys, release verification, status, logs, doctor output, and a CLI fallback.</span></p>
+                <p class="story-note" data-phase="3"><b>Expansion is additive.</b><span>Each new service adds typed operations instead of another pile of bespoke YAML.</span></p>
               </div>
             </div>
           </div>
@@ -2167,8 +2170,8 @@
           </div>
           <p class="section-lede">
             Skiff is designed around operational jobs: ship safely, respond to degraded service,
-            recover data, rotate credentials, and hand work to an agent or another human with enough
-            context to continue.
+            recover data, rotate credentials, and hand work to an agent or another human with JSON context,
+            risk labels, and enough history to continue.
           </p>
         </div>
 
@@ -2182,15 +2185,15 @@
             </div>
             <div class="recipe-grid">
               <article class="recipe-card" data-phase="0" style="--meter: 92%">
-                <div><h3>Ship a release</h3><p>Compile spec, sign release, canary traffic, watch evidence, promote or pause.</p></div>
+                <div><h3>Ship a release</h3><p>Compile spec, sign release, canary traffic, watch health, promote or pause.</p></div>
                 <div class="recipe-meter"><span></span></div>
               </article>
               <article class="recipe-card" data-phase="1" style="--meter: 76%">
-                <div><h3>Repair degraded service</h3><p>Pull facts, inspect logs, classify risk, run bounded repair, resume operation.</p></div>
+                <div><h3>Repair degraded service</h3><p>Pull JSON context, inspect logs, classify risk, escalate or run bounded repair.</p></div>
                 <div class="recipe-meter"><span></span></div>
               </article>
               <article class="recipe-card" data-phase="2" style="--meter: 68%">
-                <div><h3>Restore state</h3><p>Verify backup, isolate target, approve cutover, validate health, document evidence.</p></div>
+                <div><h3>Restore state</h3><p>Verify backup, isolate target, approve cutover, validate health, record the result.</p></div>
                 <div class="recipe-meter"><span></span></div>
               </article>
               <article class="recipe-card" data-phase="3" style="--meter: 84%">
@@ -2199,10 +2202,10 @@
               </article>
             </div>
             <div class="viz-note">
-              <p class="story-note" data-phase="0"><b>Shipping is a journey, not a YAML merge.</b><span>The operator sees release evidence, rollout state, traffic, health, logs, and audit output in one path.</span></p>
-              <p class="story-note" data-phase="1"><b>Repair begins with observed facts.</b><span>Doctor output recommends commands and flags mutating actions so humans can approve safely.</span></p>
-              <p class="story-note" data-phase="2"><b>State recovery gets first-class treatment.</b><span>Restore work includes backup proof, risk classification, cutover, validation, and traceable results.</span></p>
-              <p class="story-note" data-phase="3"><b>Credential rotation is deliberate.</b><span>Skiff stages the change, verifies workloads, revokes old access, and records the operational proof.</span></p>
+              <p class="story-note" data-phase="0"><b>Shipping stays in one path.</b><span>The operator sees release, rollout state, traffic, health, logs, and the next safe action together.</span></p>
+              <p class="story-note" data-phase="1"><b>Repair begins with observed facts.</b><span>Doctor output recommends commands, labels risk, and asks for human approval when an agent should not act alone.</span></p>
+              <p class="story-note" data-phase="2"><b>State recovery gets first-class treatment.</b><span>Restore work includes backup freshness, risk classification, cutover, validation, and traceable results.</span></p>
+              <p class="story-note" data-phase="3"><b>Credential rotation is deliberate.</b><span>Skiff stages the change, verifies workloads, revokes old access, and records what changed.</span></p>
             </div>
           </div>
         </div>
@@ -2217,9 +2220,8 @@
             <h2>The internals exist to preserve the operator promise.</h2>
           </div>
           <p class="section-lede">
-            The public story is operational leverage. The engineering story is what makes that promise safe:
-            durable object state, stateless facade, direct CLI recovery, immutable history, CAS controls,
-            and typed sagas.
+            The operator-facing promise rests on durable object state, a stateless facade, a direct CLI fallback,
+            immutable history, CAS controls, and typed sagas.
           </p>
         </div>
 
@@ -2256,7 +2258,7 @@
               </div>
               <div class="viz-note">
                 <p class="story-note" data-phase="0"><b>Durable state comes first.</b><span>Mutating operations write object storage before updating in-memory views.</span></p>
-                <p class="story-note" data-phase="1"><b>The facade can fail without taking truth with it.</b><span>skiffd powers normal UX, but direct CLI recovery remains available.</span></p>
+                <p class="story-note" data-phase="1"><b>The facade can fail without taking truth with it.</b><span>skiffd powers normal UX, but the CLI can still read object state directly.</span></p>
                 <p class="story-note" data-phase="2"><b>The VM is the workload boundary.</b><span>Runners verify signed releases and report state transitions without relying on a cluster control plane.</span></p>
                 <p class="story-note" data-phase="3"><b>Audit is part of the contract.</b><span>Every mutating production operation is traceable, resumable when long-running, and explicit about risk.</span></p>
               </div>
@@ -2264,9 +2266,9 @@
           </div>
 
           <div class="copy-column">
-            <div class="copy-card"><b>Object state is the recovery substrate.</b><span>Release manifests, operation intents, saga graphs, events, controls, indexes, and audits have clear mutation rules.</span></div>
+            <div class="copy-card"><b>Object state is the durable substrate.</b><span>Release manifests, operation intents, saga graphs, events, controls, indexes, and audits have clear mutation rules.</span></div>
             <div class="copy-card"><b>Control docs are also lock docs.</b><span>Compare-and-swap on the relevant control document prevents separate lock files and stale ownership.</span></div>
-            <div class="copy-card"><b>Cloud primitives remain visible.</b><span>Skiff exposes the ASG, target group, IAM role, log group, and provider IDs operators need to trust the system.</span></div>
+            <div class="copy-card"><b>Native cloud primitives stay native.</b><span>Skiff uses ASGs, target groups, IAM roles, and log groups without adding a thick platform abstraction.</span></div>
           </div>
         </div>
       </div>
@@ -2277,10 +2279,10 @@
         <div class="footer-box">
           <div>
             <div class="kicker">Skiff</div>
-            <h2>Get Kubernetes-class operations without signing up to run Kubernetes.</h2>
+            <h2>Get platform-grade operations without running Kubernetes.</h2>
             <p>
               Start with a secure bootstrap, ship one service through signed canary releases,
-              and turn the recurring production work into typed, audited runbooks.
+              and turn the recurring production work into typed runbooks.
             </p>
             <div class="command-box">
               <code id="install-cmd">curl -fsSL https://raw.githubusercontent.com/s1liconcow/skiff/main/scripts/install.sh | bash</code>
@@ -2305,9 +2307,9 @@
 
   <footer>
     <div class="wrap footer-line">
-      <span>Skiff - clusterless cloud operations.</span>
-      <span>Secure defaults, explicit runbooks, direct recovery.</span>
-      <span>I like solving SRE problems - hire me @ <a href="https://challoner.dev/consulting" target="_blank" rel="noreferrer">challoner.dev/consulting</a></span>
+      <span>Skiff: clusterless cloud operations.</span>
+      <span>Secure defaults, explicit runbooks, native cloud primitives.</span>
+      <span>I like solving SRE problems; hire me at <a href="https://challoner.dev/consulting" target="_blank" rel="noreferrer">challoner.dev/consulting</a></span>
     </div>
   </footer>
 
