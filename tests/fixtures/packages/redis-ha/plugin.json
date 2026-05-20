@@ -1,0 +1,46 @@
+{
+  "apiVersion": "skiff.dev/plugin/v1alpha1",
+  "kind": "Plugin",
+  "name": "redis-ha",
+  "version": "1.0.0",
+  "runtime": {"kind": "command", "command": ["redis-ha-plugin"]},
+  "hooks": ["doctor_checks", "package_step"],
+  "permissions": {
+    "doctor_checks": true,
+    "package_step_kinds": [
+      "package.primary_switchover.verify_cluster_healthy",
+      "package.primary_switchover.verify_candidate_caught_up",
+      "package.primary_switchover.move_primary",
+      "package.primary_switchover.update_old_primary",
+      "package.primary_switchover.verify_old_primary_caught_up",
+      "package.primary_switchover.optional_failback",
+      "package.primary_switchover.update_candidate",
+      "package.primary_switchover.verify_final_topology",
+      "redis.sentinel.verify_quorum",
+      "redis.sentinel.verify_primary",
+      "redis.sentinel.failover",
+      "redis.verify_replica"
+    ]
+  },
+  "capabilities": [
+    {"kind": "doctor_check", "name": "redis-ha-doctor", "doctor_checks": ["redis.sentinel_quorum", "redis.role"]},
+    {
+      "kind": "package_step",
+      "name": "redis-sentinel-safety",
+      "package_steps": [
+        {"kind": "package.primary_switchover.verify_cluster_healthy", "summary": "verify Redis and Sentinel health", "risk": "low", "reversibility": "reversible"},
+        {"kind": "package.primary_switchover.verify_candidate_caught_up", "summary": "verify replica is eligible for planned failover", "risk": "low", "reversibility": "reversible"},
+        {"kind": "package.primary_switchover.move_primary", "summary": "run Sentinel-coordinated planned failover", "risk": "high", "reversibility": "partially_reversible"},
+        {"kind": "package.primary_switchover.update_old_primary", "summary": "update old primary after replica promotion", "risk": "medium", "reversibility": "compensatable"},
+        {"kind": "package.primary_switchover.verify_old_primary_caught_up", "summary": "verify old primary rejoined as replica", "risk": "low", "reversibility": "reversible"},
+        {"kind": "package.primary_switchover.optional_failback", "summary": "optionally fail back through Sentinel", "risk": "medium", "reversibility": "partially_reversible"},
+        {"kind": "package.primary_switchover.update_candidate", "summary": "update promoted candidate after topology is safe", "risk": "medium", "reversibility": "compensatable"},
+        {"kind": "package.primary_switchover.verify_final_topology", "summary": "verify final Redis primary and replicas", "risk": "low", "reversibility": "reversible"},
+        {"kind": "redis.sentinel.verify_quorum", "summary": "verify Sentinel quorum", "risk": "low", "reversibility": "reversible"},
+        {"kind": "redis.sentinel.verify_primary", "summary": "verify Sentinel observes the expected primary", "risk": "low", "reversibility": "reversible"},
+        {"kind": "redis.sentinel.failover", "summary": "perform planned Sentinel failover", "risk": "high", "reversibility": "partially_reversible"},
+        {"kind": "redis.verify_replica", "summary": "verify replica catch-up", "risk": "low", "reversibility": "reversible"}
+      ]
+    }
+  ]
+}

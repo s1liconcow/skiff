@@ -91,13 +91,13 @@ scenario before the package bead can count as operationally safe.
 | Package | Mode | `skiff-opsem` mode | Status |
 |---|---|---|---|
 | `postgres-ha` | self-managed | `primary-replica` | covered |
-| `mysql-ha` | self-managed | `primary-replica` | not_implemented |
-| `kafka` | self-managed | `partition-isr` | not_implemented |
-| `nats-jetstream` | self-managed | `raft-groups` | not_implemented |
-| `redis-ha` | self-managed | `primary-replica` | not_implemented |
-| `redis-cluster` | self-managed | `slot-cluster` | not_implemented |
-| `opensearch-ha` | self-managed | `shard-cluster` | not_implemented |
-| `elasticsearch-ha` | self-managed | `shard-cluster` | not_implemented |
+| `mysql-ha` | self-managed | `primary-replica` | covered |
+| `kafka` | self-managed | `partition-isr` | covered |
+| `nats-jetstream` | self-managed | `raft-groups` | covered |
+| `redis-ha` | self-managed | `primary-replica` | covered |
+| `redis-cluster` | self-managed | `slot-cluster` | covered |
+| `opensearch-ha` | self-managed | `shard-cluster` | covered |
+| `elasticsearch-ha` | self-managed | `shard-cluster` | covered |
 
 ## AWS Environment
 

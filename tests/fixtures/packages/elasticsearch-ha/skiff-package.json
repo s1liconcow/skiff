@@ -1,0 +1,33 @@
+{
+  "apiVersion": "skiff.dev/package/v1alpha1",
+  "kind": "Package",
+  "name": "elasticsearch-ha",
+  "version": "1.0.0",
+  "exports": {
+    "dependencies": ["elasticsearch-ha"],
+    "operation_profiles": ["shard-allocation-rolling-update"],
+    "self_managed_operations": [
+      "shard-allocation-rolling-update",
+      "search.verify_cluster_health",
+      "search.disable_replica_allocation",
+      "search.flush",
+      "search.wait_for_recovery"
+    ],
+    "package_steps": [
+      "package.shard_allocation.verify_allocation",
+      "package.shard_allocation.relocate_primaries",
+      "package.shard_allocation.update_holders",
+      "package.shard_allocation.wait_for_rebalance",
+      "package.shard_allocation.verify_final",
+      "search.verify_cluster_health",
+      "search.disable_replica_allocation",
+      "search.flush",
+      "search.stop_node",
+      "search.start_node",
+      "search.enable_allocation",
+      "search.wait_for_recovery"
+    ],
+    "doctor_checks": ["search.cluster_health", "search.allocation"]
+  },
+  "plugin": {"manifest": "plugin.json"}
+}

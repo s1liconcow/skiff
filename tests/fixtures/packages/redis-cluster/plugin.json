@@ -1,0 +1,38 @@
+{
+  "apiVersion": "skiff.dev/plugin/v1alpha1",
+  "kind": "Plugin",
+  "name": "redis-cluster",
+  "version": "1.0.0",
+  "runtime": {"kind": "command", "command": ["redis-cluster-plugin"]},
+  "hooks": ["doctor_checks", "package_step"],
+  "permissions": {
+    "doctor_checks": true,
+    "package_step_kinds": [
+      "package.slot_aware.verify_coverage",
+      "package.slot_aware.failover_replicas",
+      "package.slot_aware.verify_slot_health",
+      "package.slot_aware.update_remaining_members",
+      "package.slot_aware.verify_final_coverage",
+      "redis.cluster.verify_slots",
+      "redis.cluster.verify_replicas",
+      "redis.cluster.manual_failover"
+    ]
+  },
+  "capabilities": [
+    {"kind": "doctor_check", "name": "redis-cluster-doctor", "doctor_checks": ["redis.cluster_slots", "redis.cluster_replicas"]},
+    {
+      "kind": "package_step",
+      "name": "redis-slot-safety",
+      "package_steps": [
+        {"kind": "package.slot_aware.verify_coverage", "summary": "verify all Redis Cluster slots are covered", "risk": "low", "reversibility": "reversible"},
+        {"kind": "package.slot_aware.failover_replicas", "summary": "run normal manual failover for one replica per slot", "risk": "high", "reversibility": "partially_reversible"},
+        {"kind": "package.slot_aware.verify_slot_health", "summary": "verify slot health after failover", "risk": "low", "reversibility": "reversible"},
+        {"kind": "package.slot_aware.update_remaining_members", "summary": "update remaining slot members", "risk": "medium", "reversibility": "compensatable"},
+        {"kind": "package.slot_aware.verify_final_coverage", "summary": "verify final slot coverage", "risk": "low", "reversibility": "reversible"},
+        {"kind": "redis.cluster.verify_slots", "summary": "verify slot map has no gaps", "risk": "low", "reversibility": "reversible"},
+        {"kind": "redis.cluster.verify_replicas", "summary": "verify every master has an eligible replica", "risk": "low", "reversibility": "reversible"},
+        {"kind": "redis.cluster.manual_failover", "summary": "perform normal Redis Cluster manual failover", "risk": "high", "reversibility": "partially_reversible"}
+      ]
+    }
+  ]
+}

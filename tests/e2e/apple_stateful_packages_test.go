@@ -19,13 +19,13 @@ type statefulPackageValidationRow struct {
 func statefulPackageValidationMatrix() []statefulPackageValidationRow {
 	return []statefulPackageValidationRow{
 		{Package: "postgres-ha", Mode: "self-managed", OpsemMode: "primary-replica", Fixture: "postgres-ha", Profile: "primary-switchover-update", Status: coverageCovered},
-		{Package: "mysql-ha", Mode: "self-managed", OpsemMode: "primary-replica", Fixture: "mysql-ha", Profile: "primary-switchover-update", Status: coverageNotImplemented},
-		{Package: "kafka", Mode: "self-managed", OpsemMode: "partition-isr", Fixture: "kafka", Profile: "partition-quorum-rolling-update", Status: coverageNotImplemented},
-		{Package: "nats-jetstream", Mode: "self-managed", OpsemMode: "raft-groups", Fixture: "nats-jetstream", Profile: "raft-group-rolling-update", Status: coverageNotImplemented},
-		{Package: "redis-ha", Mode: "self-managed", OpsemMode: "primary-replica", Fixture: "redis-ha", Profile: "primary-switchover-update", Status: coverageNotImplemented},
-		{Package: "redis-cluster", Mode: "self-managed", OpsemMode: "slot-cluster", Fixture: "redis-cluster", Profile: "slot-aware-failover-update", Status: coverageNotImplemented},
-		{Package: "opensearch-ha", Mode: "self-managed", OpsemMode: "shard-cluster", Fixture: "opensearch-ha", Profile: "shard-allocation-rolling-update", Status: coverageNotImplemented},
-		{Package: "elasticsearch-ha", Mode: "self-managed", OpsemMode: "shard-cluster", Fixture: "elasticsearch-ha", Profile: "shard-allocation-rolling-update", Status: coverageNotImplemented},
+		{Package: "mysql-ha", Mode: "self-managed", OpsemMode: "primary-replica", Fixture: "mysql-ha", Profile: "primary-switchover-update", Status: coverageCovered},
+		{Package: "kafka", Mode: "self-managed", OpsemMode: "partition-isr", Fixture: "kafka", Profile: "partition-quorum-rolling-update", Status: coverageCovered},
+		{Package: "nats-jetstream", Mode: "self-managed", OpsemMode: "raft-groups", Fixture: "nats-jetstream", Profile: "raft-group-rolling-update", Status: coverageCovered},
+		{Package: "redis-ha", Mode: "self-managed", OpsemMode: "primary-replica", Fixture: "redis-ha", Profile: "primary-switchover-update", Status: coverageCovered},
+		{Package: "redis-cluster", Mode: "self-managed", OpsemMode: "slot-cluster", Fixture: "redis-cluster", Profile: "slot-aware-failover-update", Status: coverageCovered},
+		{Package: "opensearch-ha", Mode: "self-managed", OpsemMode: "shard-cluster", Fixture: "opensearch-ha", Profile: "shard-allocation-rolling-update", Status: coverageCovered},
+		{Package: "elasticsearch-ha", Mode: "self-managed", OpsemMode: "shard-cluster", Fixture: "elasticsearch-ha", Profile: "shard-allocation-rolling-update", Status: coverageCovered},
 	}
 }
 

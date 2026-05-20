@@ -1,0 +1,41 @@
+{
+  "apiVersion": "skiff.dev/package/v1alpha1",
+  "kind": "Package",
+  "name": "mysql-ha",
+  "version": "1.0.0",
+  "exports": {
+    "dependencies": ["mysql-ha"],
+    "operation_profiles": ["primary-switchover-update"],
+    "managed_operations": [
+      "mysql.managed.failover",
+      "mysql.managed.backup",
+      "mysql.managed.restore",
+      "mysql.managed.rotate_credentials",
+      "mysql.managed.inspect_topology"
+    ],
+    "self_managed_operations": [
+      "primary-switchover-update",
+      "mysql.controlled_primary_change",
+      "mysql.backup",
+      "mysql.restore",
+      "mysql.rejoin_instance",
+      "mysql.verify_router"
+    ],
+    "package_steps": [
+      "package.primary_switchover.verify_cluster_healthy",
+      "package.primary_switchover.verify_candidate_caught_up",
+      "package.primary_switchover.move_primary",
+      "package.primary_switchover.update_old_primary",
+      "package.primary_switchover.verify_old_primary_caught_up",
+      "package.primary_switchover.optional_failback",
+      "package.primary_switchover.update_candidate",
+      "package.primary_switchover.verify_final_topology",
+      "mysql.verify_group_members",
+      "mysql.verify_primary",
+      "mysql.set_primary",
+      "mysql.verify_router"
+    ],
+    "doctor_checks": ["mysql.group_members", "mysql.primary", "mysql.router"]
+  },
+  "plugin": {"manifest": "plugin.json"}
+}

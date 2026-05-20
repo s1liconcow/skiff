@@ -1,0 +1,46 @@
+{
+  "apiVersion": "skiff.dev/plugin/v1alpha1",
+  "kind": "Plugin",
+  "name": "elasticsearch-ha",
+  "version": "1.0.0",
+  "runtime": {"kind": "command", "command": ["search-package-plugin"]},
+  "hooks": ["doctor_checks", "package_step"],
+  "permissions": {
+    "doctor_checks": true,
+    "package_step_kinds": [
+      "package.shard_allocation.verify_allocation",
+      "package.shard_allocation.relocate_primaries",
+      "package.shard_allocation.update_holders",
+      "package.shard_allocation.wait_for_rebalance",
+      "package.shard_allocation.verify_final",
+      "search.verify_cluster_health",
+      "search.disable_replica_allocation",
+      "search.flush",
+      "search.stop_node",
+      "search.start_node",
+      "search.enable_allocation",
+      "search.wait_for_recovery"
+    ]
+  },
+  "capabilities": [
+    {"kind": "doctor_check", "name": "search-doctor", "doctor_checks": ["search.cluster_health", "search.allocation"]},
+    {
+      "kind": "package_step",
+      "name": "search-shard-safety",
+      "package_steps": [
+        {"kind": "package.shard_allocation.verify_allocation", "summary": "verify cluster health and shard allocation before mutation", "risk": "low", "reversibility": "reversible"},
+        {"kind": "package.shard_allocation.relocate_primaries", "summary": "relocate primaries or hot shards away from target", "risk": "high", "reversibility": "partially_reversible"},
+        {"kind": "package.shard_allocation.update_holders", "summary": "update shard holders after relocation", "risk": "medium", "reversibility": "compensatable"},
+        {"kind": "package.shard_allocation.wait_for_rebalance", "summary": "wait for shard recovery and rebalance", "risk": "low", "reversibility": "reversible"},
+        {"kind": "package.shard_allocation.verify_final", "summary": "verify final cluster health", "risk": "low", "reversibility": "reversible"},
+        {"kind": "search.verify_cluster_health", "summary": "block red health unless break-glass is approved", "risk": "low", "reversibility": "reversible"},
+        {"kind": "search.disable_replica_allocation", "summary": "temporarily disable replica allocation for node restart", "risk": "medium", "reversibility": "compensatable"},
+        {"kind": "search.flush", "summary": "flush before restart where supported", "risk": "low", "reversibility": "reversible"},
+        {"kind": "search.stop_node", "summary": "stop one search node", "risk": "high", "reversibility": "partially_reversible"},
+        {"kind": "search.start_node", "summary": "start one search node", "risk": "medium", "reversibility": "compensatable"},
+        {"kind": "search.enable_allocation", "summary": "re-enable allocation after restart", "risk": "medium", "reversibility": "compensatable"},
+        {"kind": "search.wait_for_recovery", "summary": "wait for recovery before next node", "risk": "low", "reversibility": "reversible"}
+      ]
+    }
+  ]
+}

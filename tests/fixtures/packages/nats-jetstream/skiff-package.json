@@ -1,0 +1,30 @@
+{
+  "apiVersion": "skiff.dev/package/v1alpha1",
+  "kind": "Package",
+  "name": "nats-jetstream",
+  "version": "1.0.0",
+  "exports": {
+    "dependencies": ["nats-jetstream"],
+    "operation_profiles": ["raft-group-rolling-update"],
+    "self_managed_operations": [
+      "raft-group-rolling-update",
+      "nats.jetstream.verify_quorum",
+      "nats.jetstream.stepdown_leader",
+      "nats.jetstream.verify_catch_up"
+    ],
+    "package_steps": [
+      "package.raft_group.verify_quorum",
+      "package.raft_group.update_followers",
+      "package.raft_group.verify_followers_caught_up",
+      "package.raft_group.transfer_leader",
+      "package.raft_group.update_previous_leader",
+      "package.raft_group.verify_final_quorum",
+      "nats.jetstream.verify_quorum",
+      "nats.jetstream.verify_stream_leaders",
+      "nats.jetstream.stepdown_leader",
+      "nats.jetstream.verify_catch_up"
+    ],
+    "doctor_checks": ["nats.jetstream.quorum", "nats.jetstream.stream_leaders"]
+  },
+  "plugin": {"manifest": "plugin.json"}
+}

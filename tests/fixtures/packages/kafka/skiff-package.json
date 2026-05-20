@@ -1,0 +1,32 @@
+{
+  "apiVersion": "skiff.dev/package/v1alpha1",
+  "kind": "Package",
+  "name": "kafka",
+  "version": "1.0.0",
+  "exports": {
+    "dependencies": ["kafka"],
+    "operation_profiles": ["partition-quorum-rolling-update"],
+    "self_managed_operations": [
+      "partition-quorum-rolling-update",
+      "kafka.verify_cluster",
+      "kafka.verify_isr",
+      "kafka.move_leadership",
+      "kafka.verify_broker_caught_up"
+    ],
+    "package_steps": [
+      "package.partition_quorum.verify_quorum",
+      "package.partition_quorum.update_non_leaders",
+      "package.partition_quorum.verify_in_sync_replicas",
+      "package.partition_quorum.move_leaders",
+      "package.partition_quorum.update_previous_leaders",
+      "package.partition_quorum.verify_final",
+      "kafka.verify_cluster",
+      "kafka.verify_isr",
+      "kafka.verify_no_under_replicated_partitions",
+      "kafka.move_leadership",
+      "kafka.verify_broker_caught_up"
+    ],
+    "doctor_checks": ["kafka.cluster", "kafka.isr", "kafka.under_replicated_partitions"]
+  },
+  "plugin": {"manifest": "plugin.json"}
+}

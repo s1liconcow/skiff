@@ -1,0 +1,46 @@
+{
+  "apiVersion": "skiff.dev/plugin/v1alpha1",
+  "kind": "Plugin",
+  "name": "mysql-ha",
+  "version": "1.0.0",
+  "runtime": {"kind": "command", "command": ["mysql-ha-plugin"]},
+  "hooks": ["doctor_checks", "package_step"],
+  "permissions": {
+    "doctor_checks": true,
+    "package_step_kinds": [
+      "package.primary_switchover.verify_cluster_healthy",
+      "package.primary_switchover.verify_candidate_caught_up",
+      "package.primary_switchover.move_primary",
+      "package.primary_switchover.update_old_primary",
+      "package.primary_switchover.verify_old_primary_caught_up",
+      "package.primary_switchover.optional_failback",
+      "package.primary_switchover.update_candidate",
+      "package.primary_switchover.verify_final_topology",
+      "mysql.verify_group_members",
+      "mysql.verify_primary",
+      "mysql.set_primary",
+      "mysql.verify_router"
+    ]
+  },
+  "capabilities": [
+    {"kind": "doctor_check", "name": "mysql-doctor", "doctor_checks": ["mysql.group_members", "mysql.primary", "mysql.router"]},
+    {
+      "kind": "package_step",
+      "name": "mysql-primary-safety",
+      "package_steps": [
+        {"kind": "package.primary_switchover.verify_cluster_healthy", "summary": "verify InnoDB Cluster members are ONLINE", "risk": "low", "reversibility": "reversible"},
+        {"kind": "package.primary_switchover.verify_candidate_caught_up", "summary": "verify controlled primary candidate is caught up", "risk": "low", "reversibility": "reversible"},
+        {"kind": "package.primary_switchover.move_primary", "summary": "run controlled primary change", "risk": "high", "reversibility": "partially_reversible"},
+        {"kind": "package.primary_switchover.update_old_primary", "summary": "update old primary after demotion", "risk": "medium", "reversibility": "compensatable"},
+        {"kind": "package.primary_switchover.verify_old_primary_caught_up", "summary": "verify old primary rejoined and caught up", "risk": "low", "reversibility": "reversible"},
+        {"kind": "package.primary_switchover.optional_failback", "summary": "optionally move primary role back", "risk": "medium", "reversibility": "partially_reversible"},
+        {"kind": "package.primary_switchover.update_candidate", "summary": "update candidate after topology is safe", "risk": "medium", "reversibility": "compensatable"},
+        {"kind": "package.primary_switchover.verify_final_topology", "summary": "verify final primary and router endpoint", "risk": "low", "reversibility": "reversible"},
+        {"kind": "mysql.verify_group_members", "summary": "verify expected MySQL members are ONLINE", "risk": "low", "reversibility": "reversible"},
+        {"kind": "mysql.verify_primary", "summary": "verify single-primary topology", "risk": "low", "reversibility": "reversible"},
+        {"kind": "mysql.set_primary", "summary": "set primary through controlled primary change", "risk": "high", "reversibility": "partially_reversible"},
+        {"kind": "mysql.verify_router", "summary": "verify MySQL Router points at current primary", "risk": "low", "reversibility": "reversible"}
+      ]
+    }
+  ]
+}

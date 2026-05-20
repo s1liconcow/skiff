@@ -270,12 +270,12 @@ func (c *API) WatchEvents(ctx context.Context, opts EventWatchOptions) (<-chan E
 	go func() {
 		defer close(out)
 		defer resp.Body.Close()
-		readSSE(ctx, resp.Body, out)
+		readSSE(ctx, resp.Body, out, opts.Once)
 	}()
 	return out, nil
 }
 
-func readSSE(ctx context.Context, body io.Reader, out chan<- EventDelivery) {
+func readSSE(ctx context.Context, body io.Reader, out chan<- EventDelivery, once bool) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	var eventType, eventID string
@@ -311,6 +311,9 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- EventDelivery) {
 		}
 		select {
 		case out <- delivery:
+			if once {
+				return false
+			}
 			return true
 		case <-ctx.Done():
 			return false

@@ -604,6 +604,7 @@ func runOpsWatch(binary string, args []string, root rootOptions, stdout, stderr 
 	operation := fs.String("operation", "", "operation ID")
 	limit := fs.Int("limit", 0, "maximum replay events before watching")
 	afterID := fs.String("after", "", "resume after event ID")
+	once := fs.Bool("once", false, "exit after the first replayed or watched event")
 
 	flagArgs, positionals, err := splitOpsWatchArgs(args)
 	if err != nil {
@@ -659,6 +660,7 @@ func runOpsWatch(binary string, args []string, root rootOptions, stdout, stderr 
 		},
 		AfterID:      *afterID,
 		PollInterval: eventsWatchPollInterval,
+		Once:         *once,
 	}, *flags.format, *flags.traceID, stdout, stderr)
 }
 
@@ -883,6 +885,7 @@ func splitOpsWatchArgs(args []string) ([]string, []string, error) {
 		"format":       true,
 		"limit":        true,
 		"mode":         true,
+		"once":         false,
 		"operation":    true,
 		"provider":     true,
 		"region":       true,

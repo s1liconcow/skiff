@@ -17,13 +17,27 @@ func TestFakePackageConformance(t *testing.T) {
 	})
 }
 
-func TestPostgresHAPackageConformance(t *testing.T) {
-	result := Run(t, Suite{
-		Ref:       "file://" + filepath.Join("..", "..", "fixtures", "packages", "postgres-ha"),
-		CacheRoot: t.TempDir(),
-	})
-	if len(result.Package.Name) == 0 || result.Package.Name != "postgres-ha" {
-		t.Fatalf("unexpected package summary: %+v", result.Package)
+func TestFirstPartyPackageConformance(t *testing.T) {
+	for _, fixture := range []string{
+		"postgres-ha",
+		"mysql-ha",
+		"kafka",
+		"nats-jetstream",
+		"redis-ha",
+		"redis-cluster",
+		"opensearch-ha",
+		"elasticsearch-ha",
+	} {
+		fixture := fixture
+		t.Run(fixture, func(t *testing.T) {
+			result := Run(t, Suite{
+				Ref:       "file://" + filepath.Join("..", "..", "fixtures", "packages", fixture),
+				CacheRoot: t.TempDir(),
+			})
+			if result.Package.Name != fixture {
+				t.Fatalf("unexpected package summary: %+v", result.Package)
+			}
+		})
 	}
 }
 

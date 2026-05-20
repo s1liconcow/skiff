@@ -1746,6 +1746,9 @@ func runEventsWatch(ctx context.Context, binary string, skiffClient client.Inter
 		default:
 			return writeEventsError(binary, format, traceID, errors.New(`unsupported format; expected "human", "json", or "json-pretty"`), stdout, stderr)
 		}
+		if opts.Once {
+			return ExitSuccess
+		}
 	}
 	return ExitSuccess
 }

@@ -1,0 +1,28 @@
+{
+  "apiVersion": "skiff.dev/package/v1alpha1",
+  "kind": "Package",
+  "name": "redis-cluster",
+  "version": "1.0.0",
+  "exports": {
+    "dependencies": ["redis-cluster"],
+    "operation_profiles": ["slot-aware-failover-update"],
+    "self_managed_operations": [
+      "slot-aware-failover-update",
+      "redis.cluster.verify_slots",
+      "redis.cluster.verify_replicas",
+      "redis.cluster.manual_failover"
+    ],
+    "package_steps": [
+      "package.slot_aware.verify_coverage",
+      "package.slot_aware.failover_replicas",
+      "package.slot_aware.verify_slot_health",
+      "package.slot_aware.update_remaining_members",
+      "package.slot_aware.verify_final_coverage",
+      "redis.cluster.verify_slots",
+      "redis.cluster.verify_replicas",
+      "redis.cluster.manual_failover"
+    ],
+    "doctor_checks": ["redis.cluster_slots", "redis.cluster_replicas"]
+  },
+  "plugin": {"manifest": "plugin.json"}
+}

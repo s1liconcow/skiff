@@ -129,6 +129,7 @@ type EventWatchOptions struct {
 	AfterID      string
 	PollInterval time.Duration
 	Buffer       int
+	Once         bool
 }
 
 type EventDelivery struct {
@@ -394,6 +395,9 @@ func (c *Direct) WatchEvents(ctx context.Context, opts EventWatchOptions) (<-cha
 					afterID = event.ID
 					select {
 					case out <- EventDelivery{Event: event, LastEventID: event.ID}:
+						if opts.Once {
+							return
+						}
 					case <-ctx.Done():
 						return
 					}

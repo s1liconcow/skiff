@@ -69,20 +69,36 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 		report.CleanupStatus = "opsem operation profile Apple containers, volumes, and RustFS state registered with test cleanup"
 	}
 
-	lockfile := filepath.Join(report.reportDir, "skiff.lock.json")
-	cacheRoot := filepath.Join(report.reportDir, "package-cache")
-	lockOpsemProfilePackages(t, report, lockfile, cacheRoot)
-
 	scenarios := []opsemProfileScenario{
 		{
 			Mode:       "primary-replica",
-			Service:    "opsem-primary",
+			Service:    "postgres-primary",
 			Fixture:    "postgres-ha",
 			Profile:    "primary-switchover-update",
 			Operation:  "op_opsem_primary",
 			Saga:       "saga_opsem_primary",
 			Expected:   schema.SagaSucceeded,
 			ParamPairs: []string{"release_id=rel_primary", "candidate=1", "return_primary=true"},
+		},
+		{
+			Mode:       "primary-replica",
+			Service:    "mysql-primary",
+			Fixture:    "mysql-ha",
+			Profile:    "primary-switchover-update",
+			Operation:  "op_mysql_primary",
+			Saga:       "saga_mysql_primary",
+			Expected:   schema.SagaSucceeded,
+			ParamPairs: []string{"release_id=rel_mysql", "candidate=1", "return_primary=true"},
+		},
+		{
+			Mode:       "primary-replica",
+			Service:    "redis-primary",
+			Fixture:    "redis-ha",
+			Profile:    "primary-switchover-update",
+			Operation:  "op_redis_primary",
+			Saga:       "saga_redis_primary",
+			Expected:   schema.SagaSucceeded,
+			ParamPairs: []string{"release_id=rel_redis", "candidate=1", "return_primary=true"},
 		},
 		{
 			Mode:                    "primary-replica",
@@ -98,8 +114,8 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 		},
 		{
 			Mode:       "raft-groups",
-			Service:    "opsem-raft",
-			Fixture:    "opsem-raft-groups",
+			Service:    "nats-raft",
+			Fixture:    "nats-jetstream",
 			Profile:    "raft-group-rolling-update",
 			Operation:  "op_opsem_raft",
 			Saga:       "saga_opsem_raft",
@@ -108,20 +124,30 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 			ParamPairs: []string{"release_id=rel_raft", "group_selector={}", "leader_policy=transfer"},
 		},
 		{
+			Mode:       "partition-isr",
+			Service:    "kafka-partition",
+			Fixture:    "kafka",
+			Profile:    "partition-quorum-rolling-update",
+			Operation:  "op_kafka_partition",
+			Saga:       "saga_kafka_partition",
+			Expected:   schema.SagaSucceeded,
+			ParamPairs: []string{"release_id=rel_partition", "partition_selector={}", "min_in_sync=2"},
+		},
+		{
 			Mode:          "partition-isr",
-			Service:       "opsem-partition",
-			Fixture:       "opsem-partition-isr",
+			Service:       "kafka-partition-unsafe",
+			Fixture:       "kafka",
 			Profile:       "partition-quorum-rolling-update",
-			Operation:     "op_opsem_partition",
-			Saga:          "saga_opsem_partition",
+			Operation:     "op_kafka_partition_unsafe",
+			Saga:          "saga_kafka_partition_unsafe",
 			Expected:      schema.SagaFailed,
 			UnsafeFailure: "isr-below-min",
 			ParamPairs:    []string{"release_id=rel_partition", "partition_selector={}", "min_in_sync=2"},
 		},
 		{
 			Mode:       "slot-cluster",
-			Service:    "opsem-slot",
-			Fixture:    "opsem-slot-cluster",
+			Service:    "redis-slot",
+			Fixture:    "redis-cluster",
 			Profile:    "slot-aware-failover-update",
 			Operation:  "op_opsem_slot",
 			Saga:       "saga_opsem_slot",
@@ -129,14 +155,46 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 			ParamPairs: []string{"release_id=rel_slot", "slot_selector={}"},
 		},
 		{
+			Mode:          "slot-cluster",
+			Service:       "redis-slot-unsafe",
+			Fixture:       "redis-cluster",
+			Profile:       "slot-aware-failover-update",
+			Operation:     "op_redis_slot_unsafe",
+			Saga:          "saga_redis_slot_unsafe",
+			Expected:      schema.SagaFailed,
+			UnsafeFailure: "slot-coverage-missing",
+			ParamPairs:    []string{"release_id=rel_slot", "slot_selector={}"},
+		},
+		{
 			Mode:       "shard-cluster",
-			Service:    "opsem-shard",
-			Fixture:    "opsem-shard-cluster",
+			Service:    "opensearch-shard",
+			Fixture:    "opensearch-ha",
 			Profile:    "shard-allocation-rolling-update",
 			Operation:  "op_opsem_shard",
 			Saga:       "saga_opsem_shard",
 			Expected:   schema.SagaSucceeded,
 			ParamPairs: []string{"release_id=rel_shard", "shard_selector={}", "rebalance_timeout=1m"},
+		},
+		{
+			Mode:       "shard-cluster",
+			Service:    "elasticsearch-shard",
+			Fixture:    "elasticsearch-ha",
+			Profile:    "shard-allocation-rolling-update",
+			Operation:  "op_elasticsearch_shard",
+			Saga:       "saga_elasticsearch_shard",
+			Expected:   schema.SagaSucceeded,
+			ParamPairs: []string{"release_id=rel_es_shard", "shard_selector={}", "rebalance_timeout=1m"},
+		},
+		{
+			Mode:          "shard-cluster",
+			Service:       "opensearch-shard-unsafe",
+			Fixture:       "opensearch-ha",
+			Profile:       "shard-allocation-rolling-update",
+			Operation:     "op_opensearch_shard_unsafe",
+			Saga:          "saga_opensearch_shard_unsafe",
+			Expected:      schema.SagaFailed,
+			UnsafeFailure: "red-shard-health",
+			ParamPairs:    []string{"release_id=rel_shard", "shard_selector={}", "rebalance_timeout=1m"},
 		},
 	}
 
@@ -176,13 +234,23 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 				report.fact("opsem_unsafe_state", scenario.Service+" injected "+scenario.UnsafeFailure+" before profile execution")
 			}
 
+			lockfile := filepath.Join(report.reportDir, sanitizeProviderID(scenario.Operation)+"-skiff.lock.json")
+			cacheRoot := filepath.Join(report.reportDir, "package-cache", sanitizeProviderID(scenario.Operation))
+			lockOpsemProfilePackage(t, report, lockfile, cacheRoot, scenario.Fixture)
+
 			planOut := runOpsemProfilePlan(t, report, scenario, lockfile, cacheRoot, traceID)
 			if planOut.WouldWrite || planOut.Package == nil || planOut.Package.Digest == "" || len(planOut.Profile.Steps) == 0 {
 				t.Fatalf("operation profile plan did not resolve package and steps: %+v", planOut)
 			}
+			if planOut.Package.Name != scenario.Fixture {
+				t.Fatalf("operation profile plan resolved package %s, want %s", planOut.Package.Name, scenario.Fixture)
+			}
 			runOut := runOpsemProfileRun(t, report, scenario, lockfile, cacheRoot, stateURI, env, traceID)
 			if !runOut.WouldWrite || runOut.Package == nil || runOut.Package.Digest == "" {
 				t.Fatalf("operation profile run did not write package-backed operation: %+v", runOut)
+			}
+			if runOut.Package.Name != scenario.Fixture {
+				t.Fatalf("operation profile run resolved package %s, want %s", runOut.Package.Name, scenario.Fixture)
 			}
 			report.fact("stateful_package_validation", fmt.Sprintf("package=%s version=%s digest=%s mode=self-managed opsem_mode=%s profile=%s", runOut.Package.Name, runOut.Package.Version, runOut.Package.Digest, scenario.Mode, scenario.Profile))
 			report.addOperationID(runOut.OperationID)
@@ -213,6 +281,7 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 			}
 			recordOperationProfileCompletion(t, ctx, store, scenario.Service, scenario.Operation, scenario.Saga)
 			assertOperationProfileObjects(t, ctx, store, scenario, runOut, report)
+			assertDirectStatefulPackageSurfaces(t, report, scenario, stateURI, env, traceID)
 			assertDirectOperationProfileInspect(t, report, scenario, stateURI, env, traceID)
 			report.fact("opsem_profile_"+scenario.Mode, fmt.Sprintf("profile %s finished with saga status %s", scenario.Profile, execution.Status))
 		})
@@ -269,25 +338,23 @@ type opsemSagaInspectOutput struct {
 	Result sagastate.InspectResult `json:"result"`
 }
 
-func lockOpsemProfilePackages(t *testing.T, report *e2eReport, lockfile, cacheRoot string) {
+type opsemEventWatchOutput struct {
+	OK          bool          `json:"ok"`
+	Event       *schema.Event `json:"event,omitempty"`
+	LastEventID string        `json:"last_event_id,omitempty"`
+}
+
+func lockOpsemProfilePackage(t *testing.T, report *e2eReport, lockfile, cacheRoot, fixture string) {
 	t.Helper()
 	root := repoRootForTest(t)
-	for _, fixture := range []string{
-		"postgres-ha",
-		"opsem-raft-groups",
-		"opsem-partition-isr",
-		"opsem-slot-cluster",
-		"opsem-shard-cluster",
-	} {
-		runSkiffCLI(t, report,
-			"pkg", "add", "file://"+filepath.Join(root, "tests", "fixtures", "packages", fixture),
-			"--lockfile", lockfile,
-			"--cache", cacheRoot,
-			"--format", "json",
-			"--trace-id", "tr_pkg_"+strings.ReplaceAll(fixture, "-", "_"),
-		)
-		report.fact("opsem_package_fixture", "locked "+fixture+" into "+lockfile)
-	}
+	runSkiffCLI(t, report,
+		"pkg", "add", "file://"+filepath.Join(root, "tests", "fixtures", "packages", fixture),
+		"--lockfile", lockfile,
+		"--cache", cacheRoot,
+		"--format", "json",
+		"--trace-id", "tr_pkg_"+strings.ReplaceAll(fixture, "-", "_"),
+	)
+	report.fact("opsem_package_fixture", "locked "+fixture+" into "+lockfile)
 }
 
 func runOpsemProfilePlan(t *testing.T, report *e2eReport, scenario opsemProfileScenario, lockfile, cacheRoot, traceID string) opsemOpsProfileOutput {
@@ -544,6 +611,79 @@ func assertOperationProfileObjects(t *testing.T, ctx context.Context, store objs
 	assertObjectPrefixNonEmpty(t, ctx, store, mustOperationEventsPrefix(t, scenario.Service, scenario.Operation), "operation events")
 	assertObjectPrefixNonEmpty(t, ctx, store, mustSagaEventsPrefix(t, scenario.Saga), "saga events")
 	assertObjectPrefixNonEmpty(t, ctx, store, "audit/", "audit records")
+}
+
+func assertDirectStatefulPackageSurfaces(t *testing.T, report *e2eReport, scenario opsemProfileScenario, stateURI, env, traceID string) {
+	t.Helper()
+	var status appleStatefulStatusOutput
+	decodeCLIJSON(t, runSkiffCLI(t, report,
+		"stateful", "status", scenario.Service,
+		"--direct",
+		"--state", stateURI,
+		"--env", env,
+		"--provider", applecontainer.Name,
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", traceID,
+	), &status)
+	if !status.OK || status.Result.Group != scenario.Service || len(status.Result.Members) != 3 {
+		t.Fatalf("unexpected direct stateful status for %s: %+v", scenario.Service, status)
+	}
+
+	var doctor appleDoctorOutput
+	decodeCLIJSON(t, runSkiffCLI(t, report,
+		"stateful", "doctor", scenario.Service,
+		"--direct",
+		"--state", stateURI,
+		"--env", env,
+		"--provider", applecontainer.Name,
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", traceID,
+	), &doctor)
+	if !doctor.OK || doctor.Doctor.Source != "direct" || doctor.Doctor.Service != scenario.Service {
+		t.Fatalf("unexpected direct stateful doctor for %s: %+v", scenario.Service, doctor)
+	}
+	for _, finding := range doctor.Doctor.Findings {
+		if finding.Severity == "critical" {
+			t.Fatalf("direct stateful doctor returned critical finding for %s: %+v", scenario.Service, doctor.Doctor.Findings)
+		}
+	}
+
+	var listed appleEventsOutput
+	decodeCLIJSON(t, runSkiffCLI(t, report,
+		"ops", "events", scenario.Operation,
+		"--service", scenario.Service,
+		"--direct",
+		"--state", stateURI,
+		"--env", env,
+		"--provider", applecontainer.Name,
+		"--region", "local",
+		"--limit", "1",
+		"--format", "json",
+		"--trace-id", traceID,
+	), &listed)
+	if !listed.OK || listed.Result.Source != "direct" || len(listed.Result.Events) == 0 {
+		t.Fatalf("unexpected direct ops events for %s: %+v", scenario.Service, listed)
+	}
+
+	var watched opsemEventWatchOutput
+	decodeCLIJSON(t, runSkiffCLI(t, report,
+		"ops", "watch", scenario.Operation,
+		"--service", scenario.Service,
+		"--direct",
+		"--state", stateURI,
+		"--env", env,
+		"--provider", applecontainer.Name,
+		"--region", "local",
+		"--once",
+		"--format", "json",
+		"--trace-id", traceID,
+	), &watched)
+	if !watched.OK || watched.Event == nil || watched.Event.ID == "" || watched.LastEventID == "" {
+		t.Fatalf("unexpected direct ops watch for %s: %+v", scenario.Service, watched)
+	}
+	report.fact("stateful_package_direct_surfaces", scenario.Service+" verified direct status, doctor, ops events, ops watch, ops inspect, and saga inspect")
 }
 
 func assertDirectOperationProfileInspect(t *testing.T, report *e2eReport, scenario opsemProfileScenario, stateURI, env, traceID string) {

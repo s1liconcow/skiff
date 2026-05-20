@@ -1,0 +1,42 @@
+{
+  "apiVersion": "skiff.dev/plugin/v1alpha1",
+  "kind": "Plugin",
+  "name": "nats-jetstream",
+  "version": "1.0.0",
+  "runtime": {"kind": "command", "command": ["nats-jetstream-plugin"]},
+  "hooks": ["doctor_checks", "package_step"],
+  "permissions": {
+    "doctor_checks": true,
+    "package_step_kinds": [
+      "package.raft_group.verify_quorum",
+      "package.raft_group.update_followers",
+      "package.raft_group.verify_followers_caught_up",
+      "package.raft_group.transfer_leader",
+      "package.raft_group.update_previous_leader",
+      "package.raft_group.verify_final_quorum",
+      "nats.jetstream.verify_quorum",
+      "nats.jetstream.verify_stream_leaders",
+      "nats.jetstream.stepdown_leader",
+      "nats.jetstream.verify_catch_up"
+    ]
+  },
+  "capabilities": [
+    {"kind": "doctor_check", "name": "jetstream-doctor", "doctor_checks": ["nats.jetstream.quorum", "nats.jetstream.stream_leaders"]},
+    {
+      "kind": "package_step",
+      "name": "jetstream-raft-safety",
+      "package_steps": [
+        {"kind": "package.raft_group.verify_quorum", "summary": "verify JetStream meta and stream RAFT quorum", "risk": "low", "reversibility": "reversible"},
+        {"kind": "package.raft_group.update_followers", "summary": "update non-leader JetStream members one at a time", "risk": "medium", "reversibility": "compensatable"},
+        {"kind": "package.raft_group.verify_followers_caught_up", "summary": "verify restarted JetStream members catch up", "risk": "low", "reversibility": "reversible"},
+        {"kind": "package.raft_group.transfer_leader", "summary": "step down stream and meta leaders before updating leaders", "risk": "high", "reversibility": "partially_reversible"},
+        {"kind": "package.raft_group.update_previous_leader", "summary": "update the previous JetStream leader after transfer", "risk": "medium", "reversibility": "compensatable"},
+        {"kind": "package.raft_group.verify_final_quorum", "summary": "verify final JetStream quorum and stream leaders", "risk": "low", "reversibility": "reversible"},
+        {"kind": "nats.jetstream.verify_quorum", "summary": "query JetStream stream info JSON and verify quorum", "risk": "low", "reversibility": "reversible"},
+        {"kind": "nats.jetstream.verify_stream_leaders", "summary": "verify every stream and consumer has a leader", "risk": "low", "reversibility": "reversible"},
+        {"kind": "nats.jetstream.stepdown_leader", "summary": "step down leaders before member update", "risk": "high", "reversibility": "partially_reversible"},
+        {"kind": "nats.jetstream.verify_catch_up", "summary": "verify stream replicas catch up after restart", "risk": "low", "reversibility": "reversible"}
+      ]
+    }
+  ]
+}

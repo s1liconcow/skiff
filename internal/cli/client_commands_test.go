@@ -231,16 +231,6 @@ func TestOpsWatchDirectModeEmitsOperationEvents(t *testing.T) {
 		Severity:      "info",
 		Summary:       "operation step completed",
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
-	defer cancel()
-	oldContext := eventsWatchContext
-	oldInterval := eventsWatchPollInterval
-	eventsWatchContext = func() context.Context { return ctx }
-	eventsWatchPollInterval = time.Hour
-	t.Cleanup(func() {
-		eventsWatchContext = oldContext
-		eventsWatchPollInterval = oldInterval
-	})
 
 	var stdout, stderr bytes.Buffer
 	code := Run("skiff", []string{
@@ -251,6 +241,7 @@ func TestOpsWatchDirectModeEmitsOperationEvents(t *testing.T) {
 		"--env", "prod",
 		"--provider", "aws",
 		"--region", "us-west-2",
+		"--once",
 		"--format", "json",
 		"--trace-id", "tr_ops_watch",
 	}, &stdout, &stderr)

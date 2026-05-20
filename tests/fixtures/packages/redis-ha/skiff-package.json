@@ -1,0 +1,33 @@
+{
+  "apiVersion": "skiff.dev/package/v1alpha1",
+  "kind": "Package",
+  "name": "redis-ha",
+  "version": "1.0.0",
+  "exports": {
+    "dependencies": ["redis-ha"],
+    "operation_profiles": ["primary-switchover-update"],
+    "self_managed_operations": [
+      "primary-switchover-update",
+      "redis.sentinel.failover_update",
+      "redis.snapshot",
+      "redis.restore",
+      "redis.rejoin_replica"
+    ],
+    "package_steps": [
+      "package.primary_switchover.verify_cluster_healthy",
+      "package.primary_switchover.verify_candidate_caught_up",
+      "package.primary_switchover.move_primary",
+      "package.primary_switchover.update_old_primary",
+      "package.primary_switchover.verify_old_primary_caught_up",
+      "package.primary_switchover.optional_failback",
+      "package.primary_switchover.update_candidate",
+      "package.primary_switchover.verify_final_topology",
+      "redis.sentinel.verify_quorum",
+      "redis.sentinel.verify_primary",
+      "redis.sentinel.failover",
+      "redis.verify_replica"
+    ],
+    "doctor_checks": ["redis.sentinel_quorum", "redis.role"]
+  },
+  "plugin": {"manifest": "plugin.json"}
+}

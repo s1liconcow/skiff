@@ -44,8 +44,7 @@ func Run(t *testing.T, suite Suite) packages.ConformanceResult {
 	requireCheck(t, result, "plugin_manifest")
 	requireCheck(t, result, "package_steps")
 	requireCheck(t, result, "doctor_checks")
-	requireCheck(t, result, "operation_profile.primary-switchover-update.explain")
-	requireCheck(t, result, "operation_profile.primary-switchover-update.render")
+	requireExportedOperationProfiles(t, result)
 	requireCheck(t, result, "cli_examples")
 	return result
 }
@@ -144,4 +143,41 @@ func requireCheck(t *testing.T, result packages.ConformanceResult, id string) {
 		}
 	}
 	t.Fatalf("missing passed check %s in %+v", id, result.Checks)
+}
+
+func requireExportedOperationProfiles(t *testing.T, result packages.ConformanceResult) {
+	t.Helper()
+	seen := map[string]map[string]bool{}
+	for _, check := range result.Checks {
+		const prefix = "operation_profile."
+		if check.Status != packages.ConformancePassed || len(check.ID) <= len(prefix) || check.ID[:len(prefix)] != prefix {
+			continue
+		}
+		rest := check.ID[len(prefix):]
+		phaseIndex := len(rest)
+		for i := len(rest) - 1; i >= 0; i-- {
+			if rest[i] == '.' {
+				phaseIndex = i
+				break
+			}
+		}
+		if phaseIndex == len(rest) {
+			continue
+		}
+		name := rest[:phaseIndex]
+		phase := rest[phaseIndex+1:]
+		if seen[name] == nil {
+			seen[name] = map[string]bool{}
+		}
+		seen[name][phase] = true
+	}
+	if len(seen) == 0 {
+		requireCheck(t, result, "operation_profiles")
+		return
+	}
+	for name, phases := range seen {
+		if !phases["explain"] || !phases["render"] {
+			t.Fatalf("operation profile %s missing explain/render conformance: %+v", name, result.Checks)
+		}
+	}
 }
