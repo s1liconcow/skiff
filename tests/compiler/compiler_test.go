@@ -181,6 +181,8 @@ stack:
         engine: postgres
         version: "16"
         size: small
+        maxReplicaLagBytes: 1048576
+        synchronous: true
   bindings:
     - from: api
       to: db
@@ -196,9 +198,11 @@ stack:
 		Name:       "postgres-ha",
 		Version:    "1.2.0",
 		Exports: internalpackages.ManifestExports{
-			Dependencies:      []string{"postgres"},
-			OperationProfiles: []string{"primary-switchover-update"},
-			PackageSteps:      []string{"postgres.verify_replica_lag"},
+			Dependencies:          []string{"postgres-ha"},
+			OperationProfiles:     []string{"primary-switchover-update"},
+			ManagedOperations:     []string{"postgres.managed.failover", "postgres.managed.backup", "postgres.managed.restore", "postgres.managed.rotate_credentials", "postgres.managed.inspect_topology"},
+			SelfManagedOperations: []string{"primary-switchover-update", "postgres.backup", "postgres.restore", "postgres.rejoin_replica", "postgres.verify_replica_lag"},
+			PackageSteps:          []string{"postgres.verify_replica_lag", "postgres.switchover", "postgres.verify_timeline"},
 		},
 	}))
 	if err != nil {
@@ -214,6 +218,9 @@ stack:
 	if db.Engine != "postgres" || db.ConnectionSecretRef == "" || db.Meta.Tags[ir.TagPackage] != "skiff.dev/postgres-ha" {
 		t.Fatalf("managed database not expanded with package metadata: %+v", db)
 	}
+	if db.ReplicationMode != "sync" || db.FailoverPolicy.MaxReplicaLag != "1048576B" || !db.FailoverPolicy.RequireApproval {
+		t.Fatalf("managed database missing package HA policy: %+v", db)
+	}
 	if !hasPackageSource(db.Meta.Source, "skiff.dev/postgres-ha", lockDigest) {
 		t.Fatalf("managed database missing package source: %+v", db.Meta.Source)
 	}
@@ -226,6 +233,97 @@ stack:
 	}
 	if len(graph.Resources.PackageOperations) != 1 || graph.Resources.PackageOperations[0].OperationProfiles[0] != "primary-switchover-update" {
 		t.Fatalf("package operations missing: %+v", graph.Resources.PackageOperations)
+	}
+	ops := graph.Resources.PackageOperations[0]
+	if ops.Mode != "managed" || len(ops.ManagedOperations) != 5 || len(ops.SelfManagedOperations) == 0 {
+		t.Fatalf("package operation JSON does not distinguish managed/self-managed ops: %+v", ops)
+	}
+}
+
+func TestCompileStackPostgresHASelfManagedDependency(t *testing.T) {
+	doc, err := spec.Decode([]byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: Stack
+metadata:
+  name: payments
+  env: dev
+stack:
+  services:
+    - name: api
+      artifact:
+        type: oci
+        ref: registry.example.com/payments-api:latest
+      runtime:
+        port: 8080
+        health:
+          path: /healthz
+  dependencies:
+    - name: db
+      uses: skiff.dev/postgres-ha
+      version: "1.0.0"
+      config:
+        mode: self-managed
+        version: "16"
+        replicas: 2
+        maxReplicaLagBytes: 65536
+        synchronous: false
+        volume:
+          size: 100Gi
+        artifact:
+          type: oci
+          ref: registry.example.com/postgres-ha@sha256:abc123
+        runtime:
+          command: ["/usr/local/bin/postgres-ha"]
+          ports:
+            postgres: 5432
+            health: 8008
+          health:
+            path: /healthz
+            port: 8008
+  bindings:
+    - from: api
+      to: db
+      as: DATABASE_URL
+`), spec.DecodeOptions{})
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	lockDigest := testDigest("e")
+	graph, err := compiler.Compile(context.Background(), *doc, packageCompilerOptions(lockDigest, "postgres-ha", "skiff.dev/postgres-ha", internalpackages.Manifest{
+		APIVersion: "skiff.dev/package/v1alpha1",
+		Kind:       "Package",
+		Name:       "postgres-ha",
+		Version:    "1.0.0",
+		Exports: internalpackages.ManifestExports{
+			Dependencies:          []string{"postgres-ha"},
+			OperationProfiles:     []string{"primary-switchover-update"},
+			ManagedOperations:     []string{"postgres.managed.failover", "postgres.managed.backup", "postgres.managed.restore", "postgres.managed.rotate_credentials", "postgres.managed.inspect_topology"},
+			SelfManagedOperations: []string{"primary-switchover-update", "postgres.backup", "postgres.restore", "postgres.rejoin_replica", "postgres.verify_replica_lag"},
+			PackageSteps:          []string{"postgres.verify_replica_lag", "postgres.switchover", "postgres.verify_timeline"},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if len(graph.Resources.ManagedDatabases) != 0 || len(graph.Resources.StatefulGroups) != 1 {
+		t.Fatalf("self-managed dependency should compile to StatefulGroup only: managed=%+v stateful=%+v", graph.Resources.ManagedDatabases, graph.Resources.StatefulGroups)
+	}
+	group := graph.Resources.StatefulGroups[0]
+	if group.Replicas != 2 || group.Meta.Tags[ir.TagPackage] != "skiff.dev/postgres-ha" {
+		t.Fatalf("unexpected self-managed group: %+v", group)
+	}
+	if graph.Resources.RuntimeManifests[0].Env["DATABASE_URL"] != "skiff://stateful/payments-db" {
+		t.Fatalf("DATABASE_URL binding = %q", graph.Resources.RuntimeManifests[0].Env["DATABASE_URL"])
+	}
+	if len(graph.Resources.PackageOperations) != 1 {
+		t.Fatalf("package operation missing: %+v", graph.Resources.PackageOperations)
+	}
+	ops := graph.Resources.PackageOperations[0]
+	if ops.Mode != "self-managed" || len(ops.SelfManagedOperations) != 5 || !containsString(ops.PackageSteps, "postgres.switchover") {
+		t.Fatalf("self-managed package operations missing: %+v", ops)
+	}
+	if !strings.Contains(string(ops.Config), `"maxReplicaLagBytes":65536`) {
+		t.Fatalf("package operation config did not preserve lag gate: %s", string(ops.Config))
 	}
 }
 
@@ -518,6 +616,15 @@ func testDigest(fill string) string {
 func hasPackageSource(source []ir.SourceRef, pkg, lockDigest string) bool {
 	for _, ref := range source {
 		if ref.Package == pkg && ref.LockfileDigest == lockDigest {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
 			return true
 		}
 	}

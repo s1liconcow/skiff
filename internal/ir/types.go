@@ -311,12 +311,15 @@ type UpdatePolicy struct {
 }
 
 type PackageOperation struct {
-	Meta              ResourceMeta      `json:"meta"`
-	Dependency        string            `json:"dependency"`
-	Package           PackageProvenance `json:"package"`
-	OperationProfiles []string          `json:"operation_profiles,omitempty"`
-	PackageSteps      []string          `json:"package_steps,omitempty"`
-	Config            json.RawMessage   `json:"config,omitempty"`
+	Meta                  ResourceMeta      `json:"meta"`
+	Dependency            string            `json:"dependency"`
+	Mode                  string            `json:"mode,omitempty"`
+	Package               PackageProvenance `json:"package"`
+	OperationProfiles     []string          `json:"operation_profiles,omitempty"`
+	ManagedOperations     []string          `json:"managed_operations,omitempty"`
+	SelfManagedOperations []string          `json:"self_managed_operations,omitempty"`
+	PackageSteps          []string          `json:"package_steps,omitempty"`
+	Config                json.RawMessage   `json:"config,omitempty"`
 }
 
 type Artifact struct {

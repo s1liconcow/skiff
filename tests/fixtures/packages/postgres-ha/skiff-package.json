@@ -1,0 +1,41 @@
+{
+  "apiVersion": "skiff.dev/package/v1alpha1",
+  "kind": "Package",
+  "name": "postgres-ha",
+  "version": "1.0.0",
+  "exports": {
+    "dependencies": ["postgres-ha"],
+    "operation_profiles": ["primary-switchover-update"],
+    "managed_operations": [
+      "postgres.managed.failover",
+      "postgres.managed.backup",
+      "postgres.managed.restore",
+      "postgres.managed.rotate_credentials",
+      "postgres.managed.inspect_topology"
+    ],
+    "self_managed_operations": [
+      "primary-switchover-update",
+      "postgres.backup",
+      "postgres.restore",
+      "postgres.rejoin_replica",
+      "postgres.verify_replica_lag"
+    ],
+    "package_steps": [
+      "package.primary_switchover.verify_cluster_healthy",
+      "package.primary_switchover.verify_candidate_caught_up",
+      "package.primary_switchover.move_primary",
+      "package.primary_switchover.update_old_primary",
+      "package.primary_switchover.verify_old_primary_caught_up",
+      "package.primary_switchover.optional_failback",
+      "package.primary_switchover.update_candidate",
+      "package.primary_switchover.verify_final_topology",
+      "postgres.verify_replica_lag",
+      "postgres.switchover",
+      "postgres.verify_timeline"
+    ],
+    "doctor_checks": ["postgres.replica_lag", "postgres.timeline"]
+  },
+  "plugin": {
+    "manifest": "plugin.json"
+  }
+}

@@ -66,6 +66,9 @@ stack:
 	if len(compileOut.Graph.Resources.ManagedDatabases) != 1 || len(compileOut.Graph.Resources.PackageOperations) != 1 {
 		t.Fatalf("package resources missing from compile output: %+v", compileOut.Graph.Resources)
 	}
+	if compileOut.Graph.Resources.PackageOperations[0].Mode != "managed" {
+		t.Fatalf("package operation mode = %q, want managed", compileOut.Graph.Resources.PackageOperations[0].Mode)
+	}
 
 	plan := runCLIJSON(t, []string{"--direct", "plan", specPath, "--provider", "aws", "--region", "us-west-2", "--state", "s3://skiff-state-dev", "--lockfile", lockfile, "--cache", cache, "--format", "json", "--trace-id", "tr_pkg_plan"})
 	var planOut planOutput
@@ -80,7 +83,7 @@ stack:
 		t.Fatalf("explain exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "package: file://"+pkgDir+"@1.2.0") || !strings.Contains(out, "Skiff package operation profile") {
+	if !strings.Contains(out, "package: file://"+pkgDir+"@1.2.0") || !strings.Contains(out, "Skiff package operation profile") || !strings.Contains(out, "managed mode") {
 		t.Fatalf("explain output missing package provenance/resources:\n%s", out)
 	}
 }

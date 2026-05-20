@@ -17,6 +17,16 @@ func TestFakePackageConformance(t *testing.T) {
 	})
 }
 
+func TestPostgresHAPackageConformance(t *testing.T) {
+	result := Run(t, Suite{
+		Ref:       "file://" + filepath.Join("..", "..", "fixtures", "packages", "postgres-ha"),
+		CacheRoot: t.TempDir(),
+	})
+	if len(result.Package.Name) == 0 || result.Package.Name != "postgres-ha" {
+		t.Fatalf("unexpected package summary: %+v", result.Package)
+	}
+}
+
 func TestPackageConformanceFailsForBrokenPluginExport(t *testing.T) {
 	dir := copyFixture(t, filepath.Join("..", "..", "fixtures", "packages", "fake-postgres"))
 	pluginPath := filepath.Join(dir, "plugin.json")

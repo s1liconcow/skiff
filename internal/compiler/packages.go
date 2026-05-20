@@ -22,16 +22,18 @@ type compiledPackageDependency struct {
 }
 
 type packageDependencyConfig struct {
-	Mode     string                `json:"mode,omitempty"`
-	Endpoint string                `json:"endpoint,omitempty"`
-	Engine   string                `json:"engine,omitempty"`
-	Version  string                `json:"version,omitempty"`
-	Size     string                `json:"size,omitempty"`
-	Region   string                `json:"region,omitempty"`
-	Storage  spec.DatabaseStorage  `json:"storage,omitempty"`
-	Backups  spec.DatabaseBackups  `json:"backups,omitempty"`
-	Network  spec.DatabaseNetwork  `json:"network,omitempty"`
-	Managed  *spec.ManagedDatabase `json:"managed,omitempty"`
+	Mode               string                `json:"mode,omitempty"`
+	Endpoint           string                `json:"endpoint,omitempty"`
+	Engine             string                `json:"engine,omitempty"`
+	Version            string                `json:"version,omitempty"`
+	Size               string                `json:"size,omitempty"`
+	Region             string                `json:"region,omitempty"`
+	Storage            spec.DatabaseStorage  `json:"storage,omitempty"`
+	Backups            spec.DatabaseBackups  `json:"backups,omitempty"`
+	Network            spec.DatabaseNetwork  `json:"network,omitempty"`
+	MaxReplicaLagBytes int64                 `json:"maxReplicaLagBytes,omitempty"`
+	Synchronous        bool                  `json:"synchronous,omitempty"`
+	Managed            *spec.ManagedDatabase `json:"managed,omitempty"`
 
 	Stateful *spec.StatefulGroup    `json:"stateful,omitempty"`
 	Replicas int                    `json:"replicas,omitempty"`
@@ -239,6 +241,8 @@ func appendPackageManagedDatabase(graph *ir.Graph, dependency compiledPackageDep
 		Size:                dbSpec.Size,
 		Port:                dbPort,
 		Region:              dbSpec.Region,
+		ReplicationMode:     packageDatabaseReplicationMode(dependency),
+		FailoverPolicy:      packageDatabaseFailoverPolicy(dependency),
 		Storage:             compileDatabaseStorage(dbSpec.Storage),
 		Backups:             compileDatabaseBackups(dbSpec.Backups),
 		Network:             compileDatabaseNetwork(dbSpec.Network),
@@ -427,17 +431,56 @@ func packageStatefulGroupSpec(dependency compiledPackageDependency) spec.Statefu
 }
 
 func appendPackageOperation(graph *ir.Graph, dependency compiledPackageDependency, serviceName, env, sourcePath string) {
-	if len(dependency.Manifest.Exports.OperationProfiles) == 0 && len(dependency.Manifest.Exports.PackageSteps) == 0 {
+	if len(dependency.Manifest.Exports.OperationProfiles) == 0 &&
+		len(dependency.Manifest.Exports.ManagedOperations) == 0 &&
+		len(dependency.Manifest.Exports.SelfManagedOperations) == 0 &&
+		len(dependency.Manifest.Exports.PackageSteps) == 0 {
 		return
 	}
 	meta := meta("package-operation:"+dependency.ResourceName, ir.ResourceKindPackageOperation, resourceName(env, dependency.ResourceName, "package-ops"), packageTags(serviceName, env, dependency), sourcePath)
 	annotatePackageMeta(&meta, "", dependency.Provenance, dependency.Dependency.Name)
 	graph.Resources.PackageOperations = append(graph.Resources.PackageOperations, ir.PackageOperation{
-		Meta:              meta,
-		Dependency:        dependency.Dependency.Name,
-		Package:           dependency.Provenance,
-		OperationProfiles: cloneStrings(dependency.Manifest.Exports.OperationProfiles),
-		PackageSteps:      cloneStrings(dependency.Manifest.Exports.PackageSteps),
-		Config:            cloneRaw(dependency.Dependency.Config),
+		Meta:                  meta,
+		Dependency:            dependency.Dependency.Name,
+		Mode:                  packagePublicMode(dependency.Mode),
+		Package:               dependency.Provenance,
+		OperationProfiles:     cloneStrings(dependency.Manifest.Exports.OperationProfiles),
+		ManagedOperations:     cloneStrings(dependency.Manifest.Exports.ManagedOperations),
+		SelfManagedOperations: cloneStrings(dependency.Manifest.Exports.SelfManagedOperations),
+		PackageSteps:          cloneStrings(dependency.Manifest.Exports.PackageSteps),
+		Config:                cloneRaw(dependency.Dependency.Config),
 	})
+}
+
+func packageDatabaseReplicationMode(dependency compiledPackageDependency) string {
+	if dependency.Config.Synchronous {
+		return "sync"
+	}
+	if dependency.Config.MaxReplicaLagBytes > 0 {
+		return "async"
+	}
+	return ""
+}
+
+func packageDatabaseFailoverPolicy(dependency compiledPackageDependency) ir.FailoverPolicy {
+	policy := ir.FailoverPolicy{}
+	if dependency.Config.Synchronous {
+		policy.MaxReplicaLag = "0B"
+	}
+	if dependency.Config.MaxReplicaLagBytes > 0 {
+		policy.MaxReplicaLag = fmt.Sprintf("%dB", dependency.Config.MaxReplicaLagBytes)
+	}
+	if len(dependency.Manifest.Exports.ManagedOperations) > 0 {
+		policy.RequireApproval = true
+	}
+	return policy
+}
+
+func packagePublicMode(mode string) string {
+	switch mode {
+	case "managed":
+		return "managed"
+	default:
+		return "self-managed"
+	}
 }

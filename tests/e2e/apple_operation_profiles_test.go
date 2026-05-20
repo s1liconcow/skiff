@@ -73,12 +73,24 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 		{
 			Mode:       "primary-replica",
 			Service:    "opsem-primary",
-			Fixture:    "opsem-primary-replica",
+			Fixture:    "postgres-ha",
 			Profile:    "primary-switchover-update",
 			Operation:  "op_opsem_primary",
 			Saga:       "saga_opsem_primary",
 			Expected:   schema.SagaSucceeded,
 			ParamPairs: []string{"release_id=rel_primary", "candidate=1", "return_primary=true"},
+		},
+		{
+			Mode:                    "primary-replica",
+			Service:                 "postgres-primary-unsafe",
+			Fixture:                 "postgres-ha",
+			Profile:                 "primary-switchover-update",
+			Operation:               "op_postgres_primary_unsafe",
+			Saga:                    "saga_postgres_primary_unsafe",
+			Expected:                schema.SagaFailed,
+			UnsafeFailure:           "replica-lag-too-high",
+			InjectFailureBeforeKind: "package.primary_switchover.verify_candidate_caught_up",
+			ParamPairs:              []string{"release_id=rel_primary", "candidate=1", "return_primary=true"},
 		},
 		{
 			Mode:       "raft-groups",
@@ -155,7 +167,7 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 				report.addProviderID(resource.ProviderID)
 			}
 			waitForOpsemMode(t, ctx, portBase, scenario.Mode)
-			if scenario.UnsafeFailure != "" {
+			if scenario.UnsafeFailure != "" && scenario.InjectFailureBeforeKind == "" {
 				opsemPost(t, ctx, opsemMemberPort(portBase, 1), "/admin/fail", map[string]string{"type": scenario.UnsafeFailure})
 				report.fact("opsem_unsafe_state", scenario.Service+" injected "+scenario.UnsafeFailure+" before profile execution")
 			}
@@ -176,11 +188,13 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 
 			graph := assertRenderedPackageGraph(t, ctx, store, scenario.Saga)
 			runner := &opsemSemanticRunner{
-				service:  scenario.Service,
-				mode:     scenario.Mode,
-				portBase: portBase,
-				waitKind: scenario.WaitKind,
-				waited:   map[string]bool{},
+				service:                 scenario.Service,
+				mode:                    scenario.Mode,
+				portBase:                portBase,
+				waitKind:                scenario.WaitKind,
+				waited:                  map[string]bool{},
+				injectFailureBeforeKind: scenario.InjectFailureBeforeKind,
+				injectFailure:           scenario.UnsafeFailure,
 			}
 			execution := executeOpsemProfileSaga(t, ctx, store, graph, scenario.Saga, runner)
 			if execution.Status != scenario.Expected {
@@ -206,16 +220,17 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 }
 
 type opsemProfileScenario struct {
-	Mode          string
-	Service       string
-	Fixture       string
-	Profile       string
-	Operation     string
-	Saga          string
-	Expected      schema.SagaStatus
-	UnsafeFailure string
-	WaitKind      string
-	ParamPairs    []string
+	Mode                    string
+	Service                 string
+	Fixture                 string
+	Profile                 string
+	Operation               string
+	Saga                    string
+	Expected                schema.SagaStatus
+	UnsafeFailure           string
+	InjectFailureBeforeKind string
+	WaitKind                string
+	ParamPairs              []string
 }
 
 type opsemOpsProfileOutput struct {
@@ -246,7 +261,7 @@ func lockOpsemProfilePackages(t *testing.T, report *e2eReport, lockfile, cacheRo
 	t.Helper()
 	root := repoRootForTest(t)
 	for _, fixture := range []string{
-		"opsem-primary-replica",
+		"postgres-ha",
 		"opsem-raft-groups",
 		"opsem-partition-isr",
 		"opsem-slot-cluster",
@@ -659,12 +674,15 @@ func mustSagaEventsPrefix(t *testing.T, saga string) string {
 }
 
 type opsemSemanticRunner struct {
-	service   string
-	mode      string
-	portBase  int
-	waitKind  string
-	waited    map[string]bool
-	mutations []string
+	service                 string
+	mode                    string
+	portBase                int
+	waitKind                string
+	waited                  map[string]bool
+	injectFailureBeforeKind string
+	injectFailure           string
+	injectedFailure         bool
+	mutations               []string
 }
 
 func (r *opsemSemanticRunner) run(ctx context.Context, hook pluginapi.Hook, request any, response any) error {
@@ -700,6 +718,12 @@ func (r *opsemSemanticRunner) run(ctx context.Context, hook pluginapi.Hook, requ
 }
 
 func (r *opsemSemanticRunner) handleRun(ctx context.Context, req pluginapi.PackageStepRequest) (sagaapi.PackageStepResultResponse, error) {
+	if r.injectFailureBeforeKind == req.Kind && r.injectFailure != "" && !r.injectedFailure {
+		if err := r.post(ctx, 1, "/admin/fail", map[string]string{"type": r.injectFailure}); err != nil {
+			return sagaapi.PackageStepResultResponse{}, err
+		}
+		r.injectedFailure = true
+	}
 	switch req.Kind {
 	case "package.primary_switchover.verify_cluster_healthy":
 		return r.verifyNoFailures(ctx, req)

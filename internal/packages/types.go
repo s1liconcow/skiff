@@ -25,10 +25,12 @@ type Manifest struct {
 }
 
 type ManifestExports struct {
-	Dependencies      []string `json:"dependencies,omitempty"`
-	OperationProfiles []string `json:"operation_profiles,omitempty"`
-	PackageSteps      []string `json:"package_steps,omitempty"`
-	DoctorChecks      []string `json:"doctor_checks,omitempty"`
+	Dependencies          []string `json:"dependencies,omitempty"`
+	OperationProfiles     []string `json:"operation_profiles,omitempty"`
+	ManagedOperations     []string `json:"managed_operations,omitempty"`
+	SelfManagedOperations []string `json:"self_managed_operations,omitempty"`
+	PackageSteps          []string `json:"package_steps,omitempty"`
+	DoctorChecks          []string `json:"doctor_checks,omitempty"`
 }
 
 type PluginRef struct {
@@ -94,6 +96,8 @@ func ValidateManifest(manifest Manifest) []spec.Diagnostic {
 	}
 	validateExportList(add, "$.exports.dependencies", manifest.Exports.Dependencies, validateNameValue)
 	validateExportList(add, "$.exports.operation_profiles", manifest.Exports.OperationProfiles, validateStepKindValue)
+	validateExportList(add, "$.exports.managed_operations", manifest.Exports.ManagedOperations, validateStepKindValue)
+	validateExportList(add, "$.exports.self_managed_operations", manifest.Exports.SelfManagedOperations, validateStepKindValue)
 	validateExportList(add, "$.exports.package_steps", manifest.Exports.PackageSteps, validateStepKindValue)
 	validateExportList(add, "$.exports.doctor_checks", manifest.Exports.DoctorChecks, validateStepKindValue)
 	if manifest.Plugin != nil {

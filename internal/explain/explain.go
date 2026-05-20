@@ -343,8 +343,13 @@ func PackageDerived(providerName string, graph *ir.Graph) Result {
 	}
 	for _, item := range graph.Resources.PackageOperations {
 		operations := append([]string{}, item.OperationProfiles...)
+		operations = append(operations, item.ManagedOperations...)
+		operations = append(operations, item.SelfManagedOperations...)
 		operations = append(operations, item.PackageSteps...)
 		why := "registers package operation profiles and package saga steps for explicit operational workflows"
+		if item.Mode != "" {
+			why += " in " + item.Mode + " mode"
+		}
 		if len(operations) > 0 {
 			why += ": " + strings.Join(operations, ", ")
 		}
