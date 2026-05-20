@@ -263,6 +263,7 @@ stack:
       version: "1.0.0"
       config:
         mode: self-managed
+        endpoint: secret://stateful/payments-db/connection-url
         version: "16"
         replicas: 2
         maxReplicaLagBytes: 65536
@@ -312,7 +313,7 @@ stack:
 	if group.Replicas != 2 || group.Meta.Tags[ir.TagPackage] != "skiff.dev/postgres-ha" {
 		t.Fatalf("unexpected self-managed group: %+v", group)
 	}
-	if graph.Resources.RuntimeManifests[0].Env["DATABASE_URL"] != "skiff://stateful/payments-db" {
+	if graph.Resources.RuntimeManifests[0].Env["DATABASE_URL"] != "secret://stateful/payments-db/connection-url" {
 		t.Fatalf("DATABASE_URL binding = %q", graph.Resources.RuntimeManifests[0].Env["DATABASE_URL"])
 	}
 	if len(graph.Resources.PackageOperations) != 1 {
