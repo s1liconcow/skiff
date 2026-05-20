@@ -51,6 +51,26 @@ func TestCanarySagaHumanOutputIncludesGeneratedIdentifiers(t *testing.T) {
 	}
 }
 
+func TestSagaStartHelpMarksDeprecated(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{"saga", "start", "--help"}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	for _, want := range []string{
+		"Deprecated: saga start is kept for compatibility only.",
+		"Use deploy --canary",
+		"Use ops run <group> update-release",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("help missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
 func TestSagaInspectJSONReadsDirectObjectState(t *testing.T) {
 	clearSkiffEnv(t)
 	dir := t.TempDir()
@@ -256,7 +276,7 @@ func TestSagaStartStatefulOrderedUpdateDirectJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("stateful ordered output is not valid JSON: %v\n%s", err, stdout.String())
 	}
-	if !got.OK || got.TraceID != "tr_stateful_ordered_cli" || got.Result.Status != schema.SagaSucceeded || got.Result.Group != "orders-stream" || got.Result.ReleaseID != "rel_new" {
+	if !got.OK || got.TraceID != "tr_stateful_ordered_cli" || !got.Deprecated || !strings.Contains(got.ReplacementCommand, "ops run orders-stream update-release") || got.Result.Status != schema.SagaSucceeded || got.Result.Group != "orders-stream" || got.Result.ReleaseID != "rel_new" {
 		t.Fatalf("unexpected stateful ordered output: %+v", got)
 	}
 	member, err := client.GetStatefulMemberControl(context.Background(), "orders-stream", 1)
@@ -265,6 +285,40 @@ func TestSagaStartStatefulOrderedUpdateDirectJSON(t *testing.T) {
 	}
 	if member.Control.ReleaseID != "rel_new" || member.Control.Generation != 1 {
 		t.Fatalf("member was not updated by saga start: %+v", member.Control)
+	}
+}
+
+func TestStatefulUpdateReleaseCompatibilityJSONIncludesReplacement(t *testing.T) {
+	clearSkiffEnv(t)
+	dir := t.TempDir()
+	store, err := file.New(dir)
+	if err != nil {
+		t.Fatalf("new file store: %v", err)
+	}
+	seedStatefulSagaCLIControls(t, store, "vol-0")
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"stateful", "update-release", "orders-stream",
+		"--release-id", "rel_legacy_update",
+		"--members", "0",
+		"--direct",
+		"--state", "file://" + dir,
+		"--env", "prod",
+		"--provider", "fake",
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", "tr_stateful_update_compat",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	var got statefulOrderedSagaOutput
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("stateful update output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || !got.Deprecated || !strings.Contains(got.ReplacementCommand, "ops run orders-stream update-release") || got.Result.ReleaseID != "rel_legacy_update" {
+		t.Fatalf("unexpected stateful update output: %+v", got)
 	}
 }
 
@@ -322,7 +376,7 @@ func TestStatefulReplaceMemberDirectJSONCreatesAndRunsSaga(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("stateful replacement output is not valid JSON: %v\n%s", err, stdout.String())
 	}
-	if !got.OK || got.TraceID != "tr_stateful_replace_cli" || got.Result.Status != schema.SagaSucceeded || got.Result.Group != "orders-stream" || got.Result.Member != 0 {
+	if !got.OK || got.TraceID != "tr_stateful_replace_cli" || !got.Deprecated || !strings.Contains(got.ReplacementCommand, "ops run orders-stream replace-member") || got.Result.Status != schema.SagaSucceeded || got.Result.Group != "orders-stream" || got.Result.Member != 0 {
 		t.Fatalf("unexpected replacement output: %+v", got)
 	}
 	member, err := client.GetStatefulMemberControl(context.Background(), "orders-stream", 0)
@@ -331,6 +385,13 @@ func TestStatefulReplaceMemberDirectJSONCreatesAndRunsSaga(t *testing.T) {
 	}
 	if member.Control.InstanceID != "fake-orders-stream-0-gen-2" || member.Control.Generation != 2 || member.Control.Phase != state.StatefulMemberReady {
 		t.Fatalf("member was not replaced by CLI saga: %+v", member.Control)
+	}
+	op, err := opsstate.NewStore(store).Inspect(context.Background(), "orders-stream", got.Result.OperationID)
+	if err != nil {
+		t.Fatalf("inspect replacement operation: %v", err)
+	}
+	if op.Status != schema.OperationSucceeded || op.Kind != "replace-member" || len(op.ProviderOperations) == 0 {
+		t.Fatalf("unexpected replacement operation: %+v", op)
 	}
 }
 
@@ -695,7 +756,7 @@ func TestSagaStartCanaryDeployJSONCreatesAndRuns(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("saga start output is not valid JSON: %v\n%s", err, stdout.String())
 	}
-	if !got.OK || got.TraceID != "tr_canary_cli" || got.Result.Status != schema.SagaSucceeded || got.Result.Stage != 100 || got.Result.NextAction != "complete" {
+	if !got.OK || got.TraceID != "tr_canary_cli" || !got.Deprecated || !strings.Contains(got.ReplacementCommand, "deploy <service-spec> --canary") || got.Result.Status != schema.SagaSucceeded || got.Result.Stage != 100 || got.Result.NextAction != "complete" {
 		t.Fatalf("unexpected canary output: %+v", got)
 	}
 	if len(fake.rollouts) != 1 || fake.rollouts[0].ReleaseID != "rel_new" {

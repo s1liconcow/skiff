@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/s1liconcow/skiff/internal/client"
 	"github.com/s1liconcow/skiff/internal/config"
@@ -33,12 +34,14 @@ type sagaInspectOutput struct {
 }
 
 type sagaCommandOutput struct {
-	OK          bool   `json:"ok"`
-	TraceID     string `json:"trace_id,omitempty"`
-	Command     string `json:"command"`
-	Saga        string `json:"saga,omitempty"`
-	Implemented bool   `json:"implemented"`
-	Summary     string `json:"summary"`
+	OK                 bool   `json:"ok"`
+	TraceID            string `json:"trace_id,omitempty"`
+	Command            string `json:"command"`
+	Saga               string `json:"saga,omitempty"`
+	Implemented        bool   `json:"implemented"`
+	Deprecated         bool   `json:"deprecated,omitempty"`
+	ReplacementCommand string `json:"replacement_command,omitempty"`
+	Summary            string `json:"summary"`
 }
 
 type sagaApprovalOutput struct {
@@ -48,9 +51,11 @@ type sagaApprovalOutput struct {
 }
 
 type canarySagaOutput struct {
-	OK      bool             `json:"ok"`
-	TraceID string           `json:"trace_id,omitempty"`
-	Result  canarySagaResult `json:"result"`
+	OK                 bool             `json:"ok"`
+	TraceID            string           `json:"trace_id,omitempty"`
+	Deprecated         bool             `json:"deprecated,omitempty"`
+	ReplacementCommand string           `json:"replacement_command,omitempty"`
+	Result             canarySagaResult `json:"result"`
 }
 
 type canarySagaResult struct {
@@ -69,15 +74,19 @@ type canarySagaResult struct {
 }
 
 type statefulOrderedSagaOutput struct {
-	OK      bool                      `json:"ok"`
-	TraceID string                    `json:"trace_id,omitempty"`
-	Result  statefulOrderedSagaResult `json:"result"`
+	OK                 bool                      `json:"ok"`
+	TraceID            string                    `json:"trace_id,omitempty"`
+	Deprecated         bool                      `json:"deprecated,omitempty"`
+	ReplacementCommand string                    `json:"replacement_command,omitempty"`
+	Result             statefulOrderedSagaResult `json:"result"`
 }
 
 type statefulReplacementSagaOutput struct {
-	OK      bool                          `json:"ok"`
-	TraceID string                        `json:"trace_id,omitempty"`
-	Result  statefulReplacementSagaResult `json:"result"`
+	OK                 bool                          `json:"ok"`
+	TraceID            string                        `json:"trace_id,omitempty"`
+	Deprecated         bool                          `json:"deprecated,omitempty"`
+	ReplacementCommand string                        `json:"replacement_command,omitempty"`
+	Result             statefulReplacementSagaResult `json:"result"`
 }
 
 type statefulBackupRestoreOutput struct {
@@ -234,6 +243,7 @@ func runSagaWatch(binary string, args []string, root rootOptions, stdout, stderr
 func runSagaStart(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(binary+" saga start", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	fs.Usage = func() { printSagaStartUsage(fs.Output(), binary, fs) }
 	flags := addClientFlags(fs, root)
 	service := fs.String("service", "", "service name")
 	group := fs.String("group", "", "StatefulGroup name")
@@ -507,13 +517,20 @@ func runSagaSkeleton(binary, command string, args []string, root rootOptions, st
 		fmt.Fprintln(stdout, summary)
 		return ExitSuccess
 	case "json":
+		deprecated := command == "start"
+		replacement := ""
+		if deprecated {
+			replacement = binary + " ops run <target> <operation> --format json"
+		}
 		if err := json.NewEncoder(stdout).Encode(sagaCommandOutput{
-			OK:          true,
-			TraceID:     *flags.traceID,
-			Command:     command,
-			Saga:        *sagaID,
-			Implemented: false,
-			Summary:     summary,
+			OK:                 true,
+			TraceID:            *flags.traceID,
+			Command:            command,
+			Saga:               *sagaID,
+			Implemented:        false,
+			Deprecated:         deprecated,
+			ReplacementCommand: replacement,
+			Summary:            summary,
 		}); err != nil {
 			fmt.Fprintf(stderr, "%s saga %s: %v\n", binary, command, err)
 			return ExitInternalError
@@ -762,14 +779,37 @@ func createAndMaybeRunStatefulOrdered(ctx context.Context, binary string, cfg co
 	if err != nil {
 		return nil, err
 	}
+	initialStatus := schema.OperationPending
+	if run {
+		initialStatus = schema.OperationRunning
+	}
+	if err := createStatefulOperationDocs(ctx, store, statefulOperationDocRequest{
+		OperationID:   req.OperationID,
+		Service:       req.Group,
+		Env:           req.Env,
+		Kind:          "update-release",
+		Target:        schema.Target{Kind: "stateful-group", Name: req.Group},
+		Actor:         req.Actor,
+		TraceID:       req.TraceID,
+		CreatedAt:     req.CreatedAt,
+		Risk:          schema.RiskMedium,
+		Reversibility: schema.Compensatable,
+		Summary:       fmt.Sprintf("ordered in-place release update for stateful group %s to release %s", req.Group, req.ReleaseID),
+		Params:        req,
+		Status:        initialStatus,
+	}); err != nil {
+		return nil, err
+	}
 	sagas := sagastate.NewStore(store)
 	if _, err := sagas.Create(ctx, createReq); err != nil {
+		_ = markStatefulOperationFailed(ctx, store, req.Group, req.OperationID, "create_saga", err)
 		return nil, err
 	}
 	var execution *sagastate.ExecutionResult
 	if run {
 		cloud, err := newSagaProvider(cfg, store)
 		if err != nil {
+			_ = markStatefulOperationFailed(ctx, store, req.Group, req.OperationID, "create_provider", err)
 			return nil, err
 		}
 		execution, err = (&sagastate.Executor{
@@ -778,11 +818,16 @@ func createAndMaybeRunStatefulOrdered(ctx context.Context, binary string, cfg co
 			Owner: "skiff-cli",
 		}).Execute(ctx, req.SagaID)
 		if err != nil {
+			_ = markStatefulOperationFailed(ctx, store, req.Group, req.OperationID, "execute_saga", err)
 			return nil, err
 		}
 	}
 	inspect, err := sagas.Inspect(ctx, req.SagaID)
 	if err != nil {
+		_ = markStatefulOperationFailed(ctx, store, req.Group, req.OperationID, "inspect_saga", err)
+		return nil, err
+	}
+	if err := updateStatefulOperationFromSaga(ctx, store, req.Group, req.OperationID, *inspect); err != nil {
 		return nil, err
 	}
 	result := statefulOrderedResultFromInspect(*inspect, execution)
@@ -799,14 +844,37 @@ func createAndMaybeRunStatefulReplacement(ctx context.Context, binary string, cf
 	if err != nil {
 		return nil, err
 	}
+	initialStatus := schema.OperationPending
+	if run {
+		initialStatus = schema.OperationRunning
+	}
+	if err := createStatefulOperationDocs(ctx, store, statefulOperationDocRequest{
+		OperationID:   req.OperationID,
+		Service:       req.Group,
+		Env:           req.Env,
+		Kind:          "replace-member",
+		Target:        schema.Target{Kind: "stateful-member", Name: fmt.Sprintf("%s/%d", req.Group, req.Member)},
+		Actor:         req.Actor,
+		TraceID:       req.TraceID,
+		CreatedAt:     req.CreatedAt,
+		Risk:          schema.RiskHigh,
+		Reversibility: schema.Compensatable,
+		Summary:       fmt.Sprintf("replace stateful member %s/%d with explicit fencing", req.Group, req.Member),
+		Params:        req,
+		Status:        initialStatus,
+	}); err != nil {
+		return nil, err
+	}
 	sagas := sagastate.NewStore(store)
 	if _, err := sagas.Create(ctx, createReq); err != nil {
+		_ = markStatefulOperationFailed(ctx, store, req.Group, req.OperationID, "create_saga", err)
 		return nil, err
 	}
 	var execution *sagastate.ExecutionResult
 	if run {
 		cloud, err := newSagaProvider(cfg, store)
 		if err != nil {
+			_ = markStatefulOperationFailed(ctx, store, req.Group, req.OperationID, "create_provider", err)
 			return nil, err
 		}
 		execution, err = (&sagastate.Executor{
@@ -815,15 +883,128 @@ func createAndMaybeRunStatefulReplacement(ctx context.Context, binary string, cf
 			Owner: "skiff-cli",
 		}).Execute(ctx, req.SagaID)
 		if err != nil {
+			_ = markStatefulOperationFailed(ctx, store, req.Group, req.OperationID, "execute_saga", err)
 			return nil, err
 		}
 	}
 	inspect, err := sagas.Inspect(ctx, req.SagaID)
 	if err != nil {
+		_ = markStatefulOperationFailed(ctx, store, req.Group, req.OperationID, "inspect_saga", err)
+		return nil, err
+	}
+	if err := updateStatefulOperationFromSaga(ctx, store, req.Group, req.OperationID, *inspect); err != nil {
 		return nil, err
 	}
 	result := statefulReplacementResultFromInspect(*inspect, execution)
 	return &result, nil
+}
+
+type statefulOperationDocRequest struct {
+	OperationID   string
+	Service       string
+	Env           string
+	Kind          string
+	Target        schema.Target
+	Actor         schema.Actor
+	TraceID       string
+	CreatedAt     time.Time
+	Risk          schema.Risk
+	Reversibility schema.Reversibility
+	Summary       string
+	Params        any
+	Status        schema.OperationStatus
+}
+
+func createStatefulOperationDocs(ctx context.Context, store objstore.ObjectStore, req statefulOperationDocRequest) error {
+	intent := schema.NewOperationIntent(req.OperationID, req.Service, req.Env, req.Kind, req.Target, req.Actor, req.TraceID, canonical.Time(req.CreatedAt.UTC()))
+	intent.Risk = req.Risk
+	intent.Reversibility = req.Reversibility
+	intent.Summary = req.Summary
+	intent.Params = rawJSON(req.Params)
+	intentBody, err := canonical.Marshal(intent)
+	if err != nil {
+		return err
+	}
+	intentKey, err := paths.OperationIntent(req.Service, req.OperationID)
+	if err != nil {
+		return err
+	}
+	if _, err := store.Create(ctx, intentKey, intentBody, objstore.PutOptions{ContentType: canonical.ContentType}); err != nil {
+		return err
+	}
+	control := schema.OperationControl{
+		SchemaVersion: schema.Version,
+		OperationID:   req.OperationID,
+		Service:       req.Service,
+		Env:           req.Env,
+		Status:        req.Status,
+		UpdatedAt:     canonical.Time(req.CreatedAt.UTC()),
+		TraceID:       req.TraceID,
+	}
+	controlBody, err := canonical.Marshal(control)
+	if err != nil {
+		return err
+	}
+	controlKey, err := paths.OperationControl(req.Service, req.OperationID)
+	if err != nil {
+		return err
+	}
+	return createStatefulOperationControl(ctx, store, controlKey, controlBody)
+}
+
+func createStatefulOperationControl(ctx context.Context, store objstore.ObjectStore, key string, body []byte) error {
+	_, err := store.Create(ctx, key, body, objstore.PutOptions{ContentType: canonical.ContentType})
+	return err
+}
+
+func updateStatefulOperationFromSaga(ctx context.Context, store objstore.ObjectStore, service, operationID string, inspect sagastate.InspectResult) error {
+	doc, err := opsstate.NewStore(store).GetControl(ctx, service, operationID)
+	if err != nil {
+		return err
+	}
+	next := doc.Control
+	next.Status = canaryOperationStatus(inspect.Status)
+	next.StepResults = append([]schema.StepResultRef(nil), inspect.Control.StepResults...)
+	next.ProviderOperations = providerOperationsFromStepResults(inspect.Control.StepResults)
+	next.TraceID = firstNonEmptyString(next.TraceID, inspect.TraceID)
+	_, err = opsstate.NewStore(store).UpdateControlCAS(ctx, doc, next)
+	return err
+}
+
+func markStatefulOperationFailed(ctx context.Context, store objstore.ObjectStore, service, operationID, step string, cause error) error {
+	doc, err := opsstate.NewStore(store).GetControl(ctx, service, operationID)
+	if err != nil {
+		return err
+	}
+	next := doc.Control
+	next.Status = schema.OperationFailed
+	next.StepResults = append(next.StepResults, schema.StepResultRef{
+		StepID: step,
+		Kind:   "stateful.operation",
+		Status: "failed",
+		Failure: &schema.StepFailure{
+			Code:    "STATEFUL_OPERATION_FAILED",
+			Summary: cause.Error(),
+		},
+	})
+	_, err = opsstate.NewStore(store).UpdateControlCAS(ctx, doc, next)
+	return err
+}
+
+func providerOperationsFromStepResults(refs []schema.StepResultRef) []schema.ProviderOperationRef {
+	out := make([]schema.ProviderOperationRef, 0)
+	seen := map[string]struct{}{}
+	for _, ref := range refs {
+		for _, op := range ref.ProviderOperations {
+			key := op.Provider + "/" + op.Kind + "/" + op.ID
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, op)
+		}
+	}
+	return out
 }
 
 func createAndMaybeRunStatefulBackup(ctx context.Context, binary string, cfg config.Config, req templates.StatefulBackupRequest, run, dryRun bool) (*statefulBackupRestoreResult, error) {
@@ -949,7 +1130,12 @@ func writeCanarySagaResult(binary, command, format, traceID string, result canar
 		}
 		return ExitSuccess
 	case "json":
-		if err := json.NewEncoder(stdout).Encode(canarySagaOutput{OK: true, TraceID: traceID, Result: result}); err != nil {
+		out := canarySagaOutput{OK: true, TraceID: traceID, Result: result}
+		if command == "saga start" {
+			out.Deprecated = true
+			out.ReplacementCommand = fmt.Sprintf("%s deploy <service-spec> --canary --release-id %s --format json", binary, result.ReleaseID)
+		}
+		if err := json.NewEncoder(stdout).Encode(out); err != nil {
 			fmt.Fprintf(stderr, "%s %s: %v\n", binary, command, err)
 			return ExitInternalError
 		}
@@ -975,9 +1161,18 @@ func writeStatefulOrderedSagaResult(binary, command, format, traceID string, res
 		if result.NextAction != "" {
 			fmt.Fprintf(stdout, "next: %s\n", result.NextAction)
 		}
+		if command == "stateful update-release" {
+			fmt.Fprintf(stdout, "deprecated: use %s ops run %s update-release --release-id %s\n", binary, result.Group, result.ReleaseID)
+		}
 		return ExitSuccess
 	case "json":
-		if err := json.NewEncoder(stdout).Encode(statefulOrderedSagaOutput{OK: true, TraceID: traceID, Result: result}); err != nil {
+		out := statefulOrderedSagaOutput{OK: true, TraceID: traceID, Result: result}
+		switch command {
+		case "saga start", "stateful update-release":
+			out.Deprecated = true
+			out.ReplacementCommand = fmt.Sprintf("%s ops run %s update-release --release-id %s --format json", binary, result.Group, result.ReleaseID)
+		}
+		if err := json.NewEncoder(stdout).Encode(out); err != nil {
 			fmt.Fprintf(stderr, "%s %s: %v\n", binary, command, err)
 			return ExitInternalError
 		}
@@ -1002,9 +1197,17 @@ func writeStatefulReplacementSagaResult(binary, command, format, traceID string,
 		if result.NextAction != "" {
 			fmt.Fprintf(stdout, "next: %s\n", result.NextAction)
 		}
+		if command == "stateful replace-member" {
+			fmt.Fprintf(stdout, "deprecated: use %s ops run %s replace-member --member %d\n", binary, result.Group, result.Member)
+		}
 		return ExitSuccess
 	case "json":
-		if err := json.NewEncoder(stdout).Encode(statefulReplacementSagaOutput{OK: true, TraceID: traceID, Result: result}); err != nil {
+		out := statefulReplacementSagaOutput{OK: true, TraceID: traceID, Result: result}
+		if command == "stateful replace-member" {
+			out.Deprecated = true
+			out.ReplacementCommand = fmt.Sprintf("%s ops run %s replace-member --member %d --format json", binary, result.Group, result.Member)
+		}
+		if err := json.NewEncoder(stdout).Encode(out); err != nil {
 			fmt.Fprintf(stderr, "%s %s: %v\n", binary, command, err)
 			return ExitInternalError
 		}
@@ -1170,7 +1373,7 @@ func statefulReleaseUpdateRecommendedActions(result statefulOrderedSagaResult) [
 		{ID: "inspect_saga", Command: fmt.Sprintf("skiff ops inspect %s --format json", result.SagaID), Mutating: false},
 		{
 			ID:            "replace_member",
-			Command:       fmt.Sprintf("skiff stateful replace-member %s --member <ordinal> --format json", result.Group),
+			Command:       fmt.Sprintf("skiff ops run %s replace-member --member <ordinal> --format json", result.Group),
 			Mutating:      true,
 			Safety:        "separate high-risk path; fences the old VM before moving the durable volume",
 			Reversibility: schema.Compensatable,
@@ -1252,7 +1455,7 @@ func statefulReplacementRecommendedActions(result statefulReplacementSagaResult)
 	if result.Status != schema.SagaSucceeded {
 		actions = append(actions, recommendedAction{
 			ID:            "resume_replacement",
-			Command:       fmt.Sprintf("skiff stateful resume %s --format json", result.SagaID),
+			Command:       fmt.Sprintf("skiff ops resume %s --format json", result.SagaID),
 			Mutating:      true,
 			Safety:        "resumes from durable replacement progress",
 			Reversibility: schema.Compensatable,
@@ -1569,7 +1772,25 @@ func printSagaInspectHuman(w io.Writer, result sagastate.InspectResult) {
 
 func printSagaUsage(w io.Writer, binary string) {
 	fmt.Fprintf(w, "Usage: %s saga inspect <saga> [flags]\n", binary)
-	fmt.Fprintln(w, "       "+binary+" saga start canary-deploy --service <service> --release-id <release> [flags]")
 	fmt.Fprintln(w, "       "+binary+" saga approve|reject <saga> --step <step> [flags]")
-	fmt.Fprintln(w, "       "+binary+" saga start|watch|resume|cancel|compensate <saga> [flags]")
+	fmt.Fprintln(w, "       "+binary+" saga watch|resume|cancel|compensate <saga> [flags]")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Deprecated:")
+	fmt.Fprintln(w, "  saga start is kept for compatibility only.")
+	fmt.Fprintln(w, "  Use deploy --canary for service canaries.")
+	fmt.Fprintln(w, "  Use ops run <group> update-release for StatefulGroup release updates.")
+}
+
+func printSagaStartUsage(w io.Writer, binary string, fs *flag.FlagSet) {
+	fmt.Fprintf(w, "Usage: %s saga start <kind> [flags]\n\n", binary)
+	fmt.Fprintln(w, "Deprecated: saga start is kept for compatibility only.")
+	fmt.Fprintln(w, "Use deploy --canary for service canaries.")
+	fmt.Fprintln(w, "Use ops run <group> update-release for StatefulGroup release updates.")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Compatibility kinds:")
+	fmt.Fprintln(w, "  canary-deploy")
+	fmt.Fprintln(w, "  stateful.ordered_update")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Flags:")
+	fs.PrintDefaults()
 }

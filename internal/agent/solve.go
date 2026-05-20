@@ -188,6 +188,10 @@ func apiOperationForAction(action doctor.RecommendedAction, service string) *API
 		operation = "stateful.snapshot"
 		targetKind = "stateful-group"
 		params["member"] = flagValue(action.Command, "member")
+	case strings.Contains(command, " ops run ") && strings.Contains(command, " replace-member"):
+		operation = "stateful.replace_member"
+		targetKind = "stateful-member"
+		params["member"] = flagValue(action.Command, "member")
 	case strings.Contains(command, " stateful replace-member "):
 		operation = "stateful.replace_member"
 		targetKind = "stateful-member"

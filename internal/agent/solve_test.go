@@ -185,7 +185,7 @@ func TestSolveStatefulGroupActionsExposeTypedAPIOperations(t *testing.T) {
 				ID:            "orders-stream_stateful_replace_member",
 				Kind:          "command",
 				Service:       "orders-stream",
-				Command:       "skiff stateful replace-member orders-stream --member 0 --yes --format json",
+				Command:       "skiff ops run orders-stream replace-member --member 0 --yes --format json",
 				Mutating:      true,
 				Risk:          schema.RiskHigh,
 				Reversibility: schema.Compensatable,

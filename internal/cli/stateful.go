@@ -449,22 +449,16 @@ func runStatefulUpdateRelease(binary string, args []string, root rootOptions, st
 	if loaded.Config.Mode != config.ModeDirect {
 		return writeStatefulCommandError(binary, "stateful update-release", *flags.format, *flags.traceID, errors.New("stateful update-release currently requires --direct mode"), stdout, stderr)
 	}
-	members, err := parseMemberOrdinals(*membersValue)
-	if err != nil {
-		return writeStatefulCommandError(binary, "stateful update-release", *flags.format, *flags.traceID, err, stdout, stderr)
-	}
-	req := templates.StatefulOrderedUpdateRequest{
-		SagaID:         *sagaID,
-		OperationID:    *operationID,
+	result, err := createStatefulUpdateReleaseResult(nilContext(), binary, loaded.Config, statefulUpdateReleaseOptions{
 		Group:          *group,
-		Env:            loaded.Config.Env,
 		ReleaseID:      *releaseID,
-		Members:        members,
+		OperationID:    *operationID,
+		SagaID:         *sagaID,
+		MembersValue:   *membersValue,
 		MaxUnavailable: *maxUnavailable,
-		Actor:          schema.Actor{ID: "skiff-cli", Type: "user"},
+		Run:            *run,
 		TraceID:        *flags.traceID,
-	}
-	result, err := createAndMaybeRunStatefulOrdered(nilContext(), binary, loaded.Config, req, *run)
+	})
 	if err != nil {
 		return writeStatefulCommandError(binary, "stateful update-release", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
@@ -631,21 +625,73 @@ func runStatefulReplaceMember(binary string, args []string, root rootOptions, st
 	if loaded.Config.Env == "prod" && !*flags.yes && strings.TrimSpace(*approvalID) == "" {
 		return writeStatefulApprovalRequired(binary, *flags.format, *flags.traceID, *group, *member, stdout, stderr)
 	}
-	req := templates.StatefulReplaceMemberRequest{
-		SagaID:      *sagaID,
-		OperationID: *operationID,
+	result, err := createStatefulReplaceMemberResult(nilContext(), binary, loaded.Config, statefulReplaceMemberOptions{
 		Group:       *group,
-		Env:         loaded.Config.Env,
 		Member:      *member,
+		OperationID: *operationID,
+		SagaID:      *sagaID,
 		Reason:      *reason,
-		Actor:       schema.Actor{ID: "skiff-cli", Type: "user"},
+		Run:         *run,
 		TraceID:     *flags.traceID,
-	}
-	result, err := createAndMaybeRunStatefulReplacement(nilContext(), binary, loaded.Config, req, *run)
+	})
 	if err != nil {
 		return writeStatefulCommandError(binary, "stateful replace-member", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
 	return writeStatefulReplacementSagaResult(binary, "stateful replace-member", *flags.format, *flags.traceID, *result, stdout, stderr)
+}
+
+type statefulUpdateReleaseOptions struct {
+	Group          string
+	ReleaseID      string
+	OperationID    string
+	SagaID         string
+	MembersValue   string
+	MaxUnavailable int
+	Run            bool
+	TraceID        string
+}
+
+func createStatefulUpdateReleaseResult(ctx context.Context, binary string, cfg config.Config, opts statefulUpdateReleaseOptions) (*statefulOrderedSagaResult, error) {
+	members, err := parseMemberOrdinals(opts.MembersValue)
+	if err != nil {
+		return nil, err
+	}
+	req := templates.StatefulOrderedUpdateRequest{
+		SagaID:         opts.SagaID,
+		OperationID:    opts.OperationID,
+		Group:          opts.Group,
+		Env:            cfg.Env,
+		ReleaseID:      opts.ReleaseID,
+		Members:        members,
+		MaxUnavailable: opts.MaxUnavailable,
+		Actor:          schema.Actor{ID: "skiff-cli", Type: "user"},
+		TraceID:        opts.TraceID,
+	}
+	return createAndMaybeRunStatefulOrdered(ctx, binary, cfg, req, opts.Run)
+}
+
+type statefulReplaceMemberOptions struct {
+	Group       string
+	Member      int
+	OperationID string
+	SagaID      string
+	Reason      string
+	Run         bool
+	TraceID     string
+}
+
+func createStatefulReplaceMemberResult(ctx context.Context, binary string, cfg config.Config, opts statefulReplaceMemberOptions) (*statefulReplacementSagaResult, error) {
+	req := templates.StatefulReplaceMemberRequest{
+		SagaID:      opts.SagaID,
+		OperationID: opts.OperationID,
+		Group:       opts.Group,
+		Env:         cfg.Env,
+		Member:      opts.Member,
+		Reason:      opts.Reason,
+		Actor:       schema.Actor{ID: "skiff-cli", Type: "user"},
+		TraceID:     opts.TraceID,
+	}
+	return createAndMaybeRunStatefulReplacement(ctx, binary, cfg, req, opts.Run)
 }
 
 func runStatefulSnapshot(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
@@ -1305,6 +1351,7 @@ func splitStatefulReplaceArgs(args []string) ([]string, []string, error) {
 		"provider":     true,
 		"reason":       true,
 		"region":       true,
+		"run":          false,
 		"saga-id":      true,
 		"state":        true,
 		"state-bucket": true,
@@ -1386,7 +1433,7 @@ func splitStatefulRestoreArgs(args []string) ([]string, []string, error) {
 }
 
 func writeStatefulApprovalRequired(binary, format, traceID, group string, member int, stdout, stderr io.Writer) int {
-	command := fmt.Sprintf("%s stateful replace-member %s --member %d --yes --format json", binary, group, member)
+	command := fmt.Sprintf("%s ops run %s replace-member --member %d --yes --format json", binary, group, member)
 	if isJSONFormat(format) {
 		_ = writeJSON(stdout, format, commandErrorOutput{
 			OK:      false,
@@ -1419,8 +1466,8 @@ func printStatefulUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  solve      Render an agent action graph for StatefulGroup recovery")
 	fmt.Fprintln(w, "  logs       Query StatefulGroup or member logs")
 	fmt.Fprintln(w, "  metrics    Query StatefulGroup or member metrics")
-	fmt.Fprintln(w, "  update-release  Update existing named members in place to a release")
-	fmt.Fprintln(w, "  replace-member  Replace one failed StatefulGroup member through a saga")
+	fmt.Fprintln(w, "  update-release  Compatibility alias for ops run <group> update-release")
+	fmt.Fprintln(w, "  replace-member  Compatibility alias for ops run <group> replace-member")
 	fmt.Fprintln(w, "  snapshot   Snapshot one StatefulGroup member volume")
 	fmt.Fprintln(w, "  backup     Render StatefulGroup backup saga plans")
 	fmt.Fprintln(w, "  restore    Plan or apply StatefulGroup restore sagas")

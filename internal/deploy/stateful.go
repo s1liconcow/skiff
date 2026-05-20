@@ -771,7 +771,7 @@ func statefulRecommendedActions(group, operationID, traceID string) []StatefulRe
 	return []StatefulRecommendedAction{
 		{ID: "inspect_stateful", Command: commandWithTrace(fmt.Sprintf("skiff stateful inspect %s --format json", group), traceID), Mutating: false},
 		{ID: "inspect_operation", Command: commandWithTrace(fmt.Sprintf("skiff ops inspect --service %s --operation %s --format json", group, operationID), traceID), Mutating: false},
-		{ID: "recover_member", Command: commandWithTrace(fmt.Sprintf("skiff stateful replace-member %s --member <ordinal> --format json", group), traceID), Mutating: true, Safety: "requires explicit member fencing before volume attach", Reversibility: schema.Compensatable, Risk: schema.RiskHigh},
+		{ID: "recover_member", Command: commandWithTrace(fmt.Sprintf("skiff ops run %s replace-member --member <ordinal> --format json", group), traceID), Mutating: true, Safety: "requires explicit member fencing before volume attach", Reversibility: schema.Compensatable, Risk: schema.RiskHigh},
 	}
 }
 

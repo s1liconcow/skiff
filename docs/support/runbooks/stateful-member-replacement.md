@@ -50,7 +50,7 @@ saga must persist fencing, detach, launch, attach, DNS, recipe recovery, and
 health step results before moving forward.
 
 ```bash
-skiff stateful replace-member ledger-stream \
+skiff ops run ledger-stream replace-member \
   --member 0 \
   --reason "member failed recipe health" \
   --approval-id approval_01J... \
@@ -66,13 +66,13 @@ skiff stateful replace-member ledger-stream \
 If the command is interrupted, resume from object state:
 
 ```bash
-skiff stateful resume saga_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+skiff ops resume saga_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
 ```
 
 Watch immutable saga events:
 
 ```bash
-skiff stateful watch saga_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+skiff ops watch saga_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
 ```
 
 ## Verify

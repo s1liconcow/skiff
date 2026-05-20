@@ -56,10 +56,10 @@ workload through the ordered update workflow:
 skiff deploy examples/stacks/api-sqlite/skiff.yaml --release-id rel_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
 ```
 
-For operators who already have a published release, the explicit stateful form is:
+For operators who already have a published release, run the explicit operation:
 
 ```bash
-skiff stateful update-release orders-api --release-id rel_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+skiff ops run orders-api update-release --release-id rel_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
 ```
 
 Do not use replacement terminology for this path: it does not detach or move the
@@ -78,7 +78,7 @@ have two writers. Use the explicit replacement saga, which fences the old VM
 before moving the volume to a new VM generation:
 
 ```bash
-skiff stateful replace-member orders-api --member 0 --reason "member failed health" --approval-id approval_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+skiff ops run orders-api replace-member --member 0 --reason "member failed health" --approval-id approval_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
 ```
 
 Restore is not an API rollback. Use the stateful restore plan and approval gate

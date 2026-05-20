@@ -1036,7 +1036,7 @@ func statefulReplaceAction(binary, group string, member int) RecommendedAction {
 		Kind:             "command",
 		Service:          group,
 		Summary:          "replace one unhealthy StatefulGroup member through the explicit saga",
-		Command:          fmt.Sprintf("%s stateful replace-member %s --member %d --yes --format json", binary, group, member),
+		Command:          fmt.Sprintf("%s ops run %s replace-member --member %d --yes --format json", binary, group, member),
 		Mutating:         true,
 		Safety:           "requires explicit member fencing before volume attach",
 		Reversibility:    schema.Compensatable,

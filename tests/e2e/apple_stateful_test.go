@@ -67,7 +67,7 @@ func TestAppleStatefulGroupRustFSE2E(t *testing.T) {
 	report.RecommendedNextCommands = append(report.RecommendedNextCommands,
 		"source "+shellQuote(contexts.envPath),
 		"SKIFF_CONTEXT="+appleDirectContext+" skiff stateful inspect "+service+" --format json --trace-id "+traceID,
-		"SKIFF_CONTEXT="+appleDirectContext+" skiff stateful replace-member "+service+" --member 1 --yes --format json --trace-id "+traceID,
+		"SKIFF_CONTEXT="+appleDirectContext+" skiff ops run "+service+" replace-member --member 1 --yes --format json --trace-id "+traceID,
 	)
 
 	var applied appleStatefulApplyOutput

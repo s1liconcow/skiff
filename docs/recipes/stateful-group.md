@@ -123,7 +123,7 @@ skiff stateful doctor ledger-stream --direct --state s3://skiff-state-prod --env
 Start the replacement only after the high-risk action is approved:
 
 ```bash
-skiff stateful replace-member ledger-stream \
+skiff ops run ledger-stream replace-member \
   --member 0 \
   --reason "member failed recipe health" \
   --approval-id approval_01J... \
@@ -160,9 +160,10 @@ members. It keeps the VM instance, durable volume, DNS identity, and member
 generation stable while writing new release/runtime manifest keys into member
 control documents.
 
-`skiff stateful replace-member <group> --member <n>` replaces the VM that owns a
+`skiff ops run <group> replace-member --member <n>` replaces the VM that owns a
 member. It must fence the old writer, detach the existing volume, launch a new
-VM, attach the volume, update DNS, and publish a new member generation.
+VM, attach the volume, update DNS, and publish a new member generation. The
+older `skiff stateful replace-member` command remains as a compatibility alias.
 
 If an operation would update the release and replace the VM, model it as two
 explicit operations so the volume-moving risk remains visible.
@@ -175,7 +176,7 @@ starts. The saga records step results so it can resume after an interruption.
 It does not detach volumes, launch replacement VMs, or change member generation.
 
 ```bash
-skiff stateful update-release ledger-stream \
+skiff ops run ledger-stream update-release \
   --release-id rel_2026_05_18_ledger \
   --members 0 \
   --max-unavailable 1 \
@@ -190,7 +191,7 @@ skiff stateful update-release ledger-stream \
 Resume from object state:
 
 ```bash
-skiff stateful resume saga_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+skiff ops resume saga_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
 ```
 
 ## Backup And Restore

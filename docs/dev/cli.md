@@ -268,6 +268,23 @@ focused stream.
 skiff ops watch payments-api --operation op_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
 ```
 
+## Operations And Stateful Commands
+
+`skiff ops run` is the normal entrypoint for explicit stateful operations. It
+creates operation intent/control objects before the saga documents, so operators
+can inspect or resume from object state after interruption.
+
+```bash
+skiff ops run ledger-stream update-release --release-id rel_01J... --members 0 --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+skiff ops run ledger-stream replace-member --member 0 --approval-id approval_01J... --direct --state s3://skiff-state-prod --env prod --provider aws --region us-west-2 --format json
+```
+
+`skiff stateful update-release` and `skiff stateful replace-member` remain
+compatibility aliases. `skiff saga start` is deprecated for normal operation
+creation; use `deploy --canary` for canaries and `ops run` for stateful
+operations. Direct `saga inspect`, `watch`, `resume`, `approve`, `reject`,
+`cancel`, and `compensate` remain advanced recovery tools.
+
 ## Regional Failover
 
 `skiff failover` creates a `regional.failover` saga for a multi-region stack. Dry-run mode renders the full graph, including the manual approval and irreversible boundary after database promotion. Production execution requires direct mode and approval context.

@@ -311,7 +311,103 @@ func runOpsPlan(binary string, args []string, root rootOptions, stdout, stderr i
 }
 
 func runOpsRun(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
+	if handled, code := runOpsStatefulCompatibility(binary, "ops run", args, root, stdout, stderr, true); handled {
+		return code
+	}
 	return runOpsProfileCommand(binary, "ops run", args, root, stdout, stderr, true)
+}
+
+func runOpsStatefulCompatibility(binary, command string, args []string, root rootOptions, stdout, stderr io.Writer, mutate bool) (bool, int) {
+	flagArgs, positionals, splitErr := splitOpsArgs(args)
+	if splitErr != nil {
+		return true, writeClientCommandError(binary, command, defaultString(root.Format, "human"), root.TraceID, splitErr, stdout, stderr)
+	}
+	if len(positionals) != 2 {
+		return false, ExitSuccess
+	}
+	target := positionals[0]
+	operation := positionals[1]
+	if operation != "update-release" && operation != "replace-member" {
+		return false, ExitSuccess
+	}
+
+	fs := flag.NewFlagSet(binary+" "+command, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := addClientFlags(fs, root)
+	releaseID := fs.String("release-id", "", "release ID to run on existing named members")
+	operationID := fs.String("operation-id", "", "operation ID to use")
+	sagaID := fs.String("saga-id", "", "saga ID to use")
+	membersValue := fs.String("members", "", "comma-separated StatefulGroup member ordinals")
+	maxUnavailable := fs.Int("max-unavailable", 1, "maximum unavailable StatefulGroup members during release update")
+	member := fs.Int("member", -1, "stateful member ordinal")
+	reason := fs.String("reason", "", "replacement reason")
+	approvalID := fs.String("approval-id", "", "approval ID for high-risk production replacement")
+	runSaga := fs.Bool("run", true, "run the saga after creating it")
+	planOnly := fs.Bool("plan-only", false, "render the operation plan without writing object state")
+	dryRun := fs.Bool("dry-run", false, "render the operation plan without writing object state")
+
+	if handled, err := parseCommandFlags(fs, flagArgs, stdout); handled {
+		return true, ExitSuccess
+	} else if err != nil {
+		return true, writeClientCommandError(binary, command, *flags.format, *flags.traceID, err, stdout, stderr)
+	}
+	_ = flags.noColor
+
+	if operation == "update-release" && strings.TrimSpace(*releaseID) == "" {
+		return true, writeClientCommandError(binary, command, *flags.format, *flags.traceID, errors.New("update-release requires --release-id"), stdout, stderr)
+	}
+	if operation == "replace-member" && *member < 0 {
+		return true, writeClientCommandError(binary, command, *flags.format, *flags.traceID, errors.New("replace-member requires --member"), stdout, stderr)
+	}
+	if !mutate || *planOnly || *dryRun {
+		return true, writeClientCommandError(binary, command, *flags.format, *flags.traceID, errors.New("StatefulGroup compatibility operations do not support ops plan, --plan-only, or --dry-run yet"), stdout, stderr)
+	}
+
+	loaded, err := flags.load(binary, root, fs)
+	if err != nil {
+		return true, writeConfigError(binary, *flags.format, *flags.traceID, err, loaded.Redacted().Sources, stdout, stderr)
+	}
+	if loaded.Config.Mode != config.ModeDirect {
+		return true, writeClientCommandError(binary, command, *flags.format, *flags.traceID, errors.New(command+" for StatefulGroup compatibility operations currently requires --direct mode"), stdout, stderr)
+	}
+	shouldRun := mutate && *runSaga && !*planOnly && !*dryRun
+	if operation == "replace-member" && loaded.Config.Env == "prod" && shouldRun && !*flags.yes && strings.TrimSpace(*approvalID) == "" {
+		return true, writeStatefulApprovalRequired(binary, *flags.format, *flags.traceID, target, *member, stdout, stderr)
+	}
+
+	switch operation {
+	case "update-release":
+		result, err := createStatefulUpdateReleaseResult(nilContext(), binary, loaded.Config, statefulUpdateReleaseOptions{
+			Group:          target,
+			ReleaseID:      *releaseID,
+			OperationID:    *operationID,
+			SagaID:         *sagaID,
+			MembersValue:   *membersValue,
+			MaxUnavailable: *maxUnavailable,
+			Run:            shouldRun,
+			TraceID:        *flags.traceID,
+		})
+		if err != nil {
+			return true, writeClientCommandError(binary, command, *flags.format, *flags.traceID, err, stdout, stderr)
+		}
+		return true, writeStatefulOrderedSagaResult(binary, command, *flags.format, *flags.traceID, *result, stdout, stderr)
+	case "replace-member":
+		result, err := createStatefulReplaceMemberResult(nilContext(), binary, loaded.Config, statefulReplaceMemberOptions{
+			Group:       target,
+			Member:      *member,
+			OperationID: *operationID,
+			SagaID:      *sagaID,
+			Reason:      *reason,
+			Run:         shouldRun,
+			TraceID:     *flags.traceID,
+		})
+		if err != nil {
+			return true, writeClientCommandError(binary, command, *flags.format, *flags.traceID, err, stdout, stderr)
+		}
+		return true, writeStatefulReplacementSagaResult(binary, command, *flags.format, *flags.traceID, *result, stdout, stderr)
+	default:
+		return false, ExitSuccess
+	}
 }
 
 func runOpsProfileCommand(binary, command string, args []string, root rootOptions, stdout, stderr io.Writer, run bool) int {
@@ -850,27 +946,33 @@ func writeOpsRuntimeError(binary, format, traceID string, err error, result *ops
 
 func splitOpsArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
-		"api-url":        true,
-		"config":         true,
-		"context":        true,
-		"env":            true,
-		"format":         true,
-		"lease-duration": true,
-		"limit":          true,
-		"lockfile":       true,
-		"cache":          true,
-		"mode":           true,
-		"operation":      true,
-		"operation-id":   true,
-		"param":          true,
-		"provider":       true,
-		"region":         true,
-		"saga-id":        true,
-		"service":        true,
-		"state":          true,
-		"state-bucket":   true,
-		"target-kind":    true,
-		"trace-id":       true,
+		"api-url":         true,
+		"approval-id":     true,
+		"config":          true,
+		"context":         true,
+		"env":             true,
+		"format":          true,
+		"lease-duration":  true,
+		"limit":           true,
+		"lockfile":        true,
+		"cache":           true,
+		"max-unavailable": true,
+		"member":          true,
+		"members":         true,
+		"mode":            true,
+		"operation":       true,
+		"operation-id":    true,
+		"param":           true,
+		"provider":        true,
+		"reason":          true,
+		"region":          true,
+		"release-id":      true,
+		"saga-id":         true,
+		"service":         true,
+		"state":           true,
+		"state-bucket":    true,
+		"target-kind":     true,
+		"trace-id":        true,
 	}
 	return splitArgs(args, valueFlags)
 }
@@ -902,7 +1004,7 @@ func printOpsUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  list      List available operation profiles or stored operations")
 	fmt.Fprintln(w, "  plan      Render an operation profile plan")
-	fmt.Fprintln(w, "  run       Create an operation profile saga")
+	fmt.Fprintln(w, "  run       Create an operation saga")
 	fmt.Fprintln(w, "  inspect   Inspect an operation or saga")
 	fmt.Fprintln(w, "  events    List recent, service, operation, or saga events")
 	fmt.Fprintln(w, "  watch     Watch service or operation events")
@@ -911,6 +1013,10 @@ func printOpsUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  resume    Resume an operation or saga")
 	fmt.Fprintln(w, "  cancel    Register saga cancellation intent")
 	fmt.Fprintln(w, "  compensate Register saga compensation intent")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Stateful compatibility operations:")
+	fmt.Fprintln(w, "  ops run <group> update-release --release-id <release>")
+	fmt.Fprintln(w, "  ops run <group> replace-member --member <ordinal>")
 }
 
 func printOpsEventsUsage(w io.Writer, binary string) {

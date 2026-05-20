@@ -1003,7 +1003,7 @@ func replacementRecommendedActions(params ReplaceMemberParams, failure *schema.S
 	if failure != nil {
 		actions = append(actions, map[string]any{
 			"id":            "resume_replacement",
-			"command":       fmt.Sprintf("skiff stateful resume %s --format json", sagaID),
+			"command":       fmt.Sprintf("skiff ops resume %s --format json", sagaID),
 			"mutating":      true,
 			"risk":          schema.RiskHigh,
 			"reversibility": schema.Compensatable,

@@ -330,7 +330,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  doctor     Diagnose service health and recommend actions")
 	fmt.Fprintln(w, "  cost       Explain service shape and capacity recommendations")
 	fmt.Fprintln(w, "  rollback   Roll a service back to a stable release")
-	fmt.Fprintln(w, "  ops        Inspect, watch, approve, and resume operations")
+	fmt.Fprintln(w, "  ops        List, run, inspect, watch, approve, and resume operations")
 	fmt.Fprintln(w, "  pkg        Add, verify, explain, and lock packages")
 	fmt.Fprintln(w, "  config     Inspect and switch Skiff configuration contexts")
 	fmt.Fprintln(w, "  tui        Open the terminal operations dashboard")
@@ -378,7 +378,7 @@ func printAllUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  logs       Query service logs through the cloud provider")
 	fmt.Fprintln(w, "  metrics    Query service metrics through the cloud provider")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
-	fmt.Fprintln(w, "  ops        Inspect, watch, approve, and resume operations")
+	fmt.Fprintln(w, "  ops        List, run, inspect, watch, approve, and resume operations")
 	fmt.Fprintln(w, "  plan       Dry-run provider resource changes for a spec")
 	fmt.Fprintln(w, "  pkg        Add, verify, explain, and lock packages")
 	fmt.Fprintln(w, "  plugin     Inspect, validate, and run trusted Skiff plugins")
@@ -416,8 +416,8 @@ func printWorkflowsHelp(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  debug      Collect bundles and create audited debug sessions")
 	fmt.Fprintln(w, "  drift      Detect provider drift from Skiff resource records")
 	fmt.Fprintln(w, "  gc         Plan and apply conservative cleanup actions")
-	fmt.Fprintln(w, "  stateful   Plan, apply, and inspect StatefulGroups")
-	fmt.Fprintln(w, "  ops        Inspect, watch, approve, reject, and resume operations")
+	fmt.Fprintln(w, "  stateful   Plan, apply, inspect, and diagnose StatefulGroups")
+	fmt.Fprintln(w, "  ops        Discover and run stateful/package operations")
 }
 
 func printAdoptionHelp(w io.Writer, binary string) {
@@ -444,7 +444,7 @@ func printDevHelp(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
 	fmt.Fprintln(w, "  state      Inspect object-state paths")
 	fmt.Fprintln(w, "  events     List local service, operation, or saga events")
-	fmt.Fprintln(w, "  saga       Inspect and operate directly on saga object state")
+	fmt.Fprintln(w, "  saga       Advanced recovery: inspect and operate directly on saga object state")
 	fmt.Fprintln(w, "  solve      Build an agent action graph for service recovery")
 }
 

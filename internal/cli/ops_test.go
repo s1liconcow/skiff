@@ -13,10 +13,12 @@ import (
 	"github.com/s1liconcow/skiff/internal/config"
 	"github.com/s1liconcow/skiff/internal/ir"
 	"github.com/s1liconcow/skiff/internal/objstore"
+	"github.com/s1liconcow/skiff/internal/objstore/file"
 	"github.com/s1liconcow/skiff/internal/objstore/memory"
 	opsstate "github.com/s1liconcow/skiff/internal/ops"
 	"github.com/s1liconcow/skiff/internal/provider"
 	"github.com/s1liconcow/skiff/internal/provider/aws"
+	"github.com/s1liconcow/skiff/internal/state"
 	"github.com/s1liconcow/skiff/internal/state/canonical"
 	"github.com/s1liconcow/skiff/internal/state/paths"
 	"github.com/s1liconcow/skiff/internal/state/schema"
@@ -343,6 +345,99 @@ func TestOpsCatalogPlanAndRunPackageProfileJSON(t *testing.T) {
 	}
 	if !apiRunOut.OK || !apiRunOut.WouldWrite || apiRunOut.Paths["operation_intent"] == "" {
 		t.Fatalf("unexpected api run output: %+v", apiRunOut)
+	}
+}
+
+func TestOpsRunStatefulUpdateReleaseCompatibilityCreatesInspectableOperation(t *testing.T) {
+	clearSkiffEnv(t)
+	dir := t.TempDir()
+	store, err := file.New(dir)
+	if err != nil {
+		t.Fatalf("new file store: %v", err)
+	}
+	seedStatefulSagaCLIControls(t, store, "vol-0")
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"ops", "run", "orders-stream", "update-release",
+		"--release-id", "rel_ops_update",
+		"--members", "0",
+		"--operation-id", "op_ops_update",
+		"--saga-id", "saga_ops_update",
+		"--direct",
+		"--state", "file://" + dir,
+		"--env", "prod",
+		"--provider", "fake",
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", "tr_ops_update",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var out statefulOrderedSagaOutput
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, stdout.String())
+	}
+	if !out.OK || out.TraceID != "tr_ops_update" || out.Result.OperationID != "op_ops_update" || out.Result.SagaID != "saga_ops_update" || out.Result.Status != schema.SagaSucceeded {
+		t.Fatalf("unexpected output: %+v", out)
+	}
+	operation, err := opsstate.NewStore(store).Inspect(context.Background(), "orders-stream", "op_ops_update")
+	if err != nil {
+		t.Fatalf("inspect operation: %v", err)
+	}
+	if operation.Kind != "update-release" || operation.Status != schema.OperationSucceeded || len(operation.StepResults) == 0 {
+		t.Fatalf("unexpected operation: %+v", operation)
+	}
+	member, err := state.NewClient(store).GetStatefulMemberControl(context.Background(), "orders-stream", 0)
+	if err != nil {
+		t.Fatalf("get member: %v", err)
+	}
+	if member.Control.ReleaseID != "rel_ops_update" || member.Control.Generation != 1 {
+		t.Fatalf("member was not updated in place: %+v", member.Control)
+	}
+}
+
+func TestOpsRunStatefulReplaceMemberCompatibilityCreatesInspectableOperation(t *testing.T) {
+	clearSkiffEnv(t)
+	dir := t.TempDir()
+	store, err := file.New(dir)
+	if err != nil {
+		t.Fatalf("new file store: %v", err)
+	}
+	seedStatefulSagaCLIControls(t, store, "vol-0")
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"ops", "run", "orders-stream", "replace-member",
+		"--member", "0",
+		"--operation-id", "op_ops_replace",
+		"--saga-id", "saga_ops_replace",
+		"--yes",
+		"--direct",
+		"--state", "file://" + dir,
+		"--env", "prod",
+		"--provider", "fake",
+		"--region", "local",
+		"--format", "json",
+		"--trace-id", "tr_ops_replace",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var out statefulReplacementSagaOutput
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, stdout.String())
+	}
+	if !out.OK || out.TraceID != "tr_ops_replace" || out.Result.OperationID != "op_ops_replace" || out.Result.SagaID != "saga_ops_replace" || out.Result.Status != schema.SagaSucceeded {
+		t.Fatalf("unexpected output: %+v", out)
+	}
+	operation, err := opsstate.NewStore(store).Inspect(context.Background(), "orders-stream", "op_ops_replace")
+	if err != nil {
+		t.Fatalf("inspect operation: %v", err)
+	}
+	if operation.Kind != "replace-member" || operation.Status != schema.OperationSucceeded || len(operation.StepResults) == 0 || len(operation.ProviderOperations) == 0 {
+		t.Fatalf("unexpected operation: %+v", operation)
 	}
 }
 
