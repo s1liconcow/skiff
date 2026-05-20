@@ -6,7 +6,9 @@ Use this on an Apple Silicon Mac to demo the actual installable
 This path does not start a standalone Postgres container as a substitute. It
 locks the first-party package from `packages/postgres-ha`, builds and executes
 `cmd/postgres-ha-plugin` through Skiff's package host, applies a live
-three-member Apple StatefulGroup, runs `primary-switchover-update`, verifies
+three-member Apple StatefulGroup, runs the same `primary-switchover-update`
+stateful operation profile documented in
+[`api-postgres-ha-read-write.md`](api-postgres-ha-read-write.md), verifies
 direct-mode and local `skiffd` surfaces, and proves the unsafe replica-lag
 scenario blocks before member mutation.
 
@@ -25,7 +27,7 @@ catch-up, failback, direct-mode inspection, and unsafe-lag blocking.
 - Apple Silicon Mac.
 - Apple Container installed and running, with `container` on `PATH`.
 - `go` is available.
-- `jq` is optional but useful for reading the report.
+- `jq` is available for reading the report.
 - Network access to pull `rustfs/rustfs` and any missing builder images.
 
 Confirm the basics:
@@ -45,6 +47,12 @@ Set shared variables from the repository root:
 export APPLE_RUN_ID=postgres-ha-apple-$(date +%Y%m%d%H%M%S)
 export SKIFF_E2E_REPORT_DIR=$PWD/.skiff-demo-reports/apple-postgres-ha/$APPLE_RUN_ID
 export SKIFF_E2E_OPSEM_IMAGE=localhost/skiff-opsem:e2e
+export POSTGRES_HA_TARGET=postgres-primary
+export POSTGRES_HA_OPERATION=primary-switchover-update
+export POSTGRES_HA_OP_ID=op_opsem_primary
+export POSTGRES_HA_SAGA_ID=saga_opsem_primary
+export POSTGRES_HA_RELEASE_ID=rel_primary
+export POSTGRES_HA_CANDIDATE=1
 ```
 
 ## Build Or Confirm The Opsem Image
@@ -87,9 +95,9 @@ go test ./tests/e2e -run TestOpsemAppleOperationProfilesE2E -count=1 -v
 
 This starts RustFS for S3-compatible Skiff object state, applies live Apple
 StatefulGroups for the `postgres-ha` success and unsafe scenarios, locks the
-actual `packages/postgres-ha` package, runs `primary-switchover-update`,
-verifies direct-mode and local `skiffd` surfaces, and checks the unsafe
-replica-lag block.
+actual `packages/postgres-ha` package, runs the package-exposed
+`primary-switchover-update` StatefulGroup operation, verifies direct-mode and
+local `skiffd` surfaces, and checks the unsafe replica-lag block.
 
 The report path is:
 
@@ -112,49 +120,89 @@ Expected facts include:
 - `postgres-primary-unsafe` blocked `replica-lag-too-high` before member
   mutation
 
-## Direct Operation Commands
+## Run The Same Stateful Operation On Apple Silicon
 
-To inspect the command shape outside the all-package gate, use the operation
-profile directly against the live `primary-replica` StatefulGroup created by the
-demo:
+The focused demo target runs the same package operation shape as the AWS runbook,
+with the Apple local validation provider replacing AWS. The target is the
+`postgres-primary` StatefulGroup created by the demo, and the lockfile/cache are
+the package artifacts written under the run report directory:
 
 ```bash
-skiff ops plan postgres-primary primary-switchover-update \
-  --target-kind StatefulGroup \
-  --lockfile "$SKIFF_E2E_REPORT_DIR/op-opsem-primary-skiff.lock.json" \
-  --cache "$SKIFF_E2E_REPORT_DIR/package-cache/op_opsem_primary" \
-  --operation-id op_opsem_primary \
-  --saga-id saga_opsem_primary \
-  --param release_id=rel_primary \
-  --param 'candidate="1"' \
-  --param return_primary=true \
-  --format json
+export POSTGRES_HA_LOCKFILE=$SKIFF_E2E_REPORT_DIR/op-opsem-primary-skiff.lock.json
+export POSTGRES_HA_CACHE=$SKIFF_E2E_REPORT_DIR/package-cache/op_opsem_primary
+export APPLE_REPORT=$SKIFF_E2E_REPORT_DIR/testopsemappleoperationprofilese2e.json
+export APPLE_STATE_URI=$(jq -r '.state_uri' "$APPLE_REPORT")
 ```
 
-The corresponding mutating command is:
+Confirm the locked `postgres-ha` package exposes the stateful operation:
 
 ```bash
-skiff ops run postgres-primary primary-switchover-update \
+skiff ops list "$POSTGRES_HA_TARGET" \
+  --target-kind StatefulGroup \
+  --lockfile "$POSTGRES_HA_LOCKFILE" \
+  --cache "$POSTGRES_HA_CACHE"
+```
+
+Plan the package operation without writing object state:
+
+```bash
+skiff ops plan "$POSTGRES_HA_TARGET" "$POSTGRES_HA_OPERATION" \
+  --target-kind StatefulGroup \
+  --lockfile "$POSTGRES_HA_LOCKFILE" \
+  --cache "$POSTGRES_HA_CACHE" \
+  --operation-id "$POSTGRES_HA_OP_ID" \
+  --saga-id "$POSTGRES_HA_SAGA_ID" \
+  --param release_id="$POSTGRES_HA_RELEASE_ID" \
+  --param "candidate=\"$POSTGRES_HA_CANDIDATE\"" \
+  --param return_primary=true
+```
+
+Run the operation through direct mode:
+
+```bash
+skiff ops run "$POSTGRES_HA_TARGET" "$POSTGRES_HA_OPERATION" \
   --direct \
-  --state <rustfs-state-uri> \
+  --state "$APPLE_STATE_URI" \
   --env prod \
   --provider apple-container \
   --region local \
   --target-kind StatefulGroup \
-  --lockfile "$SKIFF_E2E_REPORT_DIR/op-opsem-primary-skiff.lock.json" \
-  --cache "$SKIFF_E2E_REPORT_DIR/package-cache/op_opsem_primary" \
-  --operation-id op_opsem_primary \
-  --saga-id saga_opsem_primary \
-  --param release_id=rel_primary \
-  --param 'candidate="1"' \
+  --lockfile "$POSTGRES_HA_LOCKFILE" \
+  --cache "$POSTGRES_HA_CACHE" \
+  --operation-id "$POSTGRES_HA_OP_ID" \
+  --saga-id "$POSTGRES_HA_SAGA_ID" \
+  --param release_id="$POSTGRES_HA_RELEASE_ID" \
+  --param "candidate=\"$POSTGRES_HA_CANDIDATE\"" \
   --param return_primary=true \
   --yes \
-  --format json
+  --trace-id tr_opsem_profiles_e2e
 ```
 
-Use the `<rustfs-state-uri>` from the Apple report or e2e output. The all-package
-gate is the recommended repeatable path because it creates isolated names,
-captures report evidence, and cleans up Apple containers and volumes by default.
+Inspect the durable operation and saga objects:
+
+```bash
+skiff ops inspect "$POSTGRES_HA_OP_ID" \
+  --service "$POSTGRES_HA_TARGET" \
+  --direct \
+  --state "$APPLE_STATE_URI" \
+  --env prod \
+  --provider apple-container \
+  --region local \
+  --trace-id tr_opsem_profiles_e2e
+
+skiff saga inspect "$POSTGRES_HA_SAGA_ID" \
+  --direct \
+  --state "$APPLE_STATE_URI" \
+  --env prod \
+  --provider apple-container \
+  --region local \
+  --trace-id tr_opsem_profiles_e2e
+```
+
+The all-package gate is the recommended repeatable path because it creates
+isolated names, captures report evidence, verifies the direct and local
+`skiffd` surfaces, runs the unsafe-lag case, and cleans up Apple containers and
+volumes by default.
 
 ## Cleanup
 

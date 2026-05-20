@@ -1,8 +1,9 @@
 # Runbook: API plus Postgres HA Read/Write Smoke
 
 Use this runbook to deploy an API service through Skiff, provision a Postgres
-database through the installable `skiff.dev/postgres-ha` package, and verify
-that the deployed API can write to and read from that database.
+database through the installable `skiff.dev/postgres-ha` package, verify that
+the deployed API can write to and read from that database, and run a stateful
+operation profile exposed by the same package.
 
 This runbook uses the read/write service in
 [`examples/stacks/api-multiregion-database`](../../../examples/stacks/api-multiregion-database)
@@ -31,6 +32,12 @@ export TRACE_ID=tr_orders_api_db_postgres_ha
 export LOCKFILE=$PWD/skiff.lock.json
 export PKG_CACHE=$PWD/.skiff/packages/cache
 export SPEC=/tmp/orders-postgres-ha.skiff.yaml
+export POSTGRES_HA_TARGET=orders-db
+export POSTGRES_HA_OPERATION=primary-switchover-update
+export POSTGRES_HA_OP_ID=op_orders_db_primary_switchover
+export POSTGRES_HA_SAGA_ID=saga_orders_db_primary_switchover
+export POSTGRES_HA_RELEASE_ID=rel_orders_db_$(date +%Y%m%d%H%M%S)
+export POSTGRES_HA_CANDIDATE=1
 ```
 
 If this is a disposable environment and you have not bootstrapped it yet, create
@@ -293,19 +300,97 @@ Successful output proves the deployed API has a working `DATABASE_URL` binding,
 can initialize schema, can insert a row, can query rows back, and can count rows
 from Postgres.
 
-## Demonstrate Postgres HA Package Operations
+## Run The Postgres HA Stateful Operation
 
 The read/write deployment above uses `skiff.dev/postgres-ha` in managed mode for
-the database dependency. To demo the package's self-managed stateful operation
-profile on Apple Silicon, use the dedicated package gate:
-[`postgres-ha-apple-silicon.md`](postgres-ha-apple-silicon.md).
+the database dependency. The package also exposes a self-managed StatefulGroup
+operation profile named `primary-switchover-update`. Use this section when the
+Postgres HA target is a self-managed StatefulGroup from the same package.
 
-That runbook installs the same package from `packages/postgres-ha`, builds and
-executes `cmd/postgres-ha-plugin`, runs `primary-switchover-update` against a
-live three-member Apple StatefulGroup, verifies direct-mode and local `skiffd`
-surfaces, and proves the unsafe replica-lag scenario blocks before member
-mutation. It does not start a standalone Postgres container as a substitute for
-the package.
+`POSTGRES_HA_TARGET` should be the StatefulGroup name from deploy or explain
+output. For a stack named `orders` with dependency `db`, the expected package
+target name is `orders-db`; change it if your output shows a different name.
+The operation is not a generic StatefulGroup alias. It is resolved from the
+locked `postgres-ha` package and renders typed package steps such as
+`package.primary_switchover.verify_candidate_caught_up`,
+`package.primary_switchover.move_primary`, and
+`package.primary_switchover.verify_final_topology`.
+
+Confirm that the locked package exposes the operation:
+
+```bash
+skiff ops list "$POSTGRES_HA_TARGET" \
+  --target-kind StatefulGroup \
+  --lockfile "$LOCKFILE" \
+  --cache "$PKG_CACHE"
+```
+
+Plan the package operation without writing object state:
+
+```bash
+skiff ops plan "$POSTGRES_HA_TARGET" "$POSTGRES_HA_OPERATION" \
+  --target-kind StatefulGroup \
+  --lockfile "$LOCKFILE" \
+  --cache "$PKG_CACHE" \
+  --operation-id "$POSTGRES_HA_OP_ID" \
+  --saga-id "$POSTGRES_HA_SAGA_ID" \
+  --param release_id="$POSTGRES_HA_RELEASE_ID" \
+  --param "candidate=\"$POSTGRES_HA_CANDIDATE\"" \
+  --param return_primary=true
+```
+
+Run the operation through direct mode:
+
+```bash
+skiff ops run "$POSTGRES_HA_TARGET" "$POSTGRES_HA_OPERATION" \
+  --direct \
+  --state "$SKIFF_STATE" \
+  --env "$SKIFF_ENV" \
+  --provider aws \
+  --region "$AWS_REGION" \
+  --target-kind StatefulGroup \
+  --lockfile "$LOCKFILE" \
+  --cache "$PKG_CACHE" \
+  --operation-id "$POSTGRES_HA_OP_ID" \
+  --saga-id "$POSTGRES_HA_SAGA_ID" \
+  --param release_id="$POSTGRES_HA_RELEASE_ID" \
+  --param "candidate=\"$POSTGRES_HA_CANDIDATE\"" \
+  --param return_primary=true \
+  --yes \
+  --trace-id "$TRACE_ID"
+```
+
+Inspect the durable operation and saga objects:
+
+```bash
+skiff ops inspect "$POSTGRES_HA_OP_ID" \
+  --service "$POSTGRES_HA_TARGET" \
+  --direct \
+  --state "$SKIFF_STATE" \
+  --env "$SKIFF_ENV" \
+  --provider aws \
+  --region "$AWS_REGION" \
+  --trace-id "$TRACE_ID"
+
+skiff saga inspect "$POSTGRES_HA_SAGA_ID" \
+  --direct \
+  --state "$SKIFF_STATE" \
+  --env "$SKIFF_ENV" \
+  --provider aws \
+  --region "$AWS_REGION" \
+  --trace-id "$TRACE_ID"
+```
+
+Expected result: Skiff writes immutable operation intent, saga intent, saga
+graph, operation events, saga events, and audit records under object state. The
+rendered graph should identify the `postgres-ha` package digest, classify the
+switchover as high risk and partially reversible, verify the candidate's replica
+lag before mutation, move the primary only after the safety gates pass, and
+verify the final topology.
+
+The Apple Silicon mirror of this operation is
+[`postgres-ha-apple-silicon.md`](postgres-ha-apple-silicon.md). It uses the same
+package operation and params against the Apple local validation provider.
 
 ## Failure Triage
 
@@ -366,3 +451,6 @@ explicit database restore operation when data must move.
 - `orders.add` response
 - `orders.list` response showing the inserted order
 - `curl /metrics` output showing the order count
+- `POSTGRES_HA_OP_ID` and `POSTGRES_HA_SAGA_ID`
+- `postgres-ha` package digest from the operation plan or Apple report
+- `primary-switchover-update` plan/run/inspect output
