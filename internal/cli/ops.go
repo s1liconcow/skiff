@@ -597,6 +597,9 @@ func runOpsInspect(binary string, args []string, root rootOptions, stdout, stder
 	if err != nil {
 		return writeClientError(binary, "ops", *flags.format, *flags.traceID, err, stdout, stderr)
 	}
+	if result == nil {
+		return writeClientError(binary, "ops", *flags.format, *flags.traceID, client.Fail("OPERATION_INSPECT_EMPTY", "operation inspect returned no result", client.ExitProviderError, nil), stdout, stderr)
+	}
 	switch *flags.format {
 	case "human", "text":
 		fmt.Fprintf(stdout, "operation: %s\n", result.OperationID)

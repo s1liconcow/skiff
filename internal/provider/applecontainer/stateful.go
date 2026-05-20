@@ -496,7 +496,11 @@ func (p *Provider) startStatefulMember(ctx context.Context, runtime appleStatefu
 	if deleteErr != nil && !appleContainerNotFound(deleteErr) {
 		return deleteErr
 	}
-	args := []string{"run", "--name", member.ContainerName, "--detach", "--user", "root"}
+	args := []string{"run", "--name", member.ContainerName, "--detach", "--user", "0"}
+	command := append([]string(nil), runtime.Command...)
+	if len(command) > 0 {
+		args = append(args, "--entrypoint", command[0])
+	}
 	for _, name := range sortedIntKeys(member.HostPorts) {
 		containerPort := runtime.Ports[name]
 		hostPort := member.HostPorts[name]
@@ -509,7 +513,9 @@ func (p *Provider) startStatefulMember(ctx context.Context, runtime appleStatefu
 	}
 	args = append(args, "-v", member.VolumeName+":"+firstNonEmpty(runtime.MountPath, appleStatefulDefaultMountPath))
 	args = append(args, runtime.Image)
-	args = append(args, runtime.Command...)
+	if len(command) > 1 {
+		args = append(args, command[1:]...)
+	}
 	_, err := p.container(ctx, args...)
 	return err
 }

@@ -725,7 +725,7 @@ func adoptedProviderIDForMember(plan *provider.Plan, member int, kinds ...string
 		return ""
 	}
 	for _, change := range plan.Resources {
-		if change.ProviderID == "" || change.Action == provider.ActionCreate {
+		if change.ProviderID == "" {
 			continue
 		}
 		if !stringIn(change.Kind, kinds) {

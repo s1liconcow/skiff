@@ -124,6 +124,12 @@ type statefulReplacementSagaResult struct {
 	Group              string                     `json:"group"`
 	Env                string                     `json:"env,omitempty"`
 	Member             int                        `json:"member"`
+	Generation         int64                      `json:"generation,omitempty"`
+	OldInstanceID      string                     `json:"old_instance_id,omitempty"`
+	NewInstanceID      string                     `json:"new_instance_id,omitempty"`
+	VolumeID           string                     `json:"volume_id,omitempty"`
+	DNSName            string                     `json:"dns_name,omitempty"`
+	Phase              string                     `json:"phase,omitempty"`
 	Status             schema.SagaStatus          `json:"status"`
 	Summary            string                     `json:"summary,omitempty"`
 	ReplacesVM         bool                       `json:"replaces_vm"`
@@ -1433,11 +1439,35 @@ func statefulReplacementResultFromInspect(inspect sagastate.InspectResult, execu
 
 func mergeStatefulReplacementStepPayload(result *statefulReplacementSagaResult, raw json.RawMessage) {
 	var payload struct {
-		Facts      []schema.Fact `json:"facts"`
-		Hypotheses []schema.Fact `json:"hypotheses"`
+		Generation    int64         `json:"generation"`
+		OldInstanceID string        `json:"old_instance_id"`
+		NewInstanceID string        `json:"new_instance_id"`
+		VolumeID      string        `json:"volume_id"`
+		DNSName       string        `json:"dns_name"`
+		Phase         string        `json:"phase"`
+		Facts         []schema.Fact `json:"facts"`
+		Hypotheses    []schema.Fact `json:"hypotheses"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return
+	}
+	if payload.Generation > 0 {
+		result.Generation = payload.Generation
+	}
+	if payload.OldInstanceID != "" {
+		result.OldInstanceID = payload.OldInstanceID
+	}
+	if payload.NewInstanceID != "" {
+		result.NewInstanceID = payload.NewInstanceID
+	}
+	if payload.VolumeID != "" {
+		result.VolumeID = payload.VolumeID
+	}
+	if payload.DNSName != "" {
+		result.DNSName = payload.DNSName
+	}
+	if payload.Phase != "" {
+		result.Phase = payload.Phase
 	}
 	if len(payload.Facts) > 0 {
 		result.Facts = payload.Facts

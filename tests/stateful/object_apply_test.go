@@ -55,7 +55,7 @@ func TestStatefulApplyWritesControlsOperationEventsAndAudit(t *testing.T) {
 		t.Fatalf("group control not persisted: %+v", group)
 	}
 	member := readObject[schema.StatefulMemberControl](t, store, "stateful/orders-stream/members/0/control.json")
-	if member.Zone != "us-west-2a" || member.DNSName == "" || member.Generation != 1 {
+	if member.Zone != "us-west-2a" || member.DNSName == "" || member.Generation != 1 || member.InstanceID == "" || member.VolumeID == "" {
 		t.Fatalf("member control not persisted: %+v", member)
 	}
 	log, err := events.NewLog(events.Options{Store: store, Clock: fixedStatefulNow})

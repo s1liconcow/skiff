@@ -379,6 +379,9 @@ func TestStatefulReplaceMemberDirectJSONCreatesAndRunsSaga(t *testing.T) {
 	if !got.OK || got.TraceID != "tr_stateful_replace_cli" || !got.Deprecated || !strings.Contains(got.ReplacementCommand, "ops run orders-stream replace-member") || got.Result.Status != schema.SagaSucceeded || got.Result.Group != "orders-stream" || got.Result.Member != 0 {
 		t.Fatalf("unexpected replacement output: %+v", got)
 	}
+	if got.Result.OldInstanceID != "i-old" || got.Result.NewInstanceID != "fake-orders-stream-0-gen-2" || got.Result.Generation != 2 || got.Result.VolumeID != "vol-0" {
+		t.Fatalf("replacement output did not surface provider IDs: %+v", got.Result)
+	}
 	member, err := client.GetStatefulMemberControl(context.Background(), "orders-stream", 0)
 	if err != nil {
 		t.Fatalf("get member: %v", err)

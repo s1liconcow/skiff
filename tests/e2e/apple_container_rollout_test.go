@@ -357,6 +357,13 @@ func pinnedImageForE2E(t *testing.T, ctx context.Context, name, fallback string)
 		t.Fatalf("%s must name an OCI image", name)
 	}
 	value = strings.TrimPrefix(value, "oci://")
+	if localOpsemFixtureImageForE2E(name, value) {
+		if _, ok := digestFromImageRef(value); ok {
+			t.Fatalf("%s=%q is a localhost digest ref; Apple Container resolves digest refs through a registry, so use the local fixture tag instead", name, value)
+		}
+		t.Logf("using local %s=%s without registry digest resolution", name, value)
+		return value
+	}
 	if _, ok := digestFromImageRef(value); ok {
 		return value
 	}
@@ -366,6 +373,21 @@ func pinnedImageForE2E(t *testing.T, ctx context.Context, name, fallback string)
 	}
 	t.Logf("resolved %s=%s to %s", name, value, pinned)
 	return pinned
+}
+
+func localOpsemFixtureImageForE2E(name, image string) bool {
+	if name != "SKIFF_E2E_OPSEM_IMAGE" {
+		return false
+	}
+	return strings.HasPrefix(image, "localhost/") || strings.HasPrefix(image, "localhost:")
+}
+
+func TestPinnedImageForE2EAllowsLocalOpsemFixtureImage(t *testing.T) {
+	t.Setenv("SKIFF_E2E_OPSEM_IMAGE", "localhost/skiff-opsem:e2e")
+	got := pinnedImageForE2E(t, context.Background(), "SKIFF_E2E_OPSEM_IMAGE", "")
+	if got != "localhost/skiff-opsem:e2e" {
+		t.Fatalf("pinnedImageForE2E() = %q, want local fixture tag", got)
+	}
 }
 
 func startRustFSContainer(t *testing.T, ctx context.Context, cli appleContainerCLI, runID string, port int, persist bool) rustFSHarness {

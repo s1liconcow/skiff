@@ -171,12 +171,13 @@ func TestApplyStatefulGroupStartsContainersAndPersistsRuntime(t *testing.T) {
 	body := string(mustRead(t, calls))
 	for _, want := range []string{
 		"volume create --opt size=1048576 skiff-prod-ledger-m0-data",
-		"run --name skiff-prod-ledger-m0-g1 --detach --user root",
+		"run --name skiff-prod-ledger-m0-g1 --detach --user 0 --entrypoint sh",
 		"-p 127.0.0.1:31000:8081",
 		"-p 127.0.0.1:31001:8080",
 		"-e SKIFF_STATEFUL_MEMBER=0",
 		"-v skiff-prod-ledger-m0-data:/data",
 		"docker.io/library/busybox@sha256:" + strings.Repeat("a", 64),
+		"-c sleep 3600",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("container calls missing %q:\n%s", want, body)
@@ -247,8 +248,9 @@ func TestStatefulReplacementMovesAppleVolumeToNewContainer(t *testing.T) {
 	for _, want := range []string{
 		"stop --time 2 skiff-prod-ledger-m1-g1",
 		"delete --force skiff-prod-ledger-m1-g1",
-		"run --name skiff-prod-ledger-m1-g2 --detach --user root",
+		"run --name skiff-prod-ledger-m1-g2 --detach --user 0 --entrypoint sh",
 		"-v skiff-prod-ledger-m1-data:/data",
+		"-c sleep 3600",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("replacement calls missing %q:\n%s", want, body)

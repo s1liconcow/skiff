@@ -78,7 +78,7 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 			Operation:  "op_opsem_primary",
 			Saga:       "saga_opsem_primary",
 			Expected:   schema.SagaSucceeded,
-			ParamPairs: []string{"release_id=rel_primary", "candidate=1", "return_primary=true"},
+			ParamPairs: []string{"release_id=rel_primary", `candidate="1"`, "return_primary=true"},
 		},
 		{
 			Mode:       "primary-replica",
@@ -88,7 +88,7 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 			Operation:  "op_mysql_primary",
 			Saga:       "saga_mysql_primary",
 			Expected:   schema.SagaSucceeded,
-			ParamPairs: []string{"release_id=rel_mysql", "candidate=1", "return_primary=true"},
+			ParamPairs: []string{"release_id=rel_mysql", `candidate="1"`, "return_primary=true"},
 		},
 		{
 			Mode:       "primary-replica",
@@ -98,7 +98,7 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 			Operation:  "op_redis_primary",
 			Saga:       "saga_redis_primary",
 			Expected:   schema.SagaSucceeded,
-			ParamPairs: []string{"release_id=rel_redis", "candidate=1", "return_primary=true"},
+			ParamPairs: []string{"release_id=rel_redis", `candidate="1"`, "return_primary=true"},
 		},
 		{
 			Mode:                    "primary-replica",
@@ -110,7 +110,7 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 			Expected:                schema.SagaFailed,
 			UnsafeFailure:           "replica-lag-too-high",
 			InjectFailureBeforeKind: "package.primary_switchover.verify_candidate_caught_up",
-			ParamPairs:              []string{"release_id=rel_primary", "candidate=1", "return_primary=true"},
+			ParamPairs:              []string{"release_id=rel_primary", `candidate="1"`, "return_primary=true"},
 		},
 		{
 			Mode:       "raft-groups",
