@@ -201,6 +201,14 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 		},
 	}
 
+	scenarios = filterOpsemProfileScenarios(scenarios)
+	if len(scenarios) == 0 {
+		t.Skip("SKIFF_OPSEM_PROFILE_FILTER matched no operation profile scenarios")
+	}
+	if filter := strings.TrimSpace(os.Getenv("SKIFF_OPSEM_PROFILE_FILTER")); filter != "" {
+		report.fact("opsem_profile_filter", "running filtered operation profile scenarios: "+filter)
+	}
+
 	for _, scenario := range scenarios {
 		scenario := scenario
 		t.Run(scenario.Mode, func(t *testing.T) {
@@ -312,6 +320,36 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 		assertAPIOperationProfileInspect(t, report, scenario, traceID)
 	}
 	report.fact("opsem_profile_skiffd", "validated local skiffd operation and saga inspect endpoints for package-backed operation profiles")
+}
+
+func filterOpsemProfileScenarios(scenarios []opsemProfileScenario) []opsemProfileScenario {
+	filter := strings.TrimSpace(os.Getenv("SKIFF_OPSEM_PROFILE_FILTER"))
+	if filter == "" {
+		return scenarios
+	}
+	tokens := strings.Split(filter, ",")
+	out := make([]opsemProfileScenario, 0, len(scenarios))
+	for _, scenario := range scenarios {
+		haystack := strings.ToLower(strings.Join([]string{
+			scenario.Mode,
+			scenario.Service,
+			scenario.Fixture,
+			scenario.Profile,
+			scenario.Operation,
+			scenario.Saga,
+		}, " "))
+		for _, token := range tokens {
+			token = strings.ToLower(strings.TrimSpace(token))
+			if token == "" {
+				continue
+			}
+			if strings.Contains(haystack, token) {
+				out = append(out, scenario)
+				break
+			}
+		}
+	}
+	return out
 }
 
 func opsemProfileGateEnabled() bool {

@@ -4,6 +4,8 @@ Runbooks are command-first and assume direct mode works even when `skiffd` is
 unavailable.
 
 - [deploy-failure.md](deploy-failure.md)
+- [api-postgres-ha-read-write.md](api-postgres-ha-read-write.md)
+- [postgres-ha-apple-silicon.md](postgres-ha-apple-silicon.md)
 - [canary-failure.md](canary-failure.md)
 - [runner-failure.md](runner-failure.md)
 - [state-bucket-access-denied.md](state-bucket-access-denied.md)
