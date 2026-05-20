@@ -188,6 +188,10 @@ func validateMultiRegionStack(diagnostics *[]Diagnostic, doc Document) {
 }
 
 var skiffNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+var exactSemverPattern = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
+var wildcardSemverPattern = regexp.MustCompile(`^v?[0-9]+(?:\.[0-9]+)?\.x$`)
+var caretTildeSemverPattern = regexp.MustCompile(`^[~^]v?[0-9]+(?:\.[0-9]+){0,2}$`)
+var comparatorSemverPattern = regexp.MustCompile(`^(?:>=|<=|>|<|=)v?[0-9]+(?:\.[0-9]+){0,2}$`)
 
 func validateName(diagnostics *[]Diagnostic, path, value, message string) {
 	value = strings.TrimSpace(value)
@@ -385,8 +389,8 @@ func validateStack(diagnostics *[]Diagnostic, doc Document) {
 	if len(stack.Services) == 0 {
 		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.services", Code: "REQUIRED", Severity: SeverityError, Message: "stack specs must include at least one service"})
 	}
-	if len(stack.Databases) == 0 && len(stack.ObjectStores) == 0 {
-		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack", Code: "REQUIRED", Severity: SeverityError, Message: "stack specs must include at least one managed database or object store"})
+	if len(stack.Databases) == 0 && len(stack.ObjectStores) == 0 && len(stack.Dependencies) == 0 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack", Code: "REQUIRED", Severity: SeverityError, Message: "stack specs must include at least one managed database, object store, or package dependency"})
 	}
 	if len(stack.Services) > 1 {
 		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.services", Code: "UNSUPPORTED_STACK_SHAPE", Severity: SeverityError, Message: "this Skiff version supports one service per stack recipe"})
@@ -425,6 +429,25 @@ func validateStack(diagnostics *[]Diagnostic, doc Document) {
 		objectStoreNames[store.Name] = struct{}{}
 		validateStackObjectStore(diagnostics, store, base)
 	}
+	dependencyNames := map[string]struct{}{}
+	for i, dependency := range stack.Dependencies {
+		base := fmt.Sprintf("$.stack.dependencies[%d]", i)
+		validateName(diagnostics, base+".name", dependency.Name, "stack dependency name must be a DNS-style Skiff name")
+		if dependency.Name != "" {
+			if _, ok := databaseNames[dependency.Name]; ok {
+				*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".name", Code: "DUPLICATE_STACK_RESOURCE", Severity: SeverityError, Message: "dependency names must not duplicate database names in the same stack"})
+			}
+			if _, ok := objectStoreNames[dependency.Name]; ok {
+				*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".name", Code: "DUPLICATE_STACK_RESOURCE", Severity: SeverityError, Message: "dependency names must not duplicate object store names in the same stack"})
+			}
+			if _, ok := dependencyNames[dependency.Name]; ok {
+				*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".name", Code: "DUPLICATE_STACK_RESOURCE", Severity: SeverityError, Message: "dependency names must be unique"})
+			}
+			dependencyNames[dependency.Name] = struct{}{}
+		}
+		validatePackageRef(diagnostics, base+".uses", dependency.Uses)
+		validatePackageVersionRange(diagnostics, base+".version", dependency.Version)
+	}
 	for i, binding := range stack.Bindings {
 		base := fmt.Sprintf("$.stack.bindings[%d]", i)
 		if _, ok := serviceNames[binding.From]; !ok {
@@ -432,16 +455,87 @@ func validateStack(diagnostics *[]Diagnostic, doc Document) {
 		}
 		_, bindsDatabase := databaseNames[binding.To]
 		_, bindsObjectStore := objectStoreNames[binding.To]
-		if !bindsDatabase && !bindsObjectStore {
-			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".to", Code: "UNKNOWN_STACK_RESOURCE", Severity: SeverityError, Message: "binding.to must name a database or object store in this stack"})
+		_, bindsDependency := dependencyNames[binding.To]
+		if !bindsDatabase && !bindsObjectStore && !bindsDependency {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".to", Code: "UNKNOWN_STACK_RESOURCE", Severity: SeverityError, Message: "binding.to must name a database, object store, or package dependency in this stack"})
 		}
 		if !validEnvName(binding.As) {
 			*diagnostics = append(*diagnostics, Diagnostic{Path: base + ".as", Code: "INVALID_ENV_NAME", Severity: SeverityError, Message: "binding.as must be an environment variable name like DATABASE_URL"})
 		}
 	}
-	if len(stack.Bindings) == 0 && len(stack.Services) > 0 && len(stack.Databases)+len(stack.ObjectStores) > 0 {
-		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.bindings", Code: "REQUIRED", Severity: SeverityError, Message: "stack specs must bind the service to its database or object store"})
+	if len(stack.Bindings) == 0 && len(stack.Services) > 0 && len(stack.Databases)+len(stack.ObjectStores)+len(stack.Dependencies) > 0 {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.bindings", Code: "REQUIRED", Severity: SeverityError, Message: "stack specs must bind the service to its database, object store, or package dependency"})
 	}
+}
+
+func validatePackageRef(diagnostics *[]Diagnostic, path, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path, Code: "REQUIRED", Severity: SeverityError, Message: "dependency uses is required"})
+		return
+	}
+	switch {
+	case strings.HasPrefix(value, "skiff.dev/"):
+		name := strings.TrimPrefix(value, "skiff.dev/")
+		if !validPackagePath(name) {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: path, Code: "INVALID_PACKAGE_REF", Severity: SeverityError, Message: "skiff.dev package refs must look like skiff.dev/name"})
+		}
+	case strings.HasPrefix(value, "oci://"):
+		parsed, err := url.Parse(value)
+		if err != nil || parsed.Host == "" || strings.Trim(parsed.Path, "/") == "" {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: path, Code: "INVALID_PACKAGE_REF", Severity: SeverityError, Message: "OCI package refs must look like oci://registry/repo/name:version"})
+		}
+	case strings.HasPrefix(value, "file://"):
+		if strings.TrimSpace(strings.TrimPrefix(value, "file://")) == "" {
+			*diagnostics = append(*diagnostics, Diagnostic{Path: path, Code: "INVALID_PACKAGE_REF", Severity: SeverityError, Message: "file package refs must include a local package path"})
+		}
+	default:
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path, Code: "INVALID_PACKAGE_REF", Severity: SeverityError, Message: "package refs must use skiff.dev/name, oci://registry/repo/name:version, or file://../local-package"})
+	}
+}
+
+func validatePackageVersionRange(diagnostics *[]Diagnostic, path, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path, Code: "REQUIRED", Severity: SeverityError, Message: "dependency version is required"})
+		return
+	}
+	if !validPackageVersionRange(value) {
+		*diagnostics = append(*diagnostics, Diagnostic{Path: path, Code: "INVALID_PACKAGE_VERSION", Severity: SeverityError, Message: "dependency version must be an exact semver or a semver range such as 1.x, ^1.2.0, or >=1.2.0 <2.0.0"})
+	}
+}
+
+func validPackagePath(value string) bool {
+	parts := strings.Split(strings.Trim(value, "/"), "/")
+	if len(parts) == 0 || len(parts) > 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" || len(part) > 63 || !skiffNamePattern.MatchString(part) {
+			return false
+		}
+	}
+	return true
+}
+
+func validPackageVersionRange(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.ContainsAny(value, "\n\r\t") {
+		return false
+	}
+	if exactSemverPattern.MatchString(value) || wildcardSemverPattern.MatchString(value) || caretTildeSemverPattern.MatchString(value) {
+		return true
+	}
+	parts := strings.Fields(value)
+	if len(parts) == 0 {
+		return false
+	}
+	for _, part := range parts {
+		if !comparatorSemverPattern.MatchString(part) {
+			return false
+		}
+	}
+	return true
 }
 
 func validateStackObjectStore(diagnostics *[]Diagnostic, store StackObjectStore, path string) {

@@ -217,6 +217,7 @@ type Stack struct {
 	Services     []StackService     `json:"services,omitempty"`
 	Databases    []StackDatabase    `json:"databases,omitempty"`
 	ObjectStores []StackObjectStore `json:"objectStores,omitempty"`
+	Dependencies []StackDependency  `json:"dependencies,omitempty"`
 	Bindings     []StackBinding     `json:"bindings,omitempty"`
 }
 
@@ -246,6 +247,13 @@ type StackObjectStore struct {
 	Access    string `json:"access,omitempty"`
 	Versioned bool   `json:"versioned,omitempty"`
 	Encrypted bool   `json:"encrypted,omitempty"`
+}
+
+type StackDependency struct {
+	Name    string          `json:"name"`
+	Uses    string          `json:"uses"`
+	Version string          `json:"version,omitempty"`
+	Config  json.RawMessage `json:"config,omitempty"`
 }
 
 type StackBinding struct {

@@ -1,6 +1,7 @@
 package spec_test
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -229,6 +230,129 @@ stack:
 	}
 	if !doc.Stack.ObjectStores[0].Encrypted || !doc.Stack.ObjectStores[0].Versioned || doc.Stack.ObjectStores[0].Access != "read-write" {
 		t.Fatalf("object store defaults missing: %+v", doc.Stack.ObjectStores[0])
+	}
+}
+
+func TestStackValidationAcceptsPackageDependencyBinding(t *testing.T) {
+	doc, err := spec.Decode([]byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: Stack
+metadata:
+  name: orders
+  env: prod
+stack:
+  services:
+    - name: api
+      artifact:
+        type: oci
+        ref: registry.example.com/orders-api@sha256:abc123
+      runtime:
+        port: 8080
+        health:
+          path: /healthz
+  dependencies:
+    - name: db
+      uses: skiff.dev/postgres-ha
+      version: 1.x
+      config:
+        mode: managed
+        engine: postgres
+        size: small
+  bindings:
+    - from: api
+      to: db
+      as: DATABASE_URL
+`), spec.DecodeOptions{})
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	result := spec.Validate(*doc)
+	if !result.OK {
+		t.Fatalf("Validate diagnostics = %+v, want OK", result.Diagnostics)
+	}
+	if len(doc.Stack.Dependencies) != 1 || doc.Stack.Dependencies[0].Name != "db" {
+		t.Fatalf("dependency not decoded: %+v", doc.Stack.Dependencies)
+	}
+	var config map[string]string
+	if err := json.Unmarshal(doc.Stack.Dependencies[0].Config, &config); err != nil {
+		t.Fatalf("dependency config is not raw JSON: %v", err)
+	}
+	if config["mode"] != "managed" || config["engine"] != "postgres" {
+		t.Fatalf("dependency config decoded incorrectly: %+v", config)
+	}
+}
+
+func TestStackDependencyValidationRejectsBadRefsAndTargets(t *testing.T) {
+	doc, err := spec.Decode([]byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: Stack
+metadata:
+  name: orders
+  env: prod
+stack:
+  services:
+    - name: api
+      artifact:
+        type: oci
+        ref: registry.example.com/orders-api@sha256:abc123
+      runtime:
+        port: 8080
+        health:
+          path: /healthz
+  dependencies:
+    - name: db
+      uses: postgres-ha
+      version: latest
+    - name: db
+      uses: skiff.dev/postgres-ha
+      version: 1.2.0
+  bindings:
+    - from: api
+      to: missing
+      as: DATABASE_URL
+`), spec.DecodeOptions{})
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	result := spec.Validate(*doc)
+	if result.OK {
+		t.Fatal("Validate returned OK, want dependency diagnostics")
+	}
+	assertDiagnostic(t, result.Diagnostics, "$.stack.dependencies[0].uses", "INVALID_PACKAGE_REF")
+	assertDiagnostic(t, result.Diagnostics, "$.stack.dependencies[0].version", "INVALID_PACKAGE_VERSION")
+	assertDiagnostic(t, result.Diagnostics, "$.stack.dependencies[1].name", "DUPLICATE_STACK_RESOURCE")
+	assertDiagnostic(t, result.Diagnostics, "$.stack.bindings[0].to", "UNKNOWN_STACK_RESOURCE")
+}
+
+func TestStackDependencyUnknownFieldRejected(t *testing.T) {
+	body := []byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: Stack
+metadata:
+  name: orders
+  env: dev
+stack:
+  services:
+    - name: api
+      artifact:
+        type: oci
+        ref: registry.example.com/orders-api:dev
+      runtime:
+        port: 8080
+        health:
+          path: /healthz
+  dependencies:
+    - name: db
+      uses: skiff.dev/postgres-ha
+      version: 1.x
+      typo: true
+  bindings:
+    - from: api
+      to: db
+      as: DATABASE_URL
+`)
+	if _, err := spec.Decode(body, spec.DecodeOptions{}); err == nil {
+		t.Fatal("Decode succeeded with unknown dependency field, want error")
 	}
 }
 

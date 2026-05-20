@@ -5,10 +5,14 @@ import (
 	"fmt"
 
 	"github.com/s1liconcow/skiff/internal/ir"
+	internalpackages "github.com/s1liconcow/skiff/internal/packages"
 	"github.com/s1liconcow/skiff/internal/spec"
 )
 
-type Options struct{}
+type Options struct {
+	PackageLock                *internalpackages.LockFile
+	AllowUnsignedLocalPackages bool
+}
 
 func Compile(ctx context.Context, doc spec.Document, opts Options) (*ir.Graph, error) {
 	select {
@@ -21,6 +25,13 @@ func Compile(ctx context.Context, doc spec.Document, opts Options) (*ir.Graph, e
 	result := spec.Validate(doc)
 	if !result.OK {
 		return nil, spec.ValidationError{Diagnostics: result.Diagnostics}
+	}
+	if doc.Kind == spec.KindStack && doc.Stack != nil && len(doc.Stack.Dependencies) > 0 {
+		if diagnostics := internalpackages.ValidateStackLock(doc, opts.PackageLock, internalpackages.ValidationOptions{
+			AllowUnsignedLocal: opts.AllowUnsignedLocalPackages,
+		}); len(diagnostics) > 0 {
+			return nil, spec.ValidationError{Diagnostics: diagnostics}
+		}
 	}
 
 	switch doc.Kind {
