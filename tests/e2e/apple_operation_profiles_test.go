@@ -29,8 +29,8 @@ import (
 
 func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 	resetSkiffEnv(t)
-	if os.Getenv("SKIFF_OPSEM_PROFILES_E2E") != "1" {
-		t.Skip("set SKIFF_OPSEM_PROFILES_E2E=1 and SKIFF_E2E_OPSEM_IMAGE to run the live operation profile e2e")
+	if !opsemProfileGateEnabled() {
+		t.Skip("set SKIFF_OPSEM_PROFILES_E2E=1 or SKIFF_APPLE_STATEFUL_PACKAGES_E2E=1 and SKIFF_E2E_OPSEM_IMAGE to run the live operation profile e2e")
 	}
 	imageName := strings.TrimSpace(os.Getenv("SKIFF_E2E_OPSEM_IMAGE"))
 	if imageName == "" {
@@ -54,7 +54,11 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 	stateURI := "s3://" + rustfs.bucket
 	env := "prod"
 	traceID := "tr_opsem_profiles_e2e"
-	report := newE2EReport(t, "opsem-apple-operation-profiles", "opsem-profiles", env, traceID)
+	reportMode := "opsem-apple-operation-profiles"
+	if os.Getenv("SKIFF_APPLE_STATEFUL_PACKAGES_E2E") == "1" {
+		reportMode = "apple-stateful-packages"
+	}
+	report := newE2EReport(t, reportMode, "opsem-profiles", env, traceID)
 	defer writeE2EReport(t, report)
 
 	contexts := writeAppleContextArtifacts(t, report, rustfs, stateURI, appleContextOptions{})
@@ -180,6 +184,7 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 			if !runOut.WouldWrite || runOut.Package == nil || runOut.Package.Digest == "" {
 				t.Fatalf("operation profile run did not write package-backed operation: %+v", runOut)
 			}
+			report.fact("stateful_package_validation", fmt.Sprintf("package=%s version=%s digest=%s mode=self-managed opsem_mode=%s profile=%s", runOut.Package.Name, runOut.Package.Version, runOut.Package.Digest, scenario.Mode, scenario.Profile))
 			report.addOperationID(runOut.OperationID)
 			report.addSagaID(runOut.SagaID)
 			for _, key := range runOut.Paths {
@@ -203,6 +208,9 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 			if scenario.UnsafeFailure != "" && len(runner.mutations) != 0 {
 				t.Fatalf("unsafe scenario mutated live members before failing: %+v", runner.mutations)
 			}
+			if scenario.UnsafeFailure != "" {
+				report.fact("blocked_unsafe_scenario", fmt.Sprintf("%s blocked %s before member mutation", scenario.Service, scenario.UnsafeFailure))
+			}
 			recordOperationProfileCompletion(t, ctx, store, scenario.Service, scenario.Operation, scenario.Saga)
 			assertOperationProfileObjects(t, ctx, store, scenario, runOut, report)
 			assertDirectOperationProfileInspect(t, report, scenario, stateURI, env, traceID)
@@ -217,6 +225,10 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 		assertAPIOperationProfileInspect(t, report, scenario, traceID)
 	}
 	report.fact("opsem_profile_skiffd", "validated local skiffd operation and saga inspect endpoints for package-backed operation profiles")
+}
+
+func opsemProfileGateEnabled() bool {
+	return os.Getenv("SKIFF_OPSEM_PROFILES_E2E") == "1" || os.Getenv("SKIFF_APPLE_STATEFUL_PACKAGES_E2E") == "1"
 }
 
 type opsemProfileScenario struct {

@@ -15,7 +15,9 @@ artifact.
 | Readiness | `make readiness` passes and uploads `skiff.readiness/v1` JSON | required |
 | Provider conformance | `go test ./tests/conformance/provider` passes | required |
 | Plugin conformance | `go test ./tests/conformance/plugin` passes | required |
+| Package conformance and validation matrix | `go test ./tests/conformance/packages ./tests/e2e -run TestStatefulPackageValidationMatrixData` passes | required |
 | Apple silicon e2e | `make e2e-apple-container` passes or is explicitly waived | optional, waiver required |
+| Apple stateful package e2e | `make e2e-apple-stateful-packages` passes for implemented first-party packages or is explicitly waived | optional, waiver required |
 | AWS e2e | `SKIFF_AWS_E2E=1 make e2e-aws` passes or live cloud proof is explicitly waived | optional, waiver required |
 
 ## Product Invariants

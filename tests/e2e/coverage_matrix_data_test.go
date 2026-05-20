@@ -140,6 +140,14 @@ func e2eCoverageMatrix() []capabilityCoverage {
 			Command:      "go test ./tests/e2e",
 		},
 		{
+			Capability:   "Stateful package validation matrix",
+			Local:        coverageCovered,
+			AppleSilicon: coverageGated,
+			AWS:          coverageNotApplicable,
+			Evidence:     "TestStatefulPackageValidationMatrixData tracks first-party package rows and implemented fixtures; make e2e-apple-stateful-packages runs the live Apple package validation gate with report facts for package name, digest, mode, operation IDs, saga IDs, provider IDs, object paths, blocked unsafe scenarios, cleanup, and next commands.",
+			Command:      "make e2e-apple-stateful-packages",
+		},
+		{
 			Capability:   "drift",
 			Local:        coverageCovered,
 			AppleSilicon: coverageNotApplicable,
