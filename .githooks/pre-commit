@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+
+echo "skiff pre-commit: running make ci" >&2
+exec make ci

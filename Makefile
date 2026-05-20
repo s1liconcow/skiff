@@ -11,7 +11,7 @@ PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 CORE_BINS := skiff skiffd skiff-runner skiff-worker
 
-.PHONY: build install test readiness e2e-local e2e-apple-container e2e-apple-stateful e2e-apple-opsem-profiles e2e-apple-stateful-packages e2e-aws demo-local demo-test demo-apple-container demo-apple-context demo-apple-up demo-apple-down clean-apple-containers codex-apple-sandbox codex-apple-sandbox-playwright vet fmt lint generate smoke clean
+.PHONY: build install test ci install-hooks readiness e2e-local e2e-apple-container e2e-apple-stateful e2e-apple-opsem-profiles e2e-apple-stateful-packages e2e-aws demo-local demo-test demo-apple-container demo-apple-context demo-apple-up demo-apple-down clean-apple-containers codex-apple-sandbox codex-apple-sandbox-playwright vet fmt lint generate smoke clean
 
 build:
 	mkdir -p bin
@@ -29,6 +29,18 @@ install: build
 
 test:
 	$(GO_TEST_ENV) $(GO) test ./...
+
+ci:
+	@test -z "$$(gofmt -l $$(find cmd internal tests -name '*.go' -print))"
+	$(GO_TEST_ENV) $(GO) test ./tests/conformance/...
+	$(MAKE) e2e-local
+	$(MAKE) readiness
+	$(GO_TEST_ENV) $(GO) test ./...
+	$(GO_TEST_ENV) $(GO) vet ./...
+
+install-hooks:
+	git config core.hooksPath .githooks
+	@echo "Installed Skiff git hooks from .githooks"
 
 readiness:
 	$(GO_TEST_ENV) $(GO) test ./tests/readiness ./tests/chaos -count=1 -v

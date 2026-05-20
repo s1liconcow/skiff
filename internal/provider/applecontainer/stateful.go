@@ -45,7 +45,7 @@ type appleStatefulRuntime struct {
 	Recipe        string                       `json:"recipe,omitempty"`
 	Image         string                       `json:"image"`
 	Command       []string                     `json:"command,omitempty"`
-	EnvVars       map[string]string            `json:"env,omitempty"`
+	EnvVars       map[string]string            `json:"env_vars,omitempty"`
 	Ports         map[string]int               `json:"ports,omitempty"`
 	HealthPath    string                       `json:"health_path,omitempty"`
 	HealthPort    int                          `json:"health_port,omitempty"`
