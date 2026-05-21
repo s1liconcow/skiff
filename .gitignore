@@ -10,7 +10,11 @@ bin/
 
 # Local demo state and generated demo artifacts
 .skiffconfig
+.skiff-postgres-ha.config
+.skiff/
 .skiff-pricing.json
 .skiff-demo-state/
 .skiff-demo-reports/
+orders-api-postgres-ha.skiff.yaml
+skiff.lock.json
 demos/out/

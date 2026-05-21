@@ -103,11 +103,19 @@ func runPlan(binary string, args []string, root rootOptions, stdout, stderr io.W
 		}
 		return writeSpecError(binary, "SPEC_COMPILE_FAILED", *format, *traceID, err, nil, stdout, stderr)
 	}
-	if *providerName != aws.Name {
-		return writeSpecError(binary, "PLAN_INVALID", *format, *traceID, fmt.Errorf("unsupported provider %q; expected aws", *providerName), nil, stdout, stderr)
-	}
 	var plan *provider.Plan
-	if (doc.Kind == spec.KindStatefulGroup || len(graph.Resources.StatefulGroups) > 0) && *region == "" {
+	if isAppleContainerProvider(*providerName) {
+		appleProvider, err := newCLIProviderNoStore(config.Config{Provider: *providerName, Region: *region, StateBucket: *stateBucket})
+		if err != nil {
+			return writeSpecError(binary, "PLAN_INVALID", *format, *traceID, err, nil, stdout, stderr)
+		}
+		plan, err = appleProvider.Plan(nilContext(), graph)
+		if err != nil {
+			return writeSpecError(binary, "PLAN_FAILED", *format, *traceID, err, nil, stdout, stderr)
+		}
+	} else if *providerName != aws.Name {
+		return writeSpecError(binary, "PLAN_INVALID", *format, *traceID, fmt.Errorf("unsupported provider %q; expected aws or apple-container", *providerName), nil, stdout, stderr)
+	} else if (doc.Kind == spec.KindStatefulGroup || len(graph.Resources.StatefulGroups) > 0) && *region == "" {
 		plan = statefulReadOnlyPlan(*providerName, graph)
 	} else {
 		awsProvider, err := aws.NewFromConfig(config.Config{Region: *region, StateBucket: *stateBucket})

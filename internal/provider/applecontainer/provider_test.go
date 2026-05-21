@@ -149,6 +149,118 @@ func TestStatefulPlanUsesStableAppleMemberAndVolumeIDs(t *testing.T) {
 	}
 }
 
+func TestStackPlanCombinesAppleServiceAndStatefulPackage(t *testing.T) {
+	t.Setenv("SKIFF_APPLE_STATEFUL_PORT_BASE", "31000")
+	graph := compileAppleServicePostgresGraph()
+	plan, err := New().Plan(context.Background(), graph)
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if plan.Provider != Name || plan.Service != "orders-api" || plan.Env != "local" {
+		t.Fatalf("unexpected plan header: %+v", plan)
+	}
+	var serviceRuntime appleServiceRuntime
+	var statefulRuntime appleStatefulRuntime
+	var statefulGroupTags map[string]string
+	for _, change := range plan.Resources {
+		switch change.Kind {
+		case ir.ResourceKindAutoscalingGroup:
+			if err := canonical.UnmarshalStrict(change.Desired, &serviceRuntime); err != nil {
+				t.Fatalf("decode service runtime: %v", err)
+			}
+		case ir.ResourceKindStatefulGroup:
+			statefulGroupTags = change.Tags
+			if err := canonical.UnmarshalStrict(change.Desired, &statefulRuntime); err != nil {
+				t.Fatalf("decode stateful runtime: %v", err)
+			}
+		}
+	}
+	if serviceRuntime.Service != "orders-api" || serviceRuntime.Image != "localhost/orders-rpc:apple" || len(serviceRuntime.Replicas) != 2 {
+		t.Fatalf("unexpected service runtime: %+v", serviceRuntime)
+	}
+	if serviceRuntime.Replicas[0].HostPort != 8080 || serviceRuntime.Replicas[1].HostPort != 8081 {
+		t.Fatalf("unexpected service host ports: %+v", serviceRuntime.Replicas)
+	}
+	if statefulRuntime.Group != "orders-db" || statefulRuntime.Image != "localhost/postgres-ha:apple" || len(statefulRuntime.Members) != 3 {
+		t.Fatalf("unexpected stateful runtime: %+v", statefulRuntime)
+	}
+	if statefulRuntime.Members[0].HostPorts["admin"] != 31000 || statefulRuntime.Members[0].HostPorts["postgres"] != 31001 {
+		t.Fatalf("unexpected stateful host ports: %+v", statefulRuntime.Members[0].HostPorts)
+	}
+	if statefulGroupTags[ir.TagService] != "orders-api" || statefulGroupTags[ir.TagStatefulGroup] != "orders-db" {
+		t.Fatalf("stateful plan tags should preserve API service and package group: %+v", statefulGroupTags)
+	}
+}
+
+func TestAppleServiceEnvResolvesStatefulConnectionURL(t *testing.T) {
+	env, err := appleServiceEnv(appleServiceRuntime{
+		Service: "orders-api",
+		Env:     "local",
+		Port:    8080,
+		EnvVars: map[string]string{
+			"DATABASE_URL": "secret://stateful/orders-db/connection-url",
+		},
+	}, appleServiceReplicaRuntime{Ordinal: 0}, map[string]appleStatefulRuntime{
+		"orders-db": {
+			Group: "orders-db",
+			Ports: map[string]int{"admin": 8008, "postgres": 5432},
+			Members: []appleStatefulMemberRuntime{{
+				Ordinal:          0,
+				ContainerName:    "skiff-local-orders-db-m0-g1",
+				ContainerAddress: "192.168.64.142",
+				HostPorts:        map[string]int{"admin": 31000, "postgres": 31001},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("apple service env: %v", err)
+	}
+	body := strings.Join(env, "\n")
+	if !strings.Contains(body, "DATABASE_URL=postgres://postgres@192.168.64.142:5432/postgres?sslmode=disable") {
+		t.Fatalf("DATABASE_URL was not resolved from stateful package runtime:\n%s", body)
+	}
+}
+
+func TestAppleServiceEnvRequiresInspectedStatefulAddress(t *testing.T) {
+	_, err := appleServiceEnv(appleServiceRuntime{
+		Service: "orders-api",
+		Env:     "local",
+		EnvVars: map[string]string{
+			"DATABASE_URL": "secret://stateful/orders-db/connection-url",
+		},
+	}, appleServiceReplicaRuntime{Ordinal: 0}, map[string]appleStatefulRuntime{
+		"orders-db": {
+			Group: "orders-db",
+			Ports: map[string]int{"postgres": 5432},
+			Members: []appleStatefulMemberRuntime{{
+				Ordinal:       0,
+				ContainerName: "skiff-local-orders-db-m0-g1",
+			}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "inspect must complete") {
+		t.Fatalf("apple service env err = %v, want inspected address requirement", err)
+	}
+}
+
+func TestAppleContainerAddressFromInspect(t *testing.T) {
+	address, ok := appleContainerAddressFromInspect([]byte(`[
+  {
+    "networks": [
+      {
+        "ipv4Gateway": "192.168.64.1",
+        "ipv4Address": "192.168.64.142/24",
+        "hostname": "skiff-local-orders-db-m0-g1",
+        "network": "default"
+      }
+    ]
+  }
+]`))
+	if !ok || address != "192.168.64.142" {
+		t.Fatalf("address = %q ok=%v, want Apple Container IPv4 address", address, ok)
+	}
+}
+
 func TestApplyStatefulGroupStartsContainersAndPersistsRuntime(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("SKIFF_APPLE_STATEFUL_PORT_BASE", "31000")
@@ -476,6 +588,91 @@ stateful:
 		t.Fatalf("compile graph: %v", err)
 	}
 	return graph
+}
+
+func compileAppleServicePostgresGraph() *ir.Graph {
+	tags := ir.RequiredTags("orders-api", "local")
+	statefulTags := ir.RequiredTags("orders-api", "local")
+	statefulTags[ir.TagStatefulGroup] = "orders-db"
+	return &ir.Graph{
+		SchemaVersion: ir.SchemaVersion,
+		Service:       "orders-api",
+		Env:           "local",
+		Resources: ir.Resources{
+			TargetGroups: []ir.TargetGroup{{
+				Meta:     ir.ResourceMeta{LogicalID: "target-group:orders-api", Kind: ir.ResourceKindTargetGroup, Name: "orders-api-tg", Tags: tags},
+				Protocol: "HTTP",
+				Port:     8080,
+				HealthCheck: ir.HealthCheck{
+					Type: "http",
+					Path: "/readyz",
+					Port: 8080,
+				},
+			}},
+			AutoscalingGroups: []ir.AutoscalingGroup{{
+				Meta: ir.ResourceMeta{LogicalID: "autoscaling-group:orders-api", Kind: ir.ResourceKindAutoscalingGroup, Name: "orders-api-asg", Tags: tags},
+				Min:  2,
+				Max:  2,
+			}},
+			RuntimeManifests: []ir.RuntimeManifest{{
+				Meta: ir.ResourceMeta{LogicalID: "runtime-manifest:orders-api", Kind: ir.ResourceKindRuntimeManifest, Name: "orders-api-runtime", Tags: tags},
+				Artifact: ir.Artifact{
+					Type: "oci",
+					Ref:  "localhost/orders-rpc:apple",
+				},
+				Env: map[string]string{
+					"DATABASE_URL": "secret://stateful/orders-db/connection-url",
+					"PORT":         "8080",
+				},
+				HealthCheck: ir.HealthCheck{
+					Type: "http",
+					Path: "/readyz",
+					Port: 8080,
+				},
+				Metrics: ir.AppMetrics{Enabled: true, Port: 8080, Path: "/metrics"},
+			}},
+			StatefulGroups: []ir.StatefulGroup{{
+				Meta:     ir.ResourceMeta{LogicalID: "stateful-group:orders-db", Kind: ir.ResourceKindStatefulGroup, Name: "orders-db", Tags: statefulTags},
+				Replicas: 3,
+			}},
+			StatefulMembers: []ir.StatefulMember{
+				{Meta: ir.ResourceMeta{LogicalID: "stateful-member:orders-db:0", Kind: ir.ResourceKindStatefulMember, Name: "orders-db-0", Tags: statefulTags}, Ordinal: 0},
+				{Meta: ir.ResourceMeta{LogicalID: "stateful-member:orders-db:1", Kind: ir.ResourceKindStatefulMember, Name: "orders-db-1", Tags: statefulTags}, Ordinal: 1},
+				{Meta: ir.ResourceMeta{LogicalID: "stateful-member:orders-db:2", Kind: ir.ResourceKindStatefulMember, Name: "orders-db-2", Tags: statefulTags}, Ordinal: 2},
+			},
+			StatefulVolumes: []ir.StatefulVolume{{
+				Meta:          ir.ResourceMeta{LogicalID: "stateful-volume:orders-db:0", Kind: ir.ResourceKindStatefulVolume, Name: "orders-db-volume", Tags: statefulTags},
+				MemberOrdinal: 0,
+				Size:          "256Mi",
+				MountPath:     "/data",
+				Encrypted:     true,
+			}},
+			StatefulRecipes: []ir.StatefulRecipe{{
+				Meta: ir.ResourceMeta{LogicalID: "stateful-recipe:orders-db", Kind: ir.ResourceKindStatefulRecipe, Name: "orders-db-recipe", Tags: statefulTags},
+				Name: "postgres-ha",
+				Artifact: ir.Artifact{
+					Type: "oci",
+					Ref:  "localhost/postgres-ha:apple",
+				},
+				Ports: map[string]int{
+					"admin":    8008,
+					"postgres": 5432,
+				},
+				HealthCheck: ir.HealthCheck{
+					Type: "http",
+					Path: "/healthz",
+					Port: 8008,
+				},
+			}},
+			SnapshotPolicies: []ir.SnapshotPolicy{{
+				Meta: ir.ResourceMeta{LogicalID: "stateful-snapshot-policy:orders-db", Kind: ir.ResourceKindSnapshotPolicy, Name: "orders-db-snapshot", Tags: statefulTags},
+			}},
+			UpdatePolicies: []ir.UpdatePolicy{{
+				Meta:     ir.ResourceMeta{LogicalID: "stateful-update-policy:orders-db", Kind: ir.ResourceKindUpdatePolicy, Name: "orders-db-update", Tags: statefulTags},
+				Strategy: "ordered",
+			}},
+		},
+	}
 }
 
 func recordingContainerCLI(t *testing.T) (string, string) {

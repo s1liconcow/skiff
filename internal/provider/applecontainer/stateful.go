@@ -57,11 +57,12 @@ type appleStatefulRuntime struct {
 }
 
 type appleStatefulMemberRuntime struct {
-	Ordinal       int            `json:"ordinal"`
-	ContainerName string         `json:"container_name"`
-	VolumeName    string         `json:"volume_name"`
-	DNSName       string         `json:"dns_name,omitempty"`
-	HostPorts     map[string]int `json:"host_ports,omitempty"`
+	Ordinal          int            `json:"ordinal"`
+	ContainerName    string         `json:"container_name"`
+	ContainerAddress string         `json:"container_address,omitempty"`
+	VolumeName       string         `json:"volume_name"`
+	DNSName          string         `json:"dns_name,omitempty"`
+	HostPorts        map[string]int `json:"host_ports,omitempty"`
 }
 
 type appleStatefulMemberDesired struct {
@@ -90,20 +91,67 @@ type appleStatefulDNSDesired struct {
 
 func (p *Provider) Plan(ctx context.Context, graph *ir.Graph) (*provider.Plan, error) {
 	if graph != nil && len(graph.Resources.StatefulGroups) > 0 {
+		if len(graph.Resources.RuntimeManifests) > 0 {
+			return p.planServiceWithStateful(ctx, graph)
+		}
 		return p.planStateful(ctx, graph)
 	}
-	return p.Provider.Plan(ctx, graph)
+	return p.planService(ctx, graph)
 }
 
 func (p *Provider) Apply(ctx context.Context, plan *provider.Plan) (*provider.ApplyResult, error) {
-	if plan != nil && plan.Provider == Name && planContainsAppleStateful(plan) {
-		runtime, err := appleStatefulRuntimeFromPlan(plan, p.clock())
+	if plan != nil && plan.Provider == Name {
+		if planContainsAppleService(plan) || planContainsAppleStateful(plan) {
+			return p.applyCombinedPlan(ctx, plan)
+		}
+	}
+	return p.Provider.Apply(ctx, plan)
+}
+
+func (p *Provider) applyCombinedPlan(ctx context.Context, plan *provider.Plan) (*provider.ApplyResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	now := p.now()
+	result := &provider.ApplyResult{Provider: Name, Service: plan.Service, Env: plan.Env, AppliedAt: now}
+	statefulRuntimes, err := appleStatefulRuntimesFromPlan(plan, p.clock())
+	if err != nil {
+		return nil, err
+	}
+	statefulByGroup := map[string]appleStatefulRuntime{}
+	for _, runtime := range statefulRuntimes {
+		applied, err := p.applyStatefulRuntime(ctx, nil, runtime)
 		if err != nil {
 			return nil, err
 		}
-		return p.applyStatefulRuntime(ctx, plan, runtime)
+		runtime, err = p.enrichStatefulRuntimeAddresses(ctx, runtime)
+		if err != nil {
+			return nil, err
+		}
+		statefulByGroup[runtime.Group] = runtime
+		result.ResourceIDs = append(result.ResourceIDs, applied.ResourceIDs...)
+		result.Resources = append(result.Resources, applied.Resources...)
 	}
-	return p.Provider.Apply(ctx, plan)
+	service, ok, err := appleServiceRuntimeFromPlan(plan, p.clock())
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		applied, err := p.applyServiceRuntime(ctx, plan, service, statefulByGroup)
+		if err != nil {
+			return nil, err
+		}
+		result.ResourceIDs = append(result.ResourceIDs, applied.ResourceIDs...)
+		result.Resources = append(result.Resources, applied.Resources...)
+	}
+	sort.Strings(result.ResourceIDs)
+	sort.Slice(result.Resources, func(i, j int) bool {
+		if result.Resources[i].Kind == result.Resources[j].Kind {
+			return result.Resources[i].LogicalID < result.Resources[j].LogicalID
+		}
+		return result.Resources[i].Kind < result.Resources[j].Kind
+	})
+	return result, nil
 }
 
 func (p *Provider) ApplyStatefulGroup(ctx context.Context, graph *ir.Graph, plan *provider.Plan) (*provider.ApplyResult, error) {
@@ -363,13 +411,13 @@ func (p *Provider) planStateful(ctx context.Context, graph *ir.Graph) (*provider
 	}
 	baseTags := ir.RequiredTags(graph.Service, graph.Env)
 	for _, group := range graph.Resources.StatefulGroups {
-		tags := appleStatefulTags(baseTags, graph.Service, -1, runtime.Recipe)
+		tags := appleStatefulTags(baseTags, runtime.Group, -1, runtime.Recipe)
 		if err := add(provider.ActionCreate, ir.ResourceKindStatefulGroup, group.Meta.LogicalID, firstNonEmpty(group.Meta.Name, graph.Service), runtime.Group, fmt.Sprintf("Apple StatefulGroup with %d local member containers", group.Replicas), tags, runtime); err != nil {
 			return nil, err
 		}
 	}
 	for _, member := range runtime.Members {
-		tags := appleStatefulTags(baseTags, graph.Service, member.Ordinal, runtime.Recipe)
+		tags := appleStatefulTags(baseTags, runtime.Group, member.Ordinal, runtime.Recipe)
 		desired := appleStatefulMemberDesired{
 			Ordinal:       member.Ordinal,
 			MemberOrdinal: member.Ordinal,
@@ -405,19 +453,19 @@ func (p *Provider) planStateful(ctx context.Context, graph *ir.Graph) (*provider
 		}
 	}
 	for _, recipe := range graph.Resources.StatefulRecipes {
-		tags := appleStatefulTags(baseTags, graph.Service, -1, runtime.Recipe)
+		tags := appleStatefulTags(baseTags, runtime.Group, -1, runtime.Recipe)
 		if err := add(provider.ActionCreate, ir.ResourceKindStatefulRecipe, recipe.Meta.LogicalID, firstNonEmpty(recipe.Meta.Name, recipe.Name, runtime.Recipe), runtime.Recipe, "Apple StatefulGroup recipe runtime", tags, recipe); err != nil {
 			return nil, err
 		}
 	}
 	for _, policy := range graph.Resources.UpdatePolicies {
-		tags := appleStatefulTags(baseTags, graph.Service, -1, runtime.Recipe)
+		tags := appleStatefulTags(baseTags, runtime.Group, -1, runtime.Recipe)
 		if err := add(provider.ActionCreate, ir.ResourceKindUpdatePolicy, policy.Meta.LogicalID, firstNonEmpty(policy.Meta.Name, "ordered"), policy.Meta.LogicalID, "Apple StatefulGroup ordered update policy", tags, policy); err != nil {
 			return nil, err
 		}
 	}
 	for _, policy := range graph.Resources.SnapshotPolicies {
-		tags := appleStatefulTags(baseTags, graph.Service, -1, runtime.Recipe)
+		tags := appleStatefulTags(baseTags, runtime.Group, -1, runtime.Recipe)
 		if err := add(provider.ActionCreate, ir.ResourceKindSnapshotPolicy, policy.Meta.LogicalID, firstNonEmpty(policy.Meta.Name, "snapshot"), policy.Meta.LogicalID, "Apple StatefulGroup snapshot marker policy", tags, policy); err != nil {
 			return nil, err
 		}
@@ -520,11 +568,82 @@ func (p *Provider) startStatefulMember(ctx context.Context, runtime appleStatefu
 	return err
 }
 
+func (p *Provider) enrichStatefulRuntimeAddresses(ctx context.Context, runtime appleStatefulRuntime) (appleStatefulRuntime, error) {
+	for i := range runtime.Members {
+		address, err := p.inspectContainerAddress(ctx, runtime.Members[i].ContainerName)
+		if err != nil {
+			return runtime, err
+		}
+		runtime.Members[i].ContainerAddress = address
+	}
+	if err := p.persistStatefulRuntime(ctx, runtime); err != nil {
+		return runtime, err
+	}
+	return runtime, nil
+}
+
+func (p *Provider) inspectContainerAddress(ctx context.Context, containerName string) (string, error) {
+	output, err := p.container(ctx, "inspect", containerName)
+	if err != nil {
+		return "", err
+	}
+	address, ok := appleContainerAddressFromInspect(output)
+	if !ok {
+		return "", &provider.Error{Code: provider.CodeProvider, Provider: Name, Op: "container_inspect", Resource: containerName, Summary: "Apple container inspect did not report a container-network address"}
+	}
+	return address, nil
+}
+
+type appleContainerInspectRecord struct {
+	Networks []struct {
+		IPv4Address string `json:"ipv4Address"`
+		IPv6Address string `json:"ipv6Address"`
+	} `json:"networks"`
+}
+
+func appleContainerAddressFromInspect(output []byte) (string, bool) {
+	var records []appleContainerInspectRecord
+	if err := json.Unmarshal(output, &records); err != nil || len(records) == 0 {
+		var record appleContainerInspectRecord
+		if err := json.Unmarshal(output, &record); err != nil {
+			return "", false
+		}
+		records = []appleContainerInspectRecord{record}
+	}
+	for _, record := range records {
+		for _, network := range record.Networks {
+			if address := appleContainerAddress(network.IPv4Address); address != "" {
+				return address, true
+			}
+		}
+	}
+	for _, record := range records {
+		for _, network := range record.Networks {
+			if address := appleContainerAddress(network.IPv6Address); address != "" {
+				return address, true
+			}
+		}
+	}
+	return "", false
+}
+
+func appleContainerAddress(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if address, _, ok := strings.Cut(value, "/"); ok {
+		value = address
+	}
+	return strings.TrimSpace(value)
+}
+
 func (p *Provider) appleStatefulRuntimeFromGraph(graph *ir.Graph) (appleStatefulRuntime, error) {
 	if graph == nil || len(graph.Resources.StatefulGroups) == 0 {
 		return appleStatefulRuntime{}, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "stateful_plan", Summary: "StatefulGroup graph is required"}
 	}
 	group := graph.Resources.StatefulGroups[0]
+	groupName := appleStatefulGroupName(graph, group)
 	recipe := firstStatefulRecipe(graph)
 	volume := firstStatefulVolume(graph)
 	image := strings.TrimPrefix(strings.TrimSpace(recipe.Artifact.Ref), "oci://")
@@ -541,8 +660,8 @@ func (p *Provider) appleStatefulRuntimeFromGraph(graph *ir.Graph) (appleStateful
 	for _, member := range members {
 		runtimeMembers = append(runtimeMembers, appleStatefulMemberRuntime{
 			Ordinal:       member.Ordinal,
-			ContainerName: appleStatefulContainerName(graph.Env, graph.Service, member.Ordinal, 1),
-			VolumeName:    appleStatefulVolumeName(graph.Env, graph.Service, member.Ordinal),
+			ContainerName: appleStatefulContainerName(graph.Env, groupName, member.Ordinal, 1),
+			VolumeName:    appleStatefulVolumeName(graph.Env, groupName, member.Ordinal),
 			DNSName:       member.DNSName,
 			HostPorts:     appleStatefulHostPorts(portBase, member.Ordinal, ports),
 		})
@@ -551,8 +670,8 @@ func (p *Provider) appleStatefulRuntimeFromGraph(graph *ir.Graph) (appleStateful
 		for i := 0; i < group.Replicas; i++ {
 			runtimeMembers = append(runtimeMembers, appleStatefulMemberRuntime{
 				Ordinal:       i,
-				ContainerName: appleStatefulContainerName(graph.Env, graph.Service, i, 1),
-				VolumeName:    appleStatefulVolumeName(graph.Env, graph.Service, i),
+				ContainerName: appleStatefulContainerName(graph.Env, groupName, i, 1),
+				VolumeName:    appleStatefulVolumeName(graph.Env, groupName, i),
 				HostPorts:     appleStatefulHostPorts(portBase, i, ports),
 			})
 		}
@@ -560,7 +679,7 @@ func (p *Provider) appleStatefulRuntimeFromGraph(graph *ir.Graph) (appleStateful
 	return appleStatefulRuntime{
 		SchemaVersion: schema.Version,
 		Provider:      Name,
-		Group:         graph.Service,
+		Group:         groupName,
 		Env:           graph.Env,
 		Recipe:        firstNonEmpty(recipe.Name, recipe.Meta.Name, recipe.Ref),
 		Image:         image,
@@ -577,20 +696,39 @@ func (p *Provider) appleStatefulRuntimeFromGraph(graph *ir.Graph) (appleStateful
 	}, nil
 }
 
+func appleStatefulGroupName(graph *ir.Graph, group ir.StatefulGroup) string {
+	if graph == nil {
+		return firstNonEmpty(group.Meta.Tags[ir.TagStatefulGroup], strings.TrimPrefix(group.Meta.LogicalID, "stateful-group:"))
+	}
+	return firstNonEmpty(group.Meta.Tags[ir.TagStatefulGroup], strings.TrimPrefix(group.Meta.LogicalID, "stateful-group:"), graph.Service)
+}
+
 func appleStatefulRuntimeFromPlan(plan *provider.Plan, now time.Time) (appleStatefulRuntime, error) {
+	runtimes, err := appleStatefulRuntimesFromPlan(plan, now)
+	if err != nil {
+		return appleStatefulRuntime{}, err
+	}
+	if len(runtimes) == 0 {
+		return appleStatefulRuntime{}, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "apply", Summary: "Apple StatefulGroup plan is missing runtime desired state"}
+	}
+	return runtimes[0], nil
+}
+
+func appleStatefulRuntimesFromPlan(plan *provider.Plan, now time.Time) ([]appleStatefulRuntime, error) {
+	var runtimes []appleStatefulRuntime
 	var runtime appleStatefulRuntime
 	for _, change := range plan.Resources {
 		if change.Kind == ir.ResourceKindStatefulGroup && len(change.Desired) > 0 {
 			if err := canonical.UnmarshalStrict(change.Desired, &runtime); err != nil {
-				return appleStatefulRuntime{}, err
+				return nil, err
 			}
 			if runtime.UpdatedAt == "" {
 				runtime.UpdatedAt = canonical.Time(now)
 			}
-			return runtime, nil
+			runtimes = append(runtimes, runtime)
 		}
 	}
-	return appleStatefulRuntime{}, &provider.Error{Code: provider.CodeValidation, Provider: Name, Op: "apply", Summary: "Apple StatefulGroup plan is missing runtime desired state"}
+	return runtimes, nil
 }
 
 func (p *Provider) loadStatefulRuntime(ctx context.Context, group string) (appleStatefulRuntime, error) {

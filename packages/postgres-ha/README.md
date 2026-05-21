@@ -76,6 +76,18 @@ Build the local Apple image with:
 make demo-apple-postgres-ha-images
 ```
 
+When the package is used in the API Apple demo, use:
+
+```bash
+make demo-apple-api-postgres-ha
+```
+
+That builds both the package image and the orders API image from this checkout,
+starts RustFS-backed object state, deploys the API stack with this package as
+the database, and verifies database-backed writes and reads. Use those
+`localhost/...:apple` tags only with a local/demo environment; production OCI
+artifacts remain digest-pinned.
+
 By default the plugin uses `http://{target}-{member}:8008`. For local Apple
 Silicon validation where members are published on loopback ports, pass the
 member URL map as an operation parameter:

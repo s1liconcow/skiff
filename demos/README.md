@@ -122,6 +122,17 @@ That target creates `localhost/postgres-ha:apple` from
 the `postgres-ha` package operation. The matching deployable StatefulGroup spec
 is `examples/stateful/postgres-ha/skiff.yaml`.
 
+For the API plus Postgres HA stack runbook, use:
+
+```bash
+make demo-apple-api-postgres-ha
+```
+
+That builds both `localhost/postgres-ha:apple` and
+`localhost/orders-rpc:apple` from this checkout, starts RustFS-backed object
+state, deploys the stack through the Apple provider, and proves API read/write
+against the package-created `postgres-ha` StatefulGroup.
+
 This runs the actual `skiff.dev/postgres-ha` package on Apple Silicon through
 the live StatefulGroup package harness. It starts RustFS for object state,
 applies the `postgres-ha` Apple StatefulGroup scenarios, verifies a SQL

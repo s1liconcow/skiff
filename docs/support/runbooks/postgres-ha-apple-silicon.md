@@ -36,3 +36,16 @@ mutation, and writes an evidence report under
 The generic AWS/Apple API plus database runbook is:
 
 [`api-postgres-ha-read-write.md`](api-postgres-ha-read-write.md)
+
+For the API plus Postgres HA Apple runbook, build both local images with:
+
+```bash
+make demo-apple-api-postgres-ha
+```
+
+That builds both `localhost/orders-rpc:apple` and
+`localhost/postgres-ha:apple`, starts RustFS, locks the actual
+`skiff.dev/postgres-ha` package, deploys the orders API stack, verifies
+database-backed read/write operations, and confirms the package operation list
+is exposed for the deployed StatefulGroup. Use `metadata.env: local` for those
+local Apple tags; production specs still require digest-pinned OCI refs.

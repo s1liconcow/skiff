@@ -10,7 +10,9 @@ make demo-apple-postgres-ha-images
 The image runs a real Postgres 16 server with its data directory on the Skiff
 StatefulGroup volume and exposes the package admin API on port `8008`.
 The deployable StatefulGroup spec is [`skiff.yaml`](skiff.yaml); the image ref
-in that spec is the tag built by the make target above.
+in that spec is the tag built by the make target above. The spec uses
+`metadata.env: local` because the local Apple image tag is mutable; production
+specs still use digest-pinned OCI refs.
 
 Useful endpoints:
 

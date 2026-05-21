@@ -20,7 +20,7 @@ RUNNER_IMAGE_CHANNEL ?= stable
 RUNNER_IMAGE_VERSION ?= $(VERSION)
 RUNNER_IMAGE_PROVENANCE_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 
-.PHONY: build install test ci install-hooks readiness e2e-local e2e-apple-container e2e-apple-stateful e2e-apple-opsem-profiles e2e-apple-stateful-packages e2e-aws demo-local demo-test demo-apple-container demo-apple-postgres-ha-images demo-apple-postgres-ha demo-apple-context demo-apple-up demo-apple-down clean-apple-containers codex-apple-sandbox codex-apple-sandbox-playwright vet fmt lint generate smoke runner-image-fmt runner-image-init runner-image-archives runner-image-validate runner-image-build clean
+.PHONY: build install test ci install-hooks readiness e2e-local e2e-apple-container e2e-apple-stateful e2e-apple-opsem-profiles e2e-apple-stateful-packages e2e-aws demo-local demo-test demo-apple-container demo-apple-postgres-ha-images demo-apple-api-postgres-ha-images demo-apple-postgres-ha demo-apple-api-postgres-ha demo-apple-context demo-apple-up demo-apple-down clean-apple-containers codex-apple-sandbox codex-apple-sandbox-playwright vet fmt lint generate smoke runner-image-fmt runner-image-init runner-image-archives runner-image-validate runner-image-build clean
 
 build:
 	mkdir -p bin
@@ -84,8 +84,15 @@ demo-apple-container:
 demo-apple-postgres-ha-images:
 	./scripts/build-apple-postgres-ha-images.sh
 
+demo-apple-api-postgres-ha-images:
+	SKIFF_APPLE_BUILD_ORDERS_API=1 ./scripts/build-apple-postgres-ha-images.sh
+
 demo-apple-postgres-ha:
 	./demos/apple-postgres-ha.sh
+
+demo-apple-api-postgres-ha:
+	SKIFF_APPLE_BUILD_ORDERS_API=1 ./scripts/build-apple-postgres-ha-images.sh
+	SKIFF_E2E_REPORT_DIR="$(CURDIR)/.skiff-demo-reports/apple-api-postgres-ha/api-postgres-ha-$$(date +%Y%m%d%H%M%S)" SKIFF_APPLE_API_POSTGRES_HA_E2E=1 $(GO_TEST_ENV) $(GO) test ./tests/e2e -run TestAppleAPIPostgresHAStackDemo -count=1 -v
 
 demo-apple-context demo-apple-up:
 	SKIFF_APPLE_CONTAINER_PERSIST=1 ./demos/apple-container-caddy.sh

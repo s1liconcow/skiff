@@ -10,9 +10,22 @@ The happy path is convention-first:
 - Package lock/cache paths use the defaults: `skiff.lock.json` and
   `.skiff/packages/cache`.
 - The stack spec is `orders-api-postgres-ha.skiff.yaml`.
-- The environment is `prod`.
+- The environment is `prod` for AWS and `local` for the Apple Silicon demo.
 - The package-created StatefulGroup is `orders-db`.
 - The API `DATABASE_URL` points at the `orders-db` package secret reference.
+
+On Apple Silicon, the full local CUJ is one command:
+
+```bash
+make demo-apple-api-postgres-ha
+```
+
+That target builds the local API and `postgres-ha` images from this checkout,
+starts RustFS for S3-compatible object state, locks the installable
+`skiff.dev/postgres-ha` package, deploys the stack through the Apple provider,
+and verifies `/readyz`, `orders.add`, `orders.list`, `/metrics`, and the
+package operation list against the deployed `orders-db` StatefulGroup. It
+writes evidence under `.skiff-demo-reports/apple-api-postgres-ha/`.
 
 The API and the operation use the same `postgres-ha` package dependency:
 
@@ -42,7 +55,8 @@ because it exposes JSON-RPC methods that actually touch Postgres.
 - For AWS, bootstrap the environment first and use the state bucket and region
   from that context.
 - For Apple Silicon, Apple Container must be installed and object state must
-  point at an S3-compatible endpoint such as local RustFS.
+  point at an S3-compatible endpoint such as local RustFS. The
+  `make demo-apple-api-postgres-ha` target starts RustFS automatically.
 
 ## Configure Skiff
 
@@ -53,7 +67,7 @@ bootstrap chose different names.
 cat > .skiff-postgres-ha.config <<'EOF'
 apiVersion: skiff.dev/v1alpha1
 kind: SkiffConfig
-current-context: postgres-ha-aws
+current-context: postgres-ha-apple
 contexts:
   - name: postgres-ha-aws
     context:
@@ -65,7 +79,7 @@ contexts:
   - name: postgres-ha-apple
     context:
       mode: direct
-      env: prod
+      env: local
       provider: apple-container
       region: local
       state: s3://skiff-apple-postgres-ha
@@ -80,6 +94,7 @@ AWS:
 
 ```bash
 export SKIFF_CONTEXT=postgres-ha-aws
+export SKIFF_ENV=prod
 export IMAGE_REF=123456789012.dkr.ecr.us-west-2.amazonaws.com/orders-rpc@sha256:...
 export POSTGRES_HA_IMAGE_REF=123456789012.dkr.ecr.us-west-2.amazonaws.com/postgres-ha@sha256:...
 export API_URL=https://orders-api.example.com
@@ -89,25 +104,25 @@ Apple Silicon:
 
 ```bash
 export SKIFF_CONTEXT=postgres-ha-apple
-export AWS_REGION=us-east-1
-export AWS_DEFAULT_REGION=us-east-1
-export AWS_ACCESS_KEY_ID=skiffdev
-export AWS_SECRET_ACCESS_KEY=skiffdevsecret
-export SKIFF_AWS_ENDPOINT=http://127.0.0.1:9000
-export SKIFF_AWS_S3_PATH_STYLE=true
-make demo-apple-postgres-ha-images
-container build -t localhost/orders-rpc:apple -f examples/stacks/api-multiregion-database/Dockerfile .
+export SKIFF_ENV=local
+make demo-apple-api-postgres-ha-images
 export IMAGE_REF=localhost/orders-rpc:apple
 export POSTGRES_HA_IMAGE_REF=localhost/postgres-ha:apple
 export API_URL=http://127.0.0.1:8080
 ```
 
-The local image tags come from this checkout:
+The local image tags come from this checkout. The
+`demo-apple-api-postgres-ha-images` target builds both:
 
 - `localhost/orders-rpc:apple` from
   `examples/stacks/api-multiregion-database/Dockerfile`
 - `localhost/postgres-ha:apple` from
   `examples/stateful/postgres-ha/Dockerfile`
+
+For a manual Apple run, start RustFS or another S3-compatible object store and
+point the selected Skiff context plus AWS-compatible endpoint credentials at
+that store. The `make demo-apple-api-postgres-ha` target is the preferred path
+because it provisions those local object-state details for you.
 
 Confirm Skiff sees the intended context:
 
@@ -138,13 +153,19 @@ This single stack spec deploys the orders API and declares the self-managed
 connection URL into the service as `DATABASE_URL`; the package operation later
 targets that same compiled `orders-db` StatefulGroup.
 
+For Apple Container, Skiff resolves
+`secret://stateful/orders-db/connection-url` after the `orders-db` members are
+standing by inspecting the live member container address and injecting a
+container-network Postgres URL into the API container environment. There is no
+hardcoded host alias and no standalone Postgres substitute.
+
 ```bash
 cat > orders-api-postgres-ha.skiff.yaml <<EOF
 apiVersion: skiff.dev/v1alpha1
 kind: Stack
 metadata:
   name: orders
-  env: prod
+  env: ${SKIFF_ENV:-local}
 stack:
   services:
     - name: api

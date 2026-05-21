@@ -2,7 +2,7 @@ apiVersion: skiff.dev/v1alpha1
 kind: StatefulGroup
 metadata:
   name: postgres-ha
-  env: prod
+  env: local
 stateful:
   replicas: 3
   members:
