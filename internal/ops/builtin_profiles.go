@@ -132,6 +132,16 @@ func primarySwitchoverUpdateProfile() sagaapi.OperationProfile {
 				Default: rawJSONProfile(false),
 				Summary: "return the primary role to the original member after update",
 			},
+			"member_admin_urls": {
+				Type:    sagaapi.ParamObject,
+				Default: rawJSONProfile(map[string]string{}),
+				Summary: "member ordinal to admin URL map; normally omitted when provider DNS is routable",
+			},
+			"admin_url_template": {
+				Type:    sagaapi.ParamString,
+				Default: rawJSONProfile(""),
+				Summary: "admin URL template using {target}, {service}, {env}, and {member}",
+			},
 		}),
 		Risk:                 sagaapi.RiskHigh,
 		Reversibility:        sagaapi.PartiallyReversible,
@@ -145,7 +155,7 @@ func primarySwitchoverUpdateProfile() sagaapi.OperationProfile {
 			{id: "optional_failback", step: "package.primary_switchover.optional_failback", risk: sagaapi.RiskMedium},
 			{id: "update_candidate", step: "package.primary_switchover.update_candidate"},
 			{id: "verify_final_topology", step: "package.primary_switchover.verify_final_topology"},
-		}, "candidate", "return_primary")},
+		}, "candidate", "return_primary", "member_admin_urls", "admin_url_template")},
 	}
 }
 

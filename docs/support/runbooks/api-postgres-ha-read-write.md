@@ -95,10 +95,19 @@ export AWS_ACCESS_KEY_ID=skiffdev
 export AWS_SECRET_ACCESS_KEY=skiffdevsecret
 export SKIFF_AWS_ENDPOINT=http://127.0.0.1:9000
 export SKIFF_AWS_S3_PATH_STYLE=true
+make demo-apple-postgres-ha-images
+container build -t localhost/orders-rpc:apple -f examples/stacks/api-multiregion-database/Dockerfile .
 export IMAGE_REF=localhost/orders-rpc:apple
 export POSTGRES_HA_IMAGE_REF=localhost/postgres-ha:apple
 export API_URL=http://127.0.0.1:8080
 ```
+
+The local image tags come from this checkout:
+
+- `localhost/orders-rpc:apple` from
+  `examples/stacks/api-multiregion-database/Dockerfile`
+- `localhost/postgres-ha:apple` from
+  `examples/stateful/postgres-ha/Dockerfile`
 
 Confirm Skiff sees the intended context:
 

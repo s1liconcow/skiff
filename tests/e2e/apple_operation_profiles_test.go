@@ -29,6 +29,17 @@ import (
 )
 
 func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
+	runOpsemAppleOperationProfilesE2E(t)
+}
+
+func TestPostgresHAApplePackageDemo(t *testing.T) {
+	if strings.TrimSpace(os.Getenv("SKIFF_OPSEM_PROFILE_FILTER")) == "" {
+		t.Setenv("SKIFF_OPSEM_PROFILE_FILTER", "postgres-primary")
+	}
+	runOpsemAppleOperationProfilesE2E(t)
+}
+
+func runOpsemAppleOperationProfilesE2E(t *testing.T) {
 	resetSkiffEnv(t)
 	if !opsemProfileGateEnabled() {
 		t.Skip("set SKIFF_OPSEM_PROFILES_E2E=1 or SKIFF_APPLE_STATEFUL_PACKAGES_E2E=1 and SKIFF_E2E_OPSEM_IMAGE to run the live operation profile e2e")
@@ -76,8 +87,8 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 			Service:       "postgres-primary",
 			Fixture:       "postgres-ha",
 			Profile:       "primary-switchover-update",
-			Operation:     "op_opsem_primary",
-			Saga:          "saga_opsem_primary",
+			Operation:     "op_postgres_primary",
+			Saga:          "saga_postgres_primary",
 			Expected:      schema.SagaSucceeded,
 			ActualPackage: true,
 			ParamPairs:    []string{"release_id=rel_primary", `candidate="1"`, "return_primary=true"},
@@ -215,6 +226,9 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 			portBase := reserveAppleStatefulPortBase(t, 3, 1)
 			t.Setenv("SKIFF_APPLE_STATEFUL_PORT_BASE", strconv.Itoa(portBase))
 			specPath := writeOpsemStatefulSpecMode(t, report.reportDir, scenario.Service, env, image, scenario.Mode)
+			if scenario.ActualPackage {
+				specPath = writePostgresHAStatefulSpec(t, report.reportDir, scenario.Service, env, image)
+			}
 			if !persist {
 				t.Cleanup(func() { cleanupAppleStatefulGroup(context.Background(), cli, env, scenario.Service, 3, 3) })
 			}
@@ -240,6 +254,9 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 				report.addProviderID(resource.ProviderID)
 			}
 			waitForOpsemMode(t, ctx, portBase, scenario.Mode)
+			if scenario.ActualPackage && scenario.UnsafeFailure == "" {
+				assertPostgresHAStatefulSQLReadWrite(t, ctx, report, scenario.Service, portBase)
+			}
 			if scenario.UnsafeFailure != "" && scenario.InjectFailureBeforeKind == "" {
 				opsemPost(t, ctx, opsemMemberPort(portBase, 1), "/admin/fail", map[string]string{"type": scenario.UnsafeFailure})
 				report.fact("opsem_unsafe_state", scenario.Service+" injected "+scenario.UnsafeFailure+" before profile execution")
@@ -248,15 +265,19 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 			lockfile := filepath.Join(report.reportDir, sanitizeProviderID(scenario.Operation)+"-skiff.lock.json")
 			cacheRoot := filepath.Join(report.reportDir, "package-cache", sanitizeProviderID(scenario.Operation))
 			lockOpsemProfilePackage(t, report, lockfile, cacheRoot, scenario)
+			profileParams := scenario.ParamPairs
+			if scenario.ActualPackage {
+				profileParams = append(append([]string(nil), profileParams...), postgresHAAdminURLsParam(t, portBase))
+			}
 
-			planOut := runOpsemProfilePlan(t, report, scenario, lockfile, cacheRoot, traceID)
+			planOut := runOpsemProfilePlan(t, report, scenario, lockfile, cacheRoot, traceID, profileParams)
 			if planOut.WouldWrite || planOut.Package == nil || planOut.Package.Digest == "" || len(planOut.Profile.Steps) == 0 {
 				t.Fatalf("operation profile plan did not resolve package and steps: %+v", planOut)
 			}
 			if planOut.Package.Name != scenario.Fixture {
 				t.Fatalf("operation profile plan resolved package %s, want %s", planOut.Package.Name, scenario.Fixture)
 			}
-			runOut := runOpsemProfileRun(t, report, scenario, lockfile, cacheRoot, stateURI, env, traceID)
+			runOut := runOpsemProfileRun(t, report, scenario, lockfile, cacheRoot, stateURI, env, traceID, profileParams)
 			if !runOut.WouldWrite || runOut.Package == nil || runOut.Package.Digest == "" {
 				t.Fatalf("operation profile run did not write package-backed operation: %+v", runOut)
 			}
@@ -275,7 +296,6 @@ func TestOpsemAppleOperationProfilesE2E(t *testing.T) {
 			var mutations []string
 			if scenario.ActualPackage {
 				ensurePostgresHAPluginOnPath(t)
-				setPostgresHAAdminURLs(t, portBase)
 				runner := &actualPostgresPackageRunner{
 					t:        t,
 					scenario: scenario,
@@ -427,7 +447,7 @@ func lockOpsemProfilePackage(t *testing.T, report *e2eReport, lockfile, cacheRoo
 	report.fact("opsem_package_fixture", "locked "+scenario.Fixture+" into "+lockfile)
 }
 
-func runOpsemProfilePlan(t *testing.T, report *e2eReport, scenario opsemProfileScenario, lockfile, cacheRoot, traceID string) opsemOpsProfileOutput {
+func runOpsemProfilePlan(t *testing.T, report *e2eReport, scenario opsemProfileScenario, lockfile, cacheRoot, traceID string, params []string) opsemOpsProfileOutput {
 	t.Helper()
 	args := []string{
 		"ops", "plan", scenario.Service, scenario.Profile,
@@ -439,7 +459,7 @@ func runOpsemProfilePlan(t *testing.T, report *e2eReport, scenario opsemProfileS
 		"--format", "json",
 		"--trace-id", traceID,
 	}
-	args = appendOpsemProfileParams(args, scenario.ParamPairs)
+	args = appendOpsemProfileParams(args, params)
 	var out opsemOpsProfileOutput
 	decodeCLIJSON(t, runSkiffCLI(t, report, args...), &out)
 	if !out.OK || out.OperationID != scenario.Operation || out.SagaID != scenario.Saga || out.Operation != scenario.Profile {
@@ -448,7 +468,7 @@ func runOpsemProfilePlan(t *testing.T, report *e2eReport, scenario opsemProfileS
 	return out
 }
 
-func runOpsemProfileRun(t *testing.T, report *e2eReport, scenario opsemProfileScenario, lockfile, cacheRoot, stateURI, env, traceID string) opsemOpsProfileOutput {
+func runOpsemProfileRun(t *testing.T, report *e2eReport, scenario opsemProfileScenario, lockfile, cacheRoot, stateURI, env, traceID string, params []string) opsemOpsProfileOutput {
 	t.Helper()
 	args := []string{
 		"ops", "run", scenario.Service, scenario.Profile,
@@ -466,7 +486,7 @@ func runOpsemProfileRun(t *testing.T, report *e2eReport, scenario opsemProfileSc
 		"--format", "json",
 		"--trace-id", traceID,
 	}
-	args = appendOpsemProfileParams(args, scenario.ParamPairs)
+	args = appendOpsemProfileParams(args, params)
 	var out opsemOpsProfileOutput
 	decodeCLIJSON(t, runSkiffCLI(t, report, args...), &out)
 	if !out.OK || out.OperationID != scenario.Operation || out.SagaID != scenario.Saga || out.Operation != scenario.Profile {
@@ -480,6 +500,19 @@ func appendOpsemProfileParams(args []string, params []string) []string {
 		args = append(args, "--param", param)
 	}
 	return args
+}
+
+func postgresHAAdminURLsParam(t *testing.T, portBase int) string {
+	t.Helper()
+	urls := map[string]string{}
+	for member := 0; member < 3; member++ {
+		urls[strconv.Itoa(member)] = fmt.Sprintf("http://127.0.0.1:%d", opsemMemberPort(portBase, member))
+	}
+	body, err := json.Marshal(urls)
+	if err != nil {
+		t.Fatalf("marshal postgres admin URLs: %v", err)
+	}
+	return "member_admin_urls=" + string(body)
 }
 
 func waitForOpsemMode(t *testing.T, ctx context.Context, portBase int, mode string) {
@@ -563,6 +596,91 @@ func executeActualPostgresProfileSaga(t *testing.T, ctx context.Context, store o
 		t.Fatalf("execute actual postgres-ha package saga: %v", err)
 	}
 	return result
+}
+
+func writePostgresHAStatefulSpec(t *testing.T, dir, service, env, image string) string {
+	t.Helper()
+	path := filepath.Join(dir, service+".skiff.yaml")
+	body := fmt.Sprintf(`apiVersion: skiff.dev/v1alpha1
+kind: StatefulGroup
+metadata:
+  name: %s
+  env: %s
+stateful:
+  replicas: 3
+  members:
+    - ordinal: 0
+      dnsName: %s
+    - ordinal: 1
+      dnsName: %s
+    - ordinal: 2
+      dnsName: %s
+  volume:
+    size: 256Mi
+    mountPath: /data
+    encrypted: true
+  recipe:
+    name: postgres-ha
+    config:
+      artifact:
+        type: oci
+        ref: %s
+      runtime:
+        ports:
+          admin: 8008
+          postgres: 5432
+        health:
+          path: /healthz
+          port: 8008
+  update:
+    strategy: ordered
+`, strconv.Quote(service), strconv.Quote(env), strconv.Quote(service+"-0.local"), strconv.Quote(service+"-1.local"), strconv.Quote(service+"-2.local"), strconv.Quote(image))
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func assertPostgresHAStatefulSQLReadWrite(t *testing.T, ctx context.Context, report *e2eReport, service string, portBase int) {
+	t.Helper()
+	key := "skiff-demo-" + sanitizeProviderID(service)
+	value := "value-" + sanitizeProviderID(service)
+	writeBody := opsemRequest(t, ctx, http.MethodPost, opsemMemberPort(portBase, 0), "/demo/write", map[string]string{"key": key, "value": value}, http.StatusOK)
+	var written struct {
+		OK     bool   `json:"ok"`
+		Member int    `json:"member"`
+		Role   string `json:"role"`
+		Key    string `json:"key"`
+		Value  string `json:"value"`
+	}
+	if err := json.Unmarshal(writeBody, &written); err != nil {
+		t.Fatalf("decode postgres-ha demo write response: %v\n%s", err, string(writeBody))
+	}
+	if !written.OK || written.Member != 0 || written.Role != "primary" || written.Key != key || written.Value != value {
+		t.Fatalf("unexpected postgres-ha demo write response: %+v", written)
+	}
+	readBody := opsemRequest(t, ctx, http.MethodGet, opsemMemberPort(portBase, 0), "/demo/read?key="+key, nil, http.StatusOK)
+	var read struct {
+		OK     bool `json:"ok"`
+		Values []struct {
+			Key    string `json:"key"`
+			Value  string `json:"value"`
+			Member int    `json:"member"`
+		} `json:"values"`
+	}
+	if err := json.Unmarshal(readBody, &read); err != nil {
+		t.Fatalf("decode postgres-ha demo read response: %v\n%s", err, string(readBody))
+	}
+	if !read.OK {
+		t.Fatalf("postgres-ha demo read returned ok=false: %+v", read)
+	}
+	for _, item := range read.Values {
+		if item.Key == key && item.Value == value && item.Member == 0 {
+			report.fact("postgres_ha_stateful_sql", fmt.Sprintf("%s wrote and read key %s through the deployed Apple StatefulGroup member", service, key))
+			return
+		}
+	}
+	t.Fatalf("postgres-ha demo read did not return written value %q: %+v", value, read.Values)
 }
 
 func actualPostgresPackageStepMap(t *testing.T, graph schema.SagaGraph, runner *actualPostgresPackageRunner) map[string]steps.Step {
@@ -675,20 +793,6 @@ func ensurePostgresHAPluginOnPath(t *testing.T) {
 		t.Fatalf("build postgres-ha-plugin: %v\n%s", err, string(body))
 	}
 	t.Setenv("PATH", outDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-}
-
-func setPostgresHAAdminURLs(t *testing.T, portBase int) {
-	t.Helper()
-	urls := map[string]string{}
-	for member := 0; member < 3; member++ {
-		urls[strconv.Itoa(member)] = fmt.Sprintf("http://127.0.0.1:%d", opsemMemberPort(portBase, member))
-	}
-	body, err := json.Marshal(urls)
-	if err != nil {
-		t.Fatalf("marshal postgres admin URLs: %v", err)
-	}
-	t.Setenv("SKIFF_POSTGRES_HA_MEMBER_ADMIN_URLS", string(body))
-	t.Setenv("SKIFF_POSTGRES_HA_MAX_REPLICA_LAG_BYTES", "0")
 }
 
 func opsemPackageStepMap(t *testing.T, graph schema.SagaGraph, runner *opsemSemanticRunner) map[string]steps.Step {

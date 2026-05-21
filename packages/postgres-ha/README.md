@@ -49,30 +49,44 @@ stack:
         maxReplicaLagBytes: 0
         volume:
           size: 100Gi
+          mountPath: /data
+        artifact:
+          type: oci
+          ref: localhost/postgres-ha:apple
         runtime:
-          command: ["/usr/local/bin/postgres-ha"]
           ports:
+            admin: 8008
             postgres: 5432
-            health: 8008
           health:
             path: /healthz
             port: 8008
 ```
 
-The self-managed plugin talks to member admin endpoints compatible with
-`skiff-opsem primary-replica`:
+The self-managed plugin talks to member admin endpoints exposed by the
+first-party Apple demo image in `examples/stateful/postgres-ha`:
 
 - `GET /admin/state`
 - `POST /admin/promote`
 - `POST /admin/stepdown`
 - `POST /admin/catch-up`
 
-By default the plugin uses `http://{target}-{member}:8008`. For local or Apple
-Silicon validation, provide explicit endpoints:
+Build the local Apple image with:
 
 ```bash
-export SKIFF_POSTGRES_HA_MEMBER_ADMIN_URLS='{"0":"http://127.0.0.1:18080","1":"http://127.0.0.1:18180","2":"http://127.0.0.1:18280"}'
-skiff ops run payments-db primary-switchover-update --param release_id=rel_20260520 --param candidate=1 --param return_primary=true --yes
+make demo-apple-postgres-ha-images
+```
+
+By default the plugin uses `http://{target}-{member}:8008`. For local Apple
+Silicon validation where members are published on loopback ports, pass the
+member URL map as an operation parameter:
+
+```bash
+skiff ops run payments-db primary-switchover-update \
+  --param release_id=rel_20260520 \
+  --param candidate=1 \
+  --param member_admin_urls='{"0":"http://127.0.0.1:20000","1":"http://127.0.0.1:20100","2":"http://127.0.0.1:20200"}' \
+  --param return_primary=true \
+  --yes
 ```
 
 Planned switchover fails before mutation when the candidate is not a replica,

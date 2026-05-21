@@ -1,0 +1,33 @@
+apiVersion: skiff.dev/v1alpha1
+kind: StatefulGroup
+metadata:
+  name: postgres-ha
+  env: prod
+stateful:
+  replicas: 3
+  members:
+    - ordinal: 0
+      dnsName: postgres-ha-0.local
+    - ordinal: 1
+      dnsName: postgres-ha-1.local
+    - ordinal: 2
+      dnsName: postgres-ha-2.local
+  volume:
+    size: 256Mi
+    mountPath: /data
+    encrypted: true
+  recipe:
+    name: postgres-ha
+    config:
+      artifact:
+        type: oci
+        ref: localhost/postgres-ha:apple
+      runtime:
+        ports:
+          admin: 8008
+          postgres: 5432
+        health:
+          path: /healthz
+          port: 8008
+  update:
+    strategy: ordered

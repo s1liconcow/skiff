@@ -110,10 +110,23 @@ make demo-apple-container
 make demo-apple-postgres-ha
 ```
 
+The demo builds its local workload image first:
+
+```bash
+make demo-apple-postgres-ha-images
+```
+
+That target creates `localhost/postgres-ha:apple` from
+`examples/stateful/postgres-ha/Dockerfile`. The image runs Postgres 16 with
+`PGDATA` on the Skiff StatefulGroup volume and exposes the admin API used by
+the `postgres-ha` package operation. The matching deployable StatefulGroup spec
+is `examples/stateful/postgres-ha/skiff.yaml`.
+
 This runs the actual `skiff.dev/postgres-ha` package on Apple Silicon through
 the live StatefulGroup package harness. It starts RustFS for object state,
-applies the `postgres-ha` Apple StatefulGroup scenarios, locks
-`packages/postgres-ha` into a fresh report directory, builds and executes
-`cmd/postgres-ha-plugin`, runs a successful `primary-switchover-update`, and
-verifies the unsafe replica-lag path blocks before member mutation. It does not
-start a standalone Postgres container as a substitute for the package.
+applies the `postgres-ha` Apple StatefulGroup scenarios, verifies a SQL
+write/read through the deployed Postgres member, locks `packages/postgres-ha`
+into a fresh report directory, builds and executes `cmd/postgres-ha-plugin`,
+runs a successful `primary-switchover-update`, and verifies the unsafe
+replica-lag path blocks before member mutation. It does not start an unrelated
+standalone Postgres container as a substitute for the package target.

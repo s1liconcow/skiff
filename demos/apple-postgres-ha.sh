@@ -8,7 +8,8 @@ if [[ -n "${SKIFF_E2E_REPORT_DIR:-}" ]]; then
 else
   report_dir="$repo_root/.skiff-demo-reports/apple-postgres-ha/$run_id"
 fi
-opsem_image="${SKIFF_E2E_OPSEM_IMAGE:-localhost/skiff-opsem:e2e}"
+postgres_image="${SKIFF_APPLE_POSTGRES_HA_IMAGE:-localhost/postgres-ha:apple}"
+opsem_image="${SKIFF_E2E_OPSEM_IMAGE:-$postgres_image}"
 filter="${SKIFF_OPSEM_PROFILE_FILTER:-postgres-primary}"
 
 cat <<EOF
@@ -18,8 +19,10 @@ This demo uses the actual installable package in packages/postgres-ha. It does
 not start a standalone Postgres container as a substitute.
 
 The demo will:
+  - build localhost/postgres-ha:apple from examples/stateful/postgres-ha
   - start RustFS for S3-compatible Skiff object state
-  - apply live Apple StatefulGroups for the filtered postgres-ha scenarios
+  - apply live Apple StatefulGroups using the postgres-ha recipe shape
+  - verify a SQL write/read through the deployed Postgres member
   - lock packages/postgres-ha into skiff.lock.json files under the report dir
   - build and execute cmd/postgres-ha-plugin through the package host
   - run primary-switchover-update successfully
@@ -45,12 +48,14 @@ EOF
   exit 1
 fi
 
-if ! container image list 2>/dev/null | grep -Eq 'localhost/skiff-opsem[[:space:]]+e2e'; then
+if [[ "${SKIFF_APPLE_POSTGRES_HA_SKIP_IMAGE_BUILD:-}" != "1" && "$opsem_image" == "$postgres_image" ]]; then
+  "$repo_root/scripts/build-apple-postgres-ha-images.sh"
+elif ! container image list 2>/dev/null | grep -Eq "$(printf '%s' "$opsem_image" | sed 's/[.[\*^$()+?{}|]/\\&/g' | sed 's/:/[[:space:]]+/')"; then
   cat >&2 <<EOF
 Required local image not found: $opsem_image
 
-Build the semantics workload image first:
-  container build -t localhost/skiff-opsem:e2e -f tests/fixtures/opsem/Dockerfile .
+Build the first-party Postgres HA Apple image:
+  make demo-apple-postgres-ha-images
 
 Then rerun:
   make demo-apple-postgres-ha
@@ -77,9 +82,9 @@ SKIFF_E2E_OPSEM_IMAGE="$opsem_image" \
 SKIFF_E2E_REPORT_DIR="$report_dir" \
 GOCACHE="$repo_root/.cache/go-build" \
 GOMODCACHE="$repo_root/.cache/gomod" \
-go test ./tests/e2e -run TestOpsemAppleOperationProfilesE2E -count=1 -v
+go test ./tests/e2e -run TestPostgresHAApplePackageDemo -count=1 -v
 
-report="$report_dir/testopsemappleoperationprofilese2e.json"
+report="$report_dir/testpostgreshaapplepackagedemo.json"
 cat <<EOF
 
 postgres-ha Apple demo complete.
