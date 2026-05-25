@@ -54,7 +54,9 @@ type LockEntry struct {
 }
 
 type ValidationOptions struct {
-	AllowUnsignedLocal bool
+	AllowUnsignedLocal       bool
+	RequirePackageLock       bool
+	RequireSignedLockEntries bool
 }
 
 var skiffNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
@@ -152,20 +154,19 @@ func ValidateStackLock(doc spec.Document, lock *LockFile, opts ValidationOptions
 	if doc.Stack == nil || len(doc.Stack.Dependencies) == 0 {
 		return nil
 	}
-	production := isProductionEnv(doc.Metadata.Env)
 	if lock == nil {
-		if !production {
+		if !opts.RequirePackageLock {
 			return nil
 		}
 		return []spec.Diagnostic{{
 			Path:     "$.stack.dependencies",
 			Code:     "PACKAGE_LOCK_REQUIRED",
 			Severity: spec.SeverityError,
-			Message:  "production package dependencies require skiff.lock.json with digest-pinned signed entries",
+			Message:  "this environment class requires skiff.lock.json with digest-pinned signed entries",
 		}}
 	}
 	validationOpts := opts
-	if production {
+	if opts.RequireSignedLockEntries {
 		validationOpts.AllowUnsignedLocal = false
 	}
 	diagnostics := ValidateLock(*lock, validationOpts)
@@ -338,13 +339,4 @@ func validPackagePath(value string) bool {
 
 func isLocalPackageRef(value string) bool {
 	return strings.HasPrefix(strings.TrimSpace(value), "file://")
-}
-
-func isProductionEnv(env string) bool {
-	switch strings.ToLower(strings.TrimSpace(env)) {
-	case "prod", "production":
-		return true
-	default:
-		return false
-	}
 }

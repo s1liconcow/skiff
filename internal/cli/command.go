@@ -90,7 +90,7 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		}
 		return runBootstrap(binary, root.Args, stdout, stderr)
 	case "compile":
-		return runCompile(binary, root.Args, stdout, stderr)
+		return runCompile(binary, root.Args, root, stdout, stderr)
 	case "config":
 		return runConfig(binary, root.Args, root, stdout, stderr)
 	case "completion":
@@ -168,12 +168,14 @@ func Run(binary string, args []string, stdout, stderr io.Writer) int {
 		return runStateful(binary, root.Args, root, stdout, stderr)
 	case "status":
 		return runStatus(binary, root.Args, root, stdout, stderr)
+	case "sudo":
+		return runSudo(binary, root.Args, root, stdout, stderr)
 	case "tui":
 		return runTUI(binary, root.Args, root, stdout, stderr)
 	case "terraform":
 		return runTerraform(binary, root.Args, root, stdout, stderr)
 	case "validate":
-		return runValidate(binary, root.Args, stdout, stderr)
+		return runValidate(binary, root.Args, root, stdout, stderr)
 	case "version":
 		return runVersion(binary, root.Args, root, stdout, stderr)
 	case "help", "-h", "--help":
@@ -343,6 +345,7 @@ func printUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  ops        List, run, inspect, watch, approve, and resume operations")
 	fmt.Fprintln(w, "  pkg        Add, verify, explain, and lock packages")
 	fmt.Fprintln(w, "  config     Inspect and switch Skiff configuration contexts")
+	fmt.Fprintln(w, "  sudo       Assume temporary auditable write credentials")
 	fmt.Fprintln(w, "  tui        Open the terminal operations dashboard")
 	if binary == "skiffd" {
 		fmt.Fprintln(w, "  serve      Start the stateless skiffd API server")
@@ -406,6 +409,7 @@ func printAllUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  state      Inspect object-state paths and developer helpers")
 	fmt.Fprintln(w, "  stateful   Plan, apply, and inspect StatefulGroups")
 	fmt.Fprintln(w, "  status     Show service status through direct or API mode")
+	fmt.Fprintln(w, "  sudo       Assume temporary auditable write credentials")
 	fmt.Fprintln(w, "  terraform  Generate Terraform modules for Skiff specs")
 	fmt.Fprintln(w, "  tui        Open the terminal operations dashboard")
 	fmt.Fprintln(w, "  validate   Parse, default, and validate a Skiff spec")
@@ -449,6 +453,7 @@ func printDevHelp(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  completion Generate shell completions")
 	fmt.Fprintln(w, "  authz      Explain authorization and approval decisions")
 	fmt.Fprintln(w, "  policy     Explain generated state security policies")
+	fmt.Fprintln(w, "  sudo       Assume temporary auditable write credentials")
 	fmt.Fprintln(w, "  pkg        Add, verify, explain, and lock packages")
 	fmt.Fprintln(w, "  plugin     Inspect, validate, and run trusted Skiff plugins")
 	fmt.Fprintln(w, "  object     Verify signed immutable objects")
@@ -664,6 +669,7 @@ func runConfigShow(binary string, args []string, root rootOptions, stdout, stder
 	fs.String("region", root.Region, "cloud provider region")
 	fs.String("state-bucket", root.State, "object-state bucket URI")
 	fs.String("kms-key", "", "KMS key ID or alias")
+	fs.String("write-role-arn", "", "IAM role ARN for temporary write escalation")
 	fs.Bool("aws-live-apply", false, "validate AWS live apply provider inputs")
 	fs.String("aws-vpc-id", "", "AWS VPC ID for live apply resources")
 	fs.String("aws-subnet-ids", "", "comma-separated AWS subnet IDs for live apply Auto Scaling Groups")
@@ -699,6 +705,7 @@ func runConfigShow(binary string, args []string, root rootOptions, stdout, stder
 		"state-bucket":                         config.FieldStateBucket,
 		"state":                                config.FieldStateBucket,
 		"kms-key":                              config.FieldKMSKey,
+		"write-role-arn":                       config.FieldWriteRoleARN,
 		"aws-live-apply":                       config.FieldAWSLiveApply,
 		"aws-vpc-id":                           config.FieldAWSVPCID,
 		"aws-subnet-ids":                       config.FieldAWSSubnetIDs,
@@ -1021,10 +1028,12 @@ func runBootstrapAWS(binary string, args []string, stdout, stderr io.Writer) int
 	contextName := fs.String("context", "", "Skiff context name to create or update")
 	noWriteConfig := fs.Bool("no-write-config", false, "do not create or update a Skiff config context")
 	env := fs.String("env", defaultSkiffEnvFromEnv(), "Skiff environment name")
+	environmentClass := fs.String("class", defaultEnvironmentClassFromEnv(), "environment class: production, staging, development, or sandbox")
 	region := fs.String("region", defaultAWSRegionFromEnv(), "AWS region")
 	bucket := fs.String("bucket", "", "S3 state bucket name")
 	stateBucket := fs.String("state-bucket", strings.TrimSpace(os.Getenv("SKIFF_STATE_BUCKET")), "S3 state bucket URI or name")
 	kmsAlias := fs.String("kms-alias", "", "KMS alias for state bucket encryption")
+	developerRole := fs.String("developer-role", "", "IAM role name for read-only developers")
 	deployerRole := fs.String("deployer-role", "", "IAM role name for deployers")
 	runnerRole := fs.String("runner-role", "", "IAM role name for runners")
 	skiffdRole := fs.String("skiffd-role", "", "IAM role name for skiffd")
@@ -1052,6 +1061,14 @@ func runBootstrapAWS(binary string, args []string, stdout, stderr io.Writer) int
 		return writeBootstrapError(binary, *format, *traceID, fmt.Errorf("unexpected argument %q", fs.Arg(0)), stdout, stderr)
 	}
 	_ = noColor
+	normalizedEnvironmentClass, err := schema.NormalizeEnvironmentClass(*environmentClass)
+	if err != nil {
+		return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+	}
+	if bootstrapProdEnvNeedsClassConfirmation(*env, normalizedEnvironmentClass) && !*yes {
+		err := bootstrapProdEnvClassConfirmationError(*env, normalizedEnvironmentClass, bootstrapAWSFlagWasSet(fs, "class"))
+		return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
+	}
 
 	if *bucket == "" && *stateBucket != "" {
 		*bucket = bucketNameFromStateBucket(*stateBucket)
@@ -1108,9 +1125,11 @@ func runBootstrapAWS(binary string, args []string, stdout, stderr io.Writer) int
 	}
 	plan, err := bootstrap.PlanAWS(bootstrap.AWSOptions{
 		Env:                     *env,
+		EnvironmentClass:        normalizedEnvironmentClass,
 		Region:                  *region,
 		StateBucket:             *bucket,
 		KMSAlias:                *kmsAlias,
+		DeveloperRole:           *developerRole,
 		DeployerRole:            *deployerRole,
 		RunnerRole:              *runnerRole,
 		SkiffdRole:              *skiffdRole,
@@ -1193,6 +1212,13 @@ func runBootstrapAWS(binary string, args []string, stdout, stderr io.Writer) int
 		}
 	}
 
+	outputPlan := plan
+	if applyResult != nil {
+		materialized := *plan
+		materialized.RootConfig = applyResult.RootConfig
+		outputPlan = &materialized
+	}
+
 	writtenConfigPath := ""
 	writtenContext := ""
 	if shouldWriteContext {
@@ -1204,15 +1230,9 @@ func runBootstrapAWS(binary string, args []string, stdout, stderr io.Writer) int
 		if writtenContext == "" {
 			writtenContext = plan.Env
 		}
-		if err := writeBootstrapAWSContext(writtenConfigPath, writtenContext, plan); err != nil {
+		if err := writeBootstrapAWSContext(writtenConfigPath, writtenContext, outputPlan); err != nil {
 			return writeBootstrapError(binary, *format, *traceID, err, stdout, stderr)
 		}
-	}
-	outputPlan := plan
-	if applyResult != nil {
-		materialized := *plan
-		materialized.RootConfig = applyResult.RootConfig
-		outputPlan = &materialized
 	}
 
 	switch *format {
@@ -1262,6 +1282,9 @@ type bootstrapAWSLocalArtifacts struct {
 
 func printBootstrapAWSPlan(w io.Writer, plan *bootstrap.AWSPlan, artifacts bootstrapAWSLocalArtifacts) {
 	fmt.Fprintf(w, "AWS bootstrap plan for %s in %s\n", plan.Env, plan.Region)
+	if plan.RootConfig.EnvironmentClass != "" {
+		fmt.Fprintf(w, "environment_class: %s\n", plan.RootConfig.EnvironmentClass)
+	}
 	fmt.Fprintf(w, "state_bucket: %s\n", plan.StateBucketURI)
 	fmt.Fprintf(w, "kms_alias: %s\n", plan.KMSAlias)
 	fmt.Fprintf(w, "root_object: %s\n", plan.RootObjectKey)
@@ -1283,6 +1306,15 @@ func printBootstrapAWSPlan(w io.Writer, plan *bootstrap.AWSPlan, artifacts boots
 		fmt.Fprintf(w, "release_signing_key: %s\n", plan.ReleaseSigningKeyID)
 	} else if plan.ReleaseSigningKeyRef != "" {
 		fmt.Fprintf(w, "release_signing_key_ref: %s\n", plan.ReleaseSigningKeyRef)
+	}
+	if plan.RootConfig.ReleasePolicy != nil {
+		fmt.Fprintf(w, "release_policy: require_signed_releases=%t allow_unsigned_code=%t\n", plan.RootConfig.ReleasePolicy.RequireSignedReleases, plan.RootConfig.ReleasePolicy.AllowUnsignedCode)
+	}
+	if developerRole := plan.RootConfig.Roles["developer"]; developerRole != "" {
+		fmt.Fprintf(w, "read_role: %s (read-only state inspection)\n", developerRole)
+	}
+	if writeRole := plan.RootConfig.Roles["deployer"]; writeRole != "" {
+		fmt.Fprintf(w, "write_role: %s (temporary STS elevation via skiff sudo <business-justification>)\n", writeRole)
 	}
 	if artifacts.TerraformPath != "" {
 		fmt.Fprintf(w, "terraform: %s\n", artifacts.TerraformPath)
@@ -1330,13 +1362,21 @@ func writeBootstrapAWSContext(path, contextName string, plan *bootstrap.AWSPlan)
 	next := config.NamedContext{
 		Name: contextName,
 		Context: config.ContextConfig{
-			Mode:         config.ModeDirect,
-			Env:          plan.Env,
-			Provider:     bootstrap.ProviderAWS,
-			Region:       plan.Region,
-			State:        plan.StateBucketURI,
-			AWSLiveApply: true,
+			Mode:             config.ModeDirect,
+			Env:              plan.Env,
+			EnvironmentClass: plan.RootConfig.EnvironmentClass,
+			Provider:         bootstrap.ProviderAWS,
+			Region:           plan.Region,
+			State:            plan.StateBucketURI,
+			WriteRoleARN:     plan.RootConfig.Roles["deployer"],
+			AWSLiveApply:     true,
 		},
+	}
+	if plan.RootConfig.ReleasePolicy != nil {
+		next.Context.ReleasePolicy = &config.ReleasePolicyConfig{
+			RequireSignedReleases: plan.RootConfig.ReleasePolicy.RequireSignedReleases,
+			AllowUnsignedCode:     plan.RootConfig.ReleasePolicy.AllowUnsignedCode,
+		}
 	}
 	if plan.ReleaseSigningKeyID != "" || plan.ReleaseSigningKeyRef != "" {
 		next.Context.Signing = &config.SigningConfig{Release: &config.ReleaseSigningConfig{
@@ -1421,6 +1461,32 @@ func isAWSKMSReleaseSigningRef(keyRef string) bool {
 	return strings.HasPrefix(strings.TrimSpace(keyRef), awsprovider.KMSReleaseSigningScheme+"://")
 }
 
+func bootstrapProdEnvNeedsClassConfirmation(env, environmentClass string) bool {
+	switch strings.ToLower(strings.TrimSpace(env)) {
+	case "prod", schema.EnvironmentClassProduction:
+	default:
+		return false
+	}
+	return environmentClass != schema.EnvironmentClassProduction
+}
+
+func bootstrapProdEnvClassConfirmationError(env, environmentClass string, classFlagSet bool) error {
+	if classFlagSet {
+		return fmt.Errorf("environment %q looks like production but bootstrap class is %q; rerun with --class production or pass --yes to confirm this non-production class", env, environmentClass)
+	}
+	return fmt.Errorf("environment %q looks like production but --class was not set, so bootstrap defaults to %q; rerun with --class production or pass --yes to confirm this non-production class", env, environmentClass)
+}
+
+func bootstrapAWSFlagWasSet(fs *flag.FlagSet, name string) bool {
+	wasSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			wasSet = true
+		}
+	})
+	return wasSet
+}
+
 func writeBootstrapError(binary, format, traceID string, err error, stdout, stderr io.Writer) int {
 	if format == "json" {
 		enc := json.NewEncoder(stdout)
@@ -1459,6 +1525,14 @@ func bucketNameFromStateBucket(value string) string {
 
 func defaultSkiffEnvFromEnv() string {
 	return strings.TrimSpace(os.Getenv("SKIFF_ENV"))
+}
+
+func defaultEnvironmentClassFromEnv() string {
+	value := strings.TrimSpace(os.Getenv("SKIFF_ENVIRONMENT_CLASS"))
+	if value == "" {
+		return schema.EnvironmentClassDevelopment
+	}
+	return value
 }
 
 func defaultSkiffCompanyNameFromEnv() string {
@@ -1516,7 +1590,7 @@ func runPolicyExplain(binary string, args []string, stdout, stderr io.Writer) in
 	noColor := fs.Bool("no-color", false, "disable ANSI color output")
 	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
-	role := fs.String("role", "", "policy role: state-bucket, runner, deployer, skiffd, or break-glass")
+	role := fs.String("role", "", "policy role: state-bucket, developer, runner, deployer, skiffd, or break-glass")
 	bucket := fs.String("bucket", "", "S3 state bucket name")
 	stateBucket := fs.String("state-bucket", "", "S3 state bucket URI or name")
 	kmsAlias := fs.String("kms-alias", "alias/skiff-state", "KMS alias used by IAM role policies")
@@ -1839,7 +1913,7 @@ func writeEventsError(binary, format, traceID string, err error, stdout, stderr 
 	return ExitUserError
 }
 
-func runCompile(binary string, args []string, stdout, stderr io.Writer) int {
+func runCompile(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		printCompileUsage(stderr, binary)
 		return ExitUserError
@@ -1854,8 +1928,10 @@ func runCompile(binary string, args []string, stdout, stderr io.Writer) int {
 
 	format := fs.String("format", "human", "output format: human, json, or json-pretty")
 	noColor := fs.Bool("no-color", false, "disable ANSI color output")
-	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
+	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
+	configPath := fs.String("config", root.ConfigPath, "path to Skiff config file")
+	contextName := fs.String("context", root.Context, "Skiff config context name")
 	filePath := fs.String("file", "", "Skiff YAML or JSON spec file")
 	outPath := fs.String("out", "", "write canonical IR JSON to path, or - for stdout")
 	allowUnknown := fs.Bool("allow-unknown-fields", false, "accept unknown fields for compatibility checks")
@@ -1884,12 +1960,21 @@ func runCompile(binary string, args []string, stdout, stderr io.Writer) int {
 	}
 	_ = noColor
 	_ = yes
+	loaded, err := config.Load(config.LoadOptions{
+		ModeDefault: defaultMode(binary),
+		ConfigPath:  *configPath,
+		Context:     *contextName,
+		Overrides:   root.configOverrides(),
+	})
+	if err != nil {
+		return writeCompileError(binary, "CONFIG_INVALID", *format, *traceID, err, nil, stdout, stderr)
+	}
 
 	doc, err := spec.LoadFile(*filePath, spec.DecodeOptions{AllowUnknownFields: *allowUnknown})
 	if err != nil {
 		return writeCompileError(binary, "SPEC_DECODE_FAILED", *format, *traceID, err, nil, stdout, stderr)
 	}
-	compileOpts, err := compilerOptionsForDocument(*doc, packageFlags, true)
+	compileOpts, err := compilerOptionsForDocumentWithConfig(*doc, packageFlags, true, loaded.Config)
 	if err != nil {
 		var validation spec.ValidationError
 		if errors.As(err, &validation) {
@@ -1975,7 +2060,7 @@ func writeCompileError(binary, code, format, traceID string, err error, fields [
 	return ExitUserError
 }
 
-func runValidate(binary string, args []string, stdout, stderr io.Writer) int {
+func runValidate(binary string, args []string, root rootOptions, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		printValidateUsage(stderr, binary)
 		return ExitUserError
@@ -1990,8 +2075,10 @@ func runValidate(binary string, args []string, stdout, stderr io.Writer) int {
 
 	format := fs.String("format", "human", "output format: human, json, or yaml")
 	noColor := fs.Bool("no-color", false, "disable ANSI color output")
-	traceID := fs.String("trace-id", "", "trace identifier to include in machine-readable output")
+	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", false, "assume yes for commands that ask for confirmation")
+	configPath := fs.String("config", root.ConfigPath, "path to Skiff config file")
+	contextName := fs.String("context", root.Context, "Skiff config context name")
 	filePath := fs.String("file", "", "Skiff YAML or JSON spec file")
 	allowUnknown := fs.Bool("allow-unknown-fields", false, "accept unknown fields for compatibility checks")
 	showDefaulted := fs.Bool("show-defaulted", false, "include the defaulted spec in output")
@@ -2017,16 +2104,38 @@ func runValidate(binary string, args []string, stdout, stderr io.Writer) int {
 	}
 	_ = noColor
 	_ = yes
+	loaded, err := config.Load(config.LoadOptions{
+		ModeDefault: defaultMode(binary),
+		ConfigPath:  *configPath,
+		Context:     *contextName,
+		Overrides:   root.configOverrides(),
+	})
+	if err != nil {
+		return writeSpecError(binary, "CONFIG_INVALID", *format, *traceID, err, nil, stdout, stderr)
+	}
+	releasePolicy, err := config.EffectiveReleasePolicy(loaded.Config)
+	if err != nil {
+		return writeSpecError(binary, "CONFIG_INVALID", *format, *traceID, err, nil, stdout, stderr)
+	}
+	if packageFlags.environmentClass != nil && *packageFlags.environmentClass != "" {
+		classCfg := config.Config{EnvironmentClass: *packageFlags.environmentClass}
+		releasePolicy, err = config.EffectiveReleasePolicy(classCfg)
+		if err != nil {
+			return writeSpecError(binary, "CONFIG_INVALID", *format, *traceID, err, nil, stdout, stderr)
+		}
+	}
 
 	doc, err := spec.LoadFile(*filePath, spec.DecodeOptions{AllowUnknownFields: *allowUnknown})
 	if err != nil {
 		return writeSpecError(binary, "SPEC_DECODE_FAILED", *format, *traceID, err, nil, stdout, stderr)
 	}
-	result := spec.Validate(*doc)
+	result := spec.ValidateWithOptions(*doc, spec.ValidationOptions{
+		RequireDigestPinnedArtifacts: releasePolicy.RequireSignedReleases,
+	})
 	if !result.OK {
 		return writeSpecError(binary, "SPEC_INVALID", *format, *traceID, errors.New("spec validation failed"), result.Diagnostics, stdout, stderr)
 	}
-	if _, err := compilerOptionsForDocument(*doc, packageFlags, false); err != nil {
+	if _, err := compilerOptionsForDocumentWithConfig(*doc, packageFlags, false, loaded.Config); err != nil {
 		var validation spec.ValidationError
 		if errors.As(err, &validation) {
 			return writeSpecError(binary, "SPEC_INVALID", *format, *traceID, errors.New("spec validation failed"), validation.Diagnostics, stdout, stderr)
@@ -2112,6 +2221,7 @@ func printBootstrapUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "AWS flags:")
 	fmt.Fprintln(w, "  --env <env>")
+	fmt.Fprintln(w, "  --class production|staging|development|sandbox  Defaults to development")
 	fmt.Fprintln(w, "  --region <region>")
 	fmt.Fprintln(w, "  --bucket <bucket>      Optional; autogenerated when omitted")
 	fmt.Fprintln(w, "  --network none|managed")
@@ -2121,10 +2231,15 @@ func printBootstrapUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  --host-name <hostname>            Optional; public ingress base hostname override")
 	fmt.Fprintln(w, "  --hosted-zone-id <zone>           Optional; Route53 zone override")
 	fmt.Fprintln(w, "  --certificate-arn <arn>           Optional; reuse an ACM cert instead of creating one")
+	fmt.Fprintln(w, "  --developer-role <name>           Optional; read-only developer IAM role")
+	fmt.Fprintln(w, "  --deployer-role <name>            Optional; write IAM role requiring auditable STS escalation")
+	fmt.Fprintln(w, "  --runner-role <name>              Optional; runner IAM role")
+	fmt.Fprintln(w, "  --skiffd-role <name>              Optional; skiffd IAM role")
 	fmt.Fprintln(w, "  --runner-ami-id <ami>              Optional; custom runner AMI")
 	fmt.Fprintln(w, "  --runner-ami-ssm-parameter <path>  Optional; defaults to Skiff AL2023 x86_64")
 	fmt.Fprintln(w, "  --runner-install-version <tag>     Optional; used with the public AL2023 fallback AMI")
 	fmt.Fprintln(w, "  --dry-run")
+	fmt.Fprintln(w, "  --yes                            Confirm writes and intentional non-production class for prod env names")
 	fmt.Fprintln(w, "  --emit terraform")
 	fmt.Fprintln(w, "  --out <dir>                       Write generated artifacts and teardown script")
 	fmt.Fprintln(w, "  --config <path>                   Config file to update when --out is set")
@@ -2139,7 +2254,7 @@ func printPolicyUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "  explain    Explain a generated state bucket or IAM policy")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Explain flags:")
-	fmt.Fprintln(w, "  --role state-bucket|runner|deployer|skiffd|break-glass")
+	fmt.Fprintln(w, "  --role state-bucket|developer|runner|deployer|skiffd|break-glass")
 	fmt.Fprintln(w, "  --bucket <bucket>")
 	fmt.Fprintln(w, "  --kms-alias <alias/name>")
 	fmt.Fprintln(w, "  --format human|json|json-pretty")
@@ -2162,6 +2277,9 @@ func printValidateUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "Flags:")
 	fmt.Fprintln(w, "  --format human|json|json-pretty|yaml")
 	fmt.Fprintln(w, "  --show-defaulted")
+	fmt.Fprintln(w, "  --config <path>")
+	fmt.Fprintln(w, "  --context <name>")
+	fmt.Fprintln(w, "  --environment-class production|staging|development|sandbox")
 	fmt.Fprintln(w, "  --allow-unknown-fields")
 	fmt.Fprintln(w, "  --trace-id <id>")
 }
@@ -2171,6 +2289,9 @@ func printCompileUsage(w io.Writer, binary string) {
 	fmt.Fprintln(w, "Flags:")
 	fmt.Fprintln(w, "  --format human|json|json-pretty")
 	fmt.Fprintln(w, "  --out <path>")
+	fmt.Fprintln(w, "  --config <path>")
+	fmt.Fprintln(w, "  --context <name>")
+	fmt.Fprintln(w, "  --environment-class production|staging|development|sandbox")
 	fmt.Fprintln(w, "  --allow-unknown-fields")
 	fmt.Fprintln(w, "  --trace-id <id>")
 }
@@ -2647,23 +2768,29 @@ func splitVerifyArgs(args []string) ([]string, []string, error) {
 
 func splitValidateArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
-		"cache":    true,
-		"file":     true,
-		"format":   true,
-		"lockfile": true,
-		"trace-id": true,
+		"cache":             true,
+		"config":            true,
+		"context":           true,
+		"environment-class": true,
+		"file":              true,
+		"format":            true,
+		"lockfile":          true,
+		"trace-id":          true,
 	}
 	return splitArgs(args, valueFlags)
 }
 
 func splitCompileArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
-		"cache":    true,
-		"file":     true,
-		"format":   true,
-		"lockfile": true,
-		"out":      true,
-		"trace-id": true,
+		"cache":             true,
+		"config":            true,
+		"context":           true,
+		"environment-class": true,
+		"file":              true,
+		"format":            true,
+		"lockfile":          true,
+		"out":               true,
+		"trace-id":          true,
 	}
 	return splitArgs(args, valueFlags)
 }
@@ -2930,6 +3057,8 @@ func configValue(cfg config.Config, field string) string {
 		return cfg.ReleaseSigningKeyID
 	case config.FieldReleaseSigningKeyRef:
 		return cfg.ReleaseSigningKeyRef
+	case config.FieldWriteRoleARN:
+		return cfg.WriteRoleARN
 	case config.FieldAWSLiveApply:
 		if cfg.AWSLiveApply {
 			return "true"

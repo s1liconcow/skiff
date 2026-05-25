@@ -36,47 +36,57 @@ type NamedContext struct {
 }
 
 type ContextConfig struct {
-	Mode                                 Mode           `json:"mode,omitempty" yaml:"mode,omitempty"`
-	Env                                  string         `json:"env,omitempty" yaml:"env,omitempty"`
-	Provider                             string         `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Region                               string         `json:"region,omitempty" yaml:"region,omitempty"`
-	State                                string         `json:"state,omitempty" yaml:"state,omitempty"`
-	StateBucket                          string         `json:"stateBucket,omitempty" yaml:"stateBucket,omitempty"`
-	StateBucketSnake                     string         `json:"state_bucket,omitempty" yaml:"state_bucket,omitempty"`
-	KMSKey                               string         `json:"kmsKey,omitempty" yaml:"kmsKey,omitempty"`
-	KMSKeySnake                          string         `json:"kms_key,omitempty" yaml:"kms_key,omitempty"`
-	AuthMode                             string         `json:"authMode,omitempty" yaml:"authMode,omitempty"`
-	AuthModeSnake                        string         `json:"auth_mode,omitempty" yaml:"auth_mode,omitempty"`
-	LogLevel                             string         `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`
-	LogLevelSnake                        string         `json:"log_level,omitempty" yaml:"log_level,omitempty"`
-	APIURL                               string         `json:"apiURL,omitempty" yaml:"apiURL,omitempty"`
-	APIURLSnake                          string         `json:"api_url,omitempty" yaml:"api_url,omitempty"`
-	APIUrl                               string         `json:"apiUrl,omitempty" yaml:"apiUrl,omitempty"`
-	Service                              string         `json:"service,omitempty" yaml:"service,omitempty"`
-	ControlKey                           string         `json:"controlKey,omitempty" yaml:"controlKey,omitempty"`
-	ControlKeySnake                      string         `json:"control_key,omitempty" yaml:"control_key,omitempty"`
-	ReleaseID                            string         `json:"releaseID,omitempty" yaml:"releaseID,omitempty"`
-	ReleaseIDSnake                       string         `json:"release_id,omitempty" yaml:"release_id,omitempty"`
-	ReleaseSigningKeyID                  string         `json:"releaseSigningKeyID,omitempty" yaml:"releaseSigningKeyID,omitempty"`
-	ReleaseSigningKeyIDSnake             string         `json:"release_signing_key_id,omitempty" yaml:"release_signing_key_id,omitempty"`
-	ReleaseSigningKeyRef                 string         `json:"releaseSigningKeyRef,omitempty" yaml:"releaseSigningKeyRef,omitempty"`
-	ReleaseSigningKeyRefSnake            string         `json:"release_signing_key_ref,omitempty" yaml:"release_signing_key_ref,omitempty"`
-	Signing                              *SigningConfig `json:"signing,omitempty" yaml:"signing,omitempty"`
-	AWSLiveApply                         bool           `json:"awsLiveApply,omitempty" yaml:"awsLiveApply,omitempty"`
-	AWSVPCID                             string         `json:"awsVPCID,omitempty" yaml:"awsVPCID,omitempty"`
-	AWSVPCIDSnake                        string         `json:"aws_vpc_id,omitempty" yaml:"aws_vpc_id,omitempty"`
-	AWSSubnetIDs                         []string       `json:"awsSubnetIDs,omitempty" yaml:"awsSubnetIDs,omitempty"`
-	AWSSubnetIDsSnake                    []string       `json:"aws_subnet_ids,omitempty" yaml:"aws_subnet_ids,omitempty"`
-	AWSAMIID                             string         `json:"awsAMIID,omitempty" yaml:"awsAMIID,omitempty"`
-	AWSAMIIDSnake                        string         `json:"aws_ami_id,omitempty" yaml:"aws_ami_id,omitempty"`
-	AWSALBListenerARN                    string         `json:"awsALBListenerARN,omitempty" yaml:"awsALBListenerARN,omitempty"`
-	AWSALBListenerARNSnake               string         `json:"aws_alb_listener_arn,omitempty" yaml:"aws_alb_listener_arn,omitempty"`
-	AWSLoadBalancerSecurityGroupRef      string         `json:"awsLoadBalancerSecurityGroupRef,omitempty" yaml:"awsLoadBalancerSecurityGroupRef,omitempty"`
-	AWSLoadBalancerSecurityGroupRefSnake string         `json:"aws_load_balancer_security_group_ref,omitempty" yaml:"aws_load_balancer_security_group_ref,omitempty"`
+	Mode                                 Mode                 `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Env                                  string               `json:"env,omitempty" yaml:"env,omitempty"`
+	EnvironmentClass                     string               `json:"environmentClass,omitempty" yaml:"environmentClass,omitempty"`
+	EnvironmentClassSnake                string               `json:"environment_class,omitempty" yaml:"environment_class,omitempty"`
+	Provider                             string               `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Region                               string               `json:"region,omitempty" yaml:"region,omitempty"`
+	State                                string               `json:"state,omitempty" yaml:"state,omitempty"`
+	StateBucket                          string               `json:"stateBucket,omitempty" yaml:"stateBucket,omitempty"`
+	StateBucketSnake                     string               `json:"state_bucket,omitempty" yaml:"state_bucket,omitempty"`
+	KMSKey                               string               `json:"kmsKey,omitempty" yaml:"kmsKey,omitempty"`
+	KMSKeySnake                          string               `json:"kms_key,omitempty" yaml:"kms_key,omitempty"`
+	AuthMode                             string               `json:"authMode,omitempty" yaml:"authMode,omitempty"`
+	AuthModeSnake                        string               `json:"auth_mode,omitempty" yaml:"auth_mode,omitempty"`
+	LogLevel                             string               `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`
+	LogLevelSnake                        string               `json:"log_level,omitempty" yaml:"log_level,omitempty"`
+	APIURL                               string               `json:"apiURL,omitempty" yaml:"apiURL,omitempty"`
+	APIURLSnake                          string               `json:"api_url,omitempty" yaml:"api_url,omitempty"`
+	APIUrl                               string               `json:"apiUrl,omitempty" yaml:"apiUrl,omitempty"`
+	Service                              string               `json:"service,omitempty" yaml:"service,omitempty"`
+	ControlKey                           string               `json:"controlKey,omitempty" yaml:"controlKey,omitempty"`
+	ControlKeySnake                      string               `json:"control_key,omitempty" yaml:"control_key,omitempty"`
+	ReleaseID                            string               `json:"releaseID,omitempty" yaml:"releaseID,omitempty"`
+	ReleaseIDSnake                       string               `json:"release_id,omitempty" yaml:"release_id,omitempty"`
+	ReleaseSigningKeyID                  string               `json:"releaseSigningKeyID,omitempty" yaml:"releaseSigningKeyID,omitempty"`
+	ReleaseSigningKeyIDSnake             string               `json:"release_signing_key_id,omitempty" yaml:"release_signing_key_id,omitempty"`
+	ReleaseSigningKeyRef                 string               `json:"releaseSigningKeyRef,omitempty" yaml:"releaseSigningKeyRef,omitempty"`
+	ReleaseSigningKeyRefSnake            string               `json:"release_signing_key_ref,omitempty" yaml:"release_signing_key_ref,omitempty"`
+	WriteRoleARN                         string               `json:"writeRoleARN,omitempty" yaml:"writeRoleARN,omitempty"`
+	WriteRoleARNSnake                    string               `json:"write_role_arn,omitempty" yaml:"write_role_arn,omitempty"`
+	Signing                              *SigningConfig       `json:"signing,omitempty" yaml:"signing,omitempty"`
+	ReleasePolicy                        *ReleasePolicyConfig `json:"releasePolicy,omitempty" yaml:"releasePolicy,omitempty"`
+	AWSLiveApply                         bool                 `json:"awsLiveApply,omitempty" yaml:"awsLiveApply,omitempty"`
+	AWSVPCID                             string               `json:"awsVPCID,omitempty" yaml:"awsVPCID,omitempty"`
+	AWSVPCIDSnake                        string               `json:"aws_vpc_id,omitempty" yaml:"aws_vpc_id,omitempty"`
+	AWSSubnetIDs                         []string             `json:"awsSubnetIDs,omitempty" yaml:"awsSubnetIDs,omitempty"`
+	AWSSubnetIDsSnake                    []string             `json:"aws_subnet_ids,omitempty" yaml:"aws_subnet_ids,omitempty"`
+	AWSAMIID                             string               `json:"awsAMIID,omitempty" yaml:"awsAMIID,omitempty"`
+	AWSAMIIDSnake                        string               `json:"aws_ami_id,omitempty" yaml:"aws_ami_id,omitempty"`
+	AWSALBListenerARN                    string               `json:"awsALBListenerARN,omitempty" yaml:"awsALBListenerARN,omitempty"`
+	AWSALBListenerARNSnake               string               `json:"aws_alb_listener_arn,omitempty" yaml:"aws_alb_listener_arn,omitempty"`
+	AWSLoadBalancerSecurityGroupRef      string               `json:"awsLoadBalancerSecurityGroupRef,omitempty" yaml:"awsLoadBalancerSecurityGroupRef,omitempty"`
+	AWSLoadBalancerSecurityGroupRefSnake string               `json:"aws_load_balancer_security_group_ref,omitempty" yaml:"aws_load_balancer_security_group_ref,omitempty"`
 }
 
 type SigningConfig struct {
 	Release *ReleaseSigningConfig `json:"release,omitempty" yaml:"release,omitempty"`
+}
+
+type ReleasePolicyConfig struct {
+	RequireSignedReleases bool `json:"requireSignedReleases" yaml:"requireSignedReleases"`
+	AllowUnsignedCode     bool `json:"allowUnsignedCode" yaml:"allowUnsignedCode"`
 }
 
 type ReleaseSigningConfig struct {
@@ -314,6 +324,11 @@ func (c ContextConfig) values() (map[string]string, error) {
 	values := make(map[string]string)
 	addValue(values, FieldMode, string(c.Mode))
 	addValue(values, FieldEnv, c.Env)
+	environmentClass, err := singleAliasValue(FieldEnvironmentClass, c.EnvironmentClass, c.EnvironmentClassSnake)
+	if err != nil {
+		return nil, err
+	}
+	addValue(values, FieldEnvironmentClass, environmentClass)
 	addValue(values, FieldProvider, c.Provider)
 	addValue(values, FieldRegion, c.Region)
 	state, err := singleAliasValue(FieldStateBucket, c.State, c.StateBucket, c.StateBucketSnake)
@@ -374,6 +389,15 @@ func (c ContextConfig) values() (map[string]string, error) {
 		return nil, err
 	}
 	addValue(values, FieldReleaseSigningKeyRef, releaseSigningKeyRef)
+	writeRoleARN, err := singleAliasValue(FieldWriteRoleARN, c.WriteRoleARN, c.WriteRoleARNSnake)
+	if err != nil {
+		return nil, err
+	}
+	addValue(values, FieldWriteRoleARN, writeRoleARN)
+	if c.ReleasePolicy != nil {
+		values[FieldRequireSignedReleases] = fmt.Sprintf("%t", c.ReleasePolicy.RequireSignedReleases)
+		values[FieldAllowUnsignedCode] = fmt.Sprintf("%t", c.ReleasePolicy.AllowUnsignedCode)
+	}
 	if c.AWSLiveApply {
 		values[FieldAWSLiveApply] = "true"
 	}

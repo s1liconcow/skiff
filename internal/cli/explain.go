@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/s1liconcow/skiff/internal/compiler"
+	"github.com/s1liconcow/skiff/internal/config"
 	"github.com/s1liconcow/skiff/internal/explain"
 	"github.com/s1liconcow/skiff/internal/ir"
 	"github.com/s1liconcow/skiff/internal/plugins"
@@ -31,6 +32,8 @@ func runExplain(binary string, args []string, root rootOptions, stdout, stderr i
 	noColor := fs.Bool("no-color", root.NoColor, "disable ANSI color output")
 	traceID := fs.String("trace-id", root.TraceID, "trace identifier to include in machine-readable output")
 	yes := fs.Bool("yes", root.Yes, "assume yes for commands that ask for confirmation")
+	configPath := fs.String("config", root.ConfigPath, "path to Skiff config file")
+	contextName := fs.String("context", root.Context, "Skiff config context name")
 	filePath := fs.String("file", "", "Skiff YAML or JSON spec file")
 	providerName := fs.String("provider", defaultString(root.Provider, "aws"), "provider to explain")
 	region := fs.String("region", root.Region, "cloud provider region")
@@ -60,12 +63,21 @@ func runExplain(binary string, args []string, root rootOptions, stdout, stderr i
 	}
 	_ = noColor
 	_ = yes
+	loaded, err := config.Load(config.LoadOptions{
+		ModeDefault: defaultMode(binary),
+		ConfigPath:  *configPath,
+		Context:     *contextName,
+		Overrides:   root.configOverrides(),
+	})
+	if err != nil {
+		return writeSpecError(binary, "EXPLAIN_INVALID", *format, *traceID, err, nil, stdout, stderr)
+	}
 
 	doc, err := spec.LoadFile(*filePath, spec.DecodeOptions{})
 	if err != nil {
 		return writeSpecError(binary, "SPEC_DECODE_FAILED", *format, *traceID, err, nil, stdout, stderr)
 	}
-	compileOpts, err := compilerOptionsForDocument(*doc, packageFlags, true)
+	compileOpts, err := compilerOptionsForDocumentWithConfig(*doc, packageFlags, true, loaded.Config)
 	if err != nil {
 		var validation spec.ValidationError
 		if errors.As(err, &validation) {
@@ -153,16 +165,19 @@ func runExplain(binary string, args []string, root rootOptions, stdout, stderr i
 
 func splitExplainArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
-		"cache":      true,
-		"file":       true,
-		"format":     true,
-		"lockfile":   true,
-		"provider":   true,
-		"region":     true,
-		"release-id": true,
-		"state":      true,
-		"trace-id":   true,
-		"plugin":     true,
+		"cache":             true,
+		"config":            true,
+		"context":           true,
+		"environment-class": true,
+		"file":              true,
+		"format":            true,
+		"lockfile":          true,
+		"provider":          true,
+		"region":            true,
+		"release-id":        true,
+		"state":             true,
+		"trace-id":          true,
+		"plugin":            true,
 	}
 	return splitArgs(args, valueFlags)
 }

@@ -182,18 +182,20 @@ func Bootstrap(ctx context.Context, req BootstrapRequest) (*BootstrapResult, err
 	if err := emit(StateVerifyingRelease, control.DesiredRelease, "verifying desired release and runtime manifest", nil, &identity); err != nil {
 		return nil, err
 	}
-	verifier, err := verifierForReleaseTrust(ctx, req.Store, req.Config, req.Verifier)
+	verifier, releasePolicy, err := verifierForReleaseTrust(ctx, req.Store, req.Config, req.Verifier)
 	if err != nil {
 		return fail(CodeReleaseTrustInvalid, "load release trust", err, nil, &identity, control.DesiredRelease)
 	}
 
 	fetched, err := release.Fetch(ctx, req.Store, release.FetchOptions{
-		Service:       req.Config.Service,
-		Env:           req.Config.Env,
-		ReleaseID:     control.DesiredRelease,
-		Verifier:      verifier,
-		Now:           now(),
-		RunnerVersion: buildinfo.Version,
+		Service:               req.Config.Service,
+		Env:                   req.Config.Env,
+		ReleaseID:             control.DesiredRelease,
+		Verifier:              verifier,
+		Now:                   now(),
+		RequireArtifactDigest: releasePolicy.RequireSignedReleases,
+		AllowUnsignedRelease:  releasePolicy.AllowUnsignedCode,
+		RunnerVersion:         buildinfo.Version,
 	})
 	if err != nil {
 		var fetchErr *release.FetchError
@@ -237,24 +239,40 @@ func Bootstrap(ctx context.Context, req BootstrapRequest) (*BootstrapResult, err
 	return result, nil
 }
 
-func verifierForReleaseTrust(ctx context.Context, store objstore.ObjectStore, cfg config.Config, provided signing.Verifier) (signing.Verifier, error) {
+func verifierForReleaseTrust(ctx context.Context, store objstore.ObjectStore, cfg config.Config, provided signing.Verifier) (signing.Verifier, schema.EnvironmentReleasePolicy, error) {
+	policy, err := config.EffectiveReleasePolicy(cfg)
+	if err != nil {
+		return nil, schema.EnvironmentReleasePolicy{}, err
+	}
 	if provided != nil {
-		return provided, nil
+		return provided, policy, nil
 	}
 	rootKey, err := paths.EnvironmentRoot(cfg.Env)
 	if err != nil {
-		return nil, err
+		return nil, policy, err
 	}
 	obj, err := store.Get(ctx, rootKey)
 	if err != nil {
-		return nil, fmt.Errorf("read environment root %s: %w", rootKey, err)
+		return nil, policy, fmt.Errorf("read environment root %s: %w", rootKey, err)
 	}
 	var root schema.EnvironmentRoot
 	if err := json.Unmarshal(obj.Body, &root); err != nil {
-		return nil, fmt.Errorf("parse environment root %s: %w", rootKey, err)
+		return nil, policy, fmt.Errorf("parse environment root %s: %w", rootKey, err)
+	}
+	if root.ReleasePolicy != nil {
+		policy = *root.ReleasePolicy
+	} else if root.EnvironmentClass != "" {
+		rootPolicy, err := schema.DefaultEnvironmentReleasePolicy(root.EnvironmentClass)
+		if err != nil {
+			return nil, policy, err
+		}
+		policy = rootPolicy
 	}
 	if root.ReleaseTrust == nil {
-		return nil, errors.New("environment root does not contain release trust")
+		if policy.AllowUnsignedCode {
+			return nil, policy, nil
+		}
+		return nil, policy, errors.New("environment root does not contain release trust")
 	}
 	active := map[string]bool{}
 	for _, keyID := range root.ReleaseTrust.ActiveKeyIDs {
@@ -271,12 +289,12 @@ func verifierForReleaseTrust(ctx context.Context, store objstore.ObjectStore, cf
 		}
 		raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(key.PublicKey))
 		if err != nil {
-			return nil, fmt.Errorf("decode release trust public key %q: %w", keyID, err)
+			return nil, policy, fmt.Errorf("decode release trust public key %q: %w", keyID, err)
 		}
 		algorithm := releaseTrustAlgorithm(key)
 		encoding := releaseTrustEncoding(key)
 		if algorithm == signing.AlgorithmEd25519 && len(raw) != ed25519.PublicKeySize {
-			return nil, fmt.Errorf("release trust public key %q must be %d bytes", keyID, ed25519.PublicKeySize)
+			return nil, policy, fmt.Errorf("release trust public key %q must be %d bytes", keyID, ed25519.PublicKeySize)
 		}
 		publicKeys = append(publicKeys, signing.TrustedPublicKey{
 			KeyID:     keyID,
@@ -286,9 +304,10 @@ func verifierForReleaseTrust(ctx context.Context, store objstore.ObjectStore, cf
 		})
 	}
 	if len(publicKeys) == 0 {
-		return nil, errors.New("environment root release trust has no active public keys")
+		return nil, policy, errors.New("environment root release trust has no active public keys")
 	}
-	return signing.NewPublicKeyVerifier(publicKeys)
+	verifier, err := signing.NewPublicKeyVerifier(publicKeys)
+	return verifier, policy, err
 }
 
 func releaseTrustAlgorithm(key schema.ReleaseTrustKey) string {
@@ -341,18 +360,20 @@ func bootstrapStateful(ctx context.Context, req BootstrapRequest, result *Bootst
 	if err := emit(StateVerifyingRelease, req.Config.ReleaseID, "verifying stateful release and runtime manifest", nil, &identity); err != nil {
 		return nil, err
 	}
-	verifier, err := verifierForReleaseTrust(ctx, req.Store, req.Config, req.Verifier)
+	verifier, releasePolicy, err := verifierForReleaseTrust(ctx, req.Store, req.Config, req.Verifier)
 	if err != nil {
 		return fail(CodeReleaseTrustInvalid, "load release trust", err, nil, &identity, req.Config.ReleaseID)
 	}
 	fetched, err := release.Fetch(ctx, req.Store, release.FetchOptions{
-		Service:       req.Config.Service,
-		Env:           req.Config.Env,
-		ReleaseID:     req.Config.ReleaseID,
-		ReleaseKey:    req.Config.ReleaseManifestKey,
-		Verifier:      verifier,
-		Now:           now(),
-		RunnerVersion: buildinfo.Version,
+		Service:               req.Config.Service,
+		Env:                   req.Config.Env,
+		ReleaseID:             req.Config.ReleaseID,
+		ReleaseKey:            req.Config.ReleaseManifestKey,
+		Verifier:              verifier,
+		Now:                   now(),
+		RequireArtifactDigest: releasePolicy.RequireSignedReleases,
+		AllowUnsignedRelease:  releasePolicy.AllowUnsignedCode,
+		RunnerVersion:         buildinfo.Version,
 	})
 	if err != nil {
 		var fetchErr *release.FetchError

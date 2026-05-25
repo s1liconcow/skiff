@@ -1507,8 +1507,8 @@ ami     - immutable VM image mode, later/advanced
 Production rule:
 
 ```go
-func ValidateArtifactRef(ref string, env string) error {
-	if env == "prod" && !strings.Contains(ref, "@sha256:") {
+func ValidateArtifactRef(ref string, environmentClass string) error {
+	if environmentClass == "production" && !strings.Contains(ref, "@sha256:") {
 		return fmt.Errorf("production artifact must be pinned by digest")
 	}
 	return nil
@@ -1839,6 +1839,21 @@ AWS Systems Manager Session Manager is a good default debug path because it prov
 
 ### 20.2 State bucket IAM model
 
+Environment security posture is explicit:
+
+```yaml
+environmentClass: production # production, staging, development, sandbox
+releasePolicy:
+  requireSignedReleases: true
+  allowUnsignedCode: false
+```
+
+Skiff reads this policy from the bootstrapped context and environment root; it
+does not infer production controls from environment names. Bootstrap defaults
+to `development`; `production` and `staging` are explicit choices. As an
+operator guardrail, bootstrap requires confirmation when the environment is
+named `prod` or `production` but the class is not `production`.
+
 Roles:
 
 ```text
@@ -1848,7 +1863,14 @@ runner role:
   read services/<service>/releases/*
   no writes
 
-ci/deployer role:
+developer role:
+  read environment roots, controls, operations, sagas, resources, indexes, and audit records
+  no state writes
+  no KMS encrypt/data-key permissions
+
+ci/deployer write role:
+  assumed as temporary escalation from the normal read-only posture
+  requires source identity plus auditable session tags for trace ID and business justification
   create candidates/releases/operations
   CAS services/<service>/control.json
   call allowed provider rollout APIs
@@ -2663,7 +2685,7 @@ Expected property: operations are resumable from object state.
 Minimal AWS bootstrap:
 
 ```bash
-skiff bootstrap aws --env prod --region us-west-2 --minimal
+skiff bootstrap aws --env prod --class production --region us-west-2 --minimal
 ```
 
 Creates:
@@ -2680,7 +2702,7 @@ CloudTrail/data-event recommendation
 Full bootstrap:
 
 ```bash
-skiff bootstrap aws --env prod --region us-west-2 --domain skiff.example.com
+skiff bootstrap aws --env prod --class production --region us-west-2 --domain skiff.example.com
 ```
 
 Adds:

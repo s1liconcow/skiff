@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 )
 
 type DecodeOptions struct {
@@ -64,13 +63,4 @@ func Parse(body []byte, opts DecodeOptions) (*Document, Result, error) {
 	}
 	result := Validate(*doc)
 	return doc, result, nil
-}
-
-func isProductionEnv(env string) bool {
-	switch strings.ToLower(strings.TrimSpace(env)) {
-	case "prod", "production":
-		return true
-	default:
-		return false
-	}
 }

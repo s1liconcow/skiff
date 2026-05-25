@@ -159,9 +159,10 @@ func (h *Harness) CreateEnvironmentRoot(env string) bootstrap.EnvironmentRoot {
 		StateBucket:   "memory://integration-state",
 		KMSAlias:      "alias/skiff-" + env,
 		Roles: map[string]string{
-			"deployer": "arn:aws:iam::123456789012:role/skiff-" + env + "-deployer",
-			"runner":   "arn:aws:iam::123456789012:role/skiff-" + env + "-runner",
-			"skiffd":   "arn:aws:iam::123456789012:role/skiff-" + env + "-skiffd",
+			"developer": "arn:aws:iam::123456789012:role/skiff-" + env + "-developer",
+			"deployer":  "arn:aws:iam::123456789012:role/skiff-" + env + "-deployer",
+			"runner":    "arn:aws:iam::123456789012:role/skiff-" + env + "-runner",
+			"skiffd":    "arn:aws:iam::123456789012:role/skiff-" + env + "-skiffd",
 		},
 		CreatedAt: canonical.Time(h.Clock.Now()),
 		UpdatedAt: canonical.Time(h.Clock.Now()),

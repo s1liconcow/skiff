@@ -1,25 +1,43 @@
 package schema
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
 
 const Version = "skiff.state/v1"
 
 const EnvironmentRootSchemaVersion = "skiff.environment-root/v1"
 
+const (
+	EnvironmentClassProduction  = "production"
+	EnvironmentClassStaging     = "staging"
+	EnvironmentClassDevelopment = "development"
+	EnvironmentClassSandbox     = "sandbox"
+)
+
 type EnvironmentRoot struct {
-	SchemaVersion string              `json:"schema_version"`
-	Env           string              `json:"env"`
-	Provider      string              `json:"provider"`
-	Region        string              `json:"region"`
-	StateBucket   string              `json:"state_bucket"`
-	KMSAlias      string              `json:"kms_alias"`
-	Roles         map[string]string   `json:"roles"`
-	Network       *EnvironmentNetwork `json:"network,omitempty"`
-	Ingress       *EnvironmentIngress `json:"ingress,omitempty"`
-	Runner        *EnvironmentRunner  `json:"runner,omitempty"`
-	ReleaseTrust  *ReleaseTrust       `json:"release_trust,omitempty"`
-	CreatedAt     string              `json:"created_at"`
-	UpdatedAt     string              `json:"updated_at"`
+	SchemaVersion    string                    `json:"schema_version"`
+	Env              string                    `json:"env"`
+	EnvironmentClass string                    `json:"environment_class,omitempty"`
+	Provider         string                    `json:"provider"`
+	Region           string                    `json:"region"`
+	StateBucket      string                    `json:"state_bucket"`
+	KMSAlias         string                    `json:"kms_alias"`
+	Roles            map[string]string         `json:"roles"`
+	Network          *EnvironmentNetwork       `json:"network,omitempty"`
+	Ingress          *EnvironmentIngress       `json:"ingress,omitempty"`
+	Runner           *EnvironmentRunner        `json:"runner,omitempty"`
+	ReleasePolicy    *EnvironmentReleasePolicy `json:"release_policy,omitempty"`
+	ReleaseTrust     *ReleaseTrust             `json:"release_trust,omitempty"`
+	CreatedAt        string                    `json:"created_at"`
+	UpdatedAt        string                    `json:"updated_at"`
+}
+
+type EnvironmentReleasePolicy struct {
+	RequireSignedReleases bool `json:"require_signed_releases"`
+	AllowUnsignedCode     bool `json:"allow_unsigned_code"`
 }
 
 type EnvironmentNetwork struct {
@@ -73,6 +91,38 @@ type ReleaseTrustKey struct {
 	PublicKey string `json:"public_key"`
 	Status    string `json:"status"`
 	CreatedAt string `json:"created_at"`
+}
+
+func NormalizeEnvironmentClass(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return EnvironmentClassDevelopment, nil
+	case EnvironmentClassProduction:
+		return EnvironmentClassProduction, nil
+	case EnvironmentClassStaging:
+		return EnvironmentClassStaging, nil
+	case EnvironmentClassDevelopment:
+		return EnvironmentClassDevelopment, nil
+	case EnvironmentClassSandbox:
+		return EnvironmentClassSandbox, nil
+	default:
+		return "", fmt.Errorf("environment class must be one of production, staging, development, or sandbox")
+	}
+}
+
+func DefaultEnvironmentReleasePolicy(environmentClass string) (EnvironmentReleasePolicy, error) {
+	normalized, err := NormalizeEnvironmentClass(environmentClass)
+	if err != nil {
+		return EnvironmentReleasePolicy{}, err
+	}
+	switch normalized {
+	case EnvironmentClassProduction, EnvironmentClassStaging:
+		return EnvironmentReleasePolicy{RequireSignedReleases: true, AllowUnsignedCode: false}, nil
+	case EnvironmentClassDevelopment, EnvironmentClassSandbox:
+		return EnvironmentReleasePolicy{RequireSignedReleases: false, AllowUnsignedCode: true}, nil
+	default:
+		return EnvironmentReleasePolicy{}, fmt.Errorf("environment class must be one of production, staging, development, or sandbox")
+	}
 }
 
 type Actor struct {

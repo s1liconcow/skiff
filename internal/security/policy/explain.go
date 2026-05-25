@@ -34,10 +34,13 @@ func reasonForStatement(role Role, sid string) string {
 		"DenyStateDeletes":              "Keep durable object-state history and controls from being deleted by default.",
 		"DenyUnconditionalStateWrites":  "Force create-if-absent or compare-and-swap headers on state writes.",
 		"ReadStateBucketLocation":       "Allow clients to discover the bucket region without granting object access.",
+		"ListEnvironmentState":          "Allow read-only operators to discover environment root objects.",
 		"ListServiceState":              "Allow listing service state prefixes needed for service operations.",
+		"ListStatefulState":             "Allow listing stateful group state prefixes needed for service operations.",
 		"ListSagaState":                 "Allow listing saga state prefixes needed for operational workflows.",
 		"ListIndexState":                "Allow skiffd to read rebuildable index object prefixes.",
 		"ListResourceState":             "Allow skiffd to discover cloud resource record prefixes.",
+		"ListAuditState":                "Allow read-only operators to inspect audit record prefixes.",
 		"ListAllStateForEmergency":      "Allow emergency operators to enumerate state during break-glass recovery.",
 		"ReadServiceControlAndReleases": "Allow skiff-runner to read environment root, service control, release, and runtime manifests.",
 		"ReadOperationalState":          "Allow deployer and skiffd flows to inspect operation, saga, release, and audit state.",
@@ -49,6 +52,9 @@ func reasonForStatement(role Role, sid string) string {
 		"EmergencyCASControlState":      "Allow emergency compare-and-swap updates to control documents.",
 		"UseStateKMSKey":                "Allow use of the configured KMS alias for encrypted state object access.",
 		"UseReleaseSigningKMSKey":       "Allow release signing with the configured asymmetric KMS key.",
+		"AllowAssumeRole":               "Allow the role to be assumed through the account identity system.",
+		"AllowTemporaryWriteEscalation": "Require source identity, trace ID, and business-justification tags before issuing write-role credentials.",
+		"AllowAuditableEscalationTags":  "Permit only tagged STS sessions for auditable write-role escalation.",
 	}
 	if reason := reasons[sid]; reason != "" {
 		return reason

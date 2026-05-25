@@ -122,6 +122,41 @@ func TestBootstrapBuildsVerifierFromEnvironmentReleaseTrust(t *testing.T) {
 	}
 }
 
+func TestBootstrapAllowsUnsignedReleaseInDevelopmentEnvironment(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	cfg := parseRunnerConfig(t)
+	cfg.Env = "david-dev"
+
+	putDevelopmentEnvironmentRoot(t, ctx, store, cfg)
+	putServiceControl(t, ctx, store, cfg.Service, cfg.Env, "rel_01JNEW", "")
+	putUnsignedRelease(t, ctx, store, releaseFixture{
+		service:   cfg.Service,
+		env:       cfg.Env,
+		releaseID: "rel_01JNEW",
+		createdAt: "2026-05-17T00:00:00Z",
+		expiresAt: "2026-06-17T00:00:00Z",
+	})
+
+	result, err := runner.Bootstrap(ctx, runner.BootstrapRequest{
+		Config: cfg,
+		Store:  store,
+		MetadataProvider: runner.StaticMetadataProvider{Value: runner.Identity{
+			Provider:   "aws",
+			Region:     "us-west-2",
+			InstanceID: "i-abc123",
+		}},
+		StateStore: runner.FileStateStore{Path: filepath.Join(t.TempDir(), "state.json")},
+		Now:        fixedNow,
+	})
+	if err != nil {
+		t.Fatalf("Bootstrap returned error: %v", err)
+	}
+	if !result.Verification.OK || result.Verification.VerifiedSignature != nil {
+		t.Fatalf("unexpected unsigned verification: %+v", result.Verification)
+	}
+}
+
 func TestBootstrapReportsWrongReleaseTarget(t *testing.T) {
 	ctx := context.Background()
 	store := memory.New()
@@ -390,6 +425,30 @@ func putEnvironmentRoot(t *testing.T, ctx context.Context, store objstore.Object
 	putJSON(t, ctx, store, key, root)
 }
 
+func putDevelopmentEnvironmentRoot(t *testing.T, ctx context.Context, store objstore.ObjectStore, cfg config.Config) {
+	t.Helper()
+	key, err := paths.EnvironmentRoot(cfg.Env)
+	if err != nil {
+		t.Fatalf("EnvironmentRoot path returned error: %v", err)
+	}
+	root := schema.EnvironmentRoot{
+		SchemaVersion:    schema.EnvironmentRootSchemaVersion,
+		Env:              cfg.Env,
+		EnvironmentClass: schema.EnvironmentClassDevelopment,
+		Provider:         cfg.Provider,
+		Region:           cfg.Region,
+		StateBucket:      cfg.StateBucket,
+		Roles:            map[string]string{},
+		ReleasePolicy: &schema.EnvironmentReleasePolicy{
+			RequireSignedReleases: false,
+			AllowUnsignedCode:     true,
+		},
+		CreatedAt: "2026-05-16T17:00:00Z",
+		UpdatedAt: "2026-05-16T17:00:00Z",
+	}
+	putJSON(t, ctx, store, key, root)
+}
+
 type releaseFixture struct {
 	service       string
 	env           string
@@ -400,6 +459,25 @@ type releaseFixture struct {
 }
 
 func putSignedRelease(t *testing.T, ctx context.Context, store objstore.ObjectStore, signer signing.Signer, fixture releaseFixture) {
+	t.Helper()
+	objectService := fixture.objectService
+	if objectService == "" {
+		objectService = fixture.service
+	}
+	runtimeKey, runtimeManifest, manifest := releaseDocuments(t, fixture)
+	signed, err := release.SignManifest(ctx, manifest, signer, schema.Actor{ID: "alpha-one", Type: "agent"}, fixedTime())
+	if err != nil {
+		t.Fatalf("SignManifest returned error: %v", err)
+	}
+	releaseKey, err := paths.ReleaseManifest(objectService, fixture.releaseID)
+	if err != nil {
+		t.Fatalf("ReleaseManifest path returned error: %v", err)
+	}
+	putJSON(t, ctx, store, runtimeKey, runtimeManifest)
+	putJSON(t, ctx, store, releaseKey, signed)
+}
+
+func releaseDocuments(t *testing.T, fixture releaseFixture) (string, schema.RuntimeManifest, schema.ReleaseManifest) {
 	t.Helper()
 	objectService := fixture.objectService
 	if objectService == "" {
@@ -438,16 +516,27 @@ func putSignedRelease(t *testing.T, ctx context.Context, store objstore.ObjectSt
 		CreatedAt:             fixture.createdAt,
 		ExpiresAt:             fixture.expiresAt,
 	}
-	signed, err := release.SignManifest(ctx, manifest, signer, schema.Actor{ID: "alpha-one", Type: "agent"}, fixedTime())
+	return runtimeKey, runtimeManifest, manifest
+}
+
+func putUnsignedRelease(t *testing.T, ctx context.Context, store objstore.ObjectStore, fixture releaseFixture) {
+	t.Helper()
+	runtimeKey, runtimeManifest, manifest := releaseDocuments(t, fixture)
+	digest, err := release.ManifestDigest(manifest)
 	if err != nil {
-		t.Fatalf("SignManifest returned error: %v", err)
+		t.Fatalf("ManifestDigest returned error: %v", err)
+	}
+	manifest.Digest = digest
+	objectService := fixture.objectService
+	if objectService == "" {
+		objectService = fixture.service
 	}
 	releaseKey, err := paths.ReleaseManifest(objectService, fixture.releaseID)
 	if err != nil {
 		t.Fatalf("ReleaseManifest path returned error: %v", err)
 	}
 	putJSON(t, ctx, store, runtimeKey, runtimeManifest)
-	putJSON(t, ctx, store, releaseKey, signed)
+	putJSON(t, ctx, store, releaseKey, manifest)
 }
 
 func putJSON(t *testing.T, ctx context.Context, store objstore.ObjectStore, key string, document any) {

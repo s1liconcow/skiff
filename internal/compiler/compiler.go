@@ -7,6 +7,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/ir"
 	internalpackages "github.com/s1liconcow/skiff/internal/packages"
 	"github.com/s1liconcow/skiff/internal/spec"
+	"github.com/s1liconcow/skiff/internal/state/schema"
 )
 
 type Options struct {
@@ -14,6 +15,7 @@ type Options struct {
 	PackageLockDigest          string
 	PackageManifests           map[string]internalpackages.Manifest
 	AllowUnsignedLocalPackages bool
+	ReleasePolicy              schema.EnvironmentReleasePolicy
 }
 
 func Compile(ctx context.Context, doc spec.Document, opts Options) (*ir.Graph, error) {
@@ -24,13 +26,17 @@ func Compile(ctx context.Context, doc spec.Document, opts Options) (*ir.Graph, e
 	}
 
 	spec.ApplyDefaults(&doc)
-	result := spec.Validate(doc)
+	result := spec.ValidateWithOptions(doc, spec.ValidationOptions{
+		RequireDigestPinnedArtifacts: opts.ReleasePolicy.RequireSignedReleases,
+	})
 	if !result.OK {
 		return nil, spec.ValidationError{Diagnostics: result.Diagnostics}
 	}
 	if doc.Kind == spec.KindStack && doc.Stack != nil && len(doc.Stack.Dependencies) > 0 {
 		if diagnostics := internalpackages.ValidateStackLock(doc, opts.PackageLock, internalpackages.ValidationOptions{
-			AllowUnsignedLocal: opts.AllowUnsignedLocalPackages,
+			AllowUnsignedLocal:       opts.AllowUnsignedLocalPackages || opts.ReleasePolicy.AllowUnsignedCode,
+			RequirePackageLock:       opts.ReleasePolicy.RequireSignedReleases,
+			RequireSignedLockEntries: opts.ReleasePolicy.RequireSignedReleases,
 		}); len(diagnostics) > 0 {
 			return nil, spec.ValidationError{Diagnostics: diagnostics}
 		}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/s1liconcow/skiff/internal/compiler"
+	"github.com/s1liconcow/skiff/internal/config"
 	"github.com/s1liconcow/skiff/internal/packages"
 	"github.com/s1liconcow/skiff/internal/spec"
 )
@@ -12,6 +13,7 @@ import (
 type packageCompileFlags struct {
 	lockfile           *string
 	cacheRoot          *string
+	environmentClass   *string
 	allowUnsignedLocal *bool
 }
 
@@ -19,12 +21,26 @@ func addPackageCompileFlags(fs *flag.FlagSet) packageCompileFlags {
 	return packageCompileFlags{
 		lockfile:           fs.String("lockfile", "skiff.lock.json", "package lockfile used when stack.dependencies is present"),
 		cacheRoot:          fs.String("cache", packages.DefaultCacheRoot(), "content-addressed package cache used when stack.dependencies is present"),
+		environmentClass:   fs.String("environment-class", "", "environment class for validation policy: production, staging, development, or sandbox"),
 		allowUnsignedLocal: fs.Bool("allow-unsigned-local", false, "allow unsigned file:// packages for local development"),
 	}
 }
 
 func compilerOptionsForDocument(doc spec.Document, flags packageCompileFlags, requireLock bool) (compiler.Options, error) {
+	return compilerOptionsForDocumentWithConfig(doc, flags, requireLock, config.Config{})
+}
+
+func compilerOptionsForDocumentWithConfig(doc spec.Document, flags packageCompileFlags, requireLock bool, cfg config.Config) (compiler.Options, error) {
 	opts := compiler.Options{}
+	if flags.environmentClass != nil && *flags.environmentClass != "" {
+		cfg.EnvironmentClass = *flags.environmentClass
+		cfg.ReleasePolicy = nil
+	}
+	releasePolicy, err := config.EffectiveReleasePolicy(cfg)
+	if err != nil {
+		return opts, err
+	}
+	opts.ReleasePolicy = releasePolicy
 	if flags.allowUnsignedLocal != nil {
 		opts.AllowUnsignedLocalPackages = *flags.allowUnsignedLocal
 	}
@@ -43,8 +59,13 @@ func compilerOptionsForDocument(doc spec.Document, flags packageCompileFlags, re
 	if err != nil {
 		return opts, fmt.Errorf("read package lockfile %s: %w", lockfile, err)
 	}
+	validationOpts := packages.ValidationOptions{
+		AllowUnsignedLocal:       opts.AllowUnsignedLocalPackages || releasePolicy.AllowUnsignedCode,
+		RequirePackageLock:       releasePolicy.RequireSignedReleases,
+		RequireSignedLockEntries: releasePolicy.RequireSignedReleases,
+	}
 	if !exists {
-		if diagnostics := packages.ValidateStackLock(doc, nil, packages.ValidationOptions{AllowUnsignedLocal: opts.AllowUnsignedLocalPackages}); len(diagnostics) > 0 {
+		if diagnostics := packages.ValidateStackLock(doc, nil, validationOpts); len(diagnostics) > 0 {
 			return opts, spec.ValidationError{Diagnostics: diagnostics}
 		}
 		if requireLock {
@@ -52,7 +73,7 @@ func compilerOptionsForDocument(doc spec.Document, flags packageCompileFlags, re
 		}
 		return opts, nil
 	}
-	if diagnostics := packages.ValidateStackLock(doc, &lock, packages.ValidationOptions{AllowUnsignedLocal: opts.AllowUnsignedLocalPackages}); len(diagnostics) > 0 {
+	if diagnostics := packages.ValidateStackLock(doc, &lock, validationOpts); len(diagnostics) > 0 {
 		return opts, spec.ValidationError{Diagnostics: diagnostics}
 	}
 	cache := packages.Cache{Root: cacheRoot}

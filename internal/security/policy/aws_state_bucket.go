@@ -10,6 +10,7 @@ type Role string
 
 const (
 	RoleStateBucket Role = "state-bucket"
+	RoleDeveloper   Role = "developer"
 	RoleRunner      Role = "runner"
 	RoleDeployer    Role = "deployer"
 	RoleSkiffd      Role = "skiffd"
@@ -94,6 +95,8 @@ func PolicyForRole(role Role, bucket, kmsAlias string) (Document, error) {
 	switch role {
 	case RoleStateBucket:
 		return StateBucketPolicy(bucket), nil
+	case RoleDeveloper:
+		return DeveloperPolicy(bucket, kmsAlias), nil
 	case RoleRunner:
 		return RunnerPolicy(bucket, kmsAlias), nil
 	case RoleDeployer:
@@ -104,6 +107,25 @@ func PolicyForRole(role Role, bucket, kmsAlias string) (Document, error) {
 		return BreakGlassPolicy(bucket, kmsAlias), nil
 	default:
 		return Document{}, fmt.Errorf("unsupported policy role %q", role)
+	}
+}
+
+func DeveloperPolicy(bucket, kmsAlias string) Document {
+	return Document{
+		Version: "2012-10-17",
+		Statement: compactStatements([]Statement{
+			bucketLocationStatement(bucket),
+			listPrefixStatement("ListEnvironmentState", bucket, "envs/*"),
+			listPrefixStatement("ListServiceState", bucket, "services/*"),
+			listPrefixStatement("ListStatefulState", bucket, "stateful/*"),
+			listPrefixStatement("ListSagaState", bucket, "sagas/*"),
+			listPrefixStatement("ListIndexState", bucket, "indexes/*"),
+			listPrefixStatement("ListResourceState", bucket, "resources/*"),
+			listPrefixStatement("ListAuditState", bucket, "audit/*"),
+			readOperatorStateStatement(bucket),
+			readSkiffdIndexAndResourceStatement(bucket),
+			kmsStatement(kmsAlias, false),
+		}),
 	}
 }
 
@@ -174,6 +196,68 @@ func BreakGlassPolicy(bucket, kmsAlias string) Document {
 			casStateStatement("EmergencyCASControlState", bucket),
 			kmsStatement(kmsAlias, true),
 		}),
+	}
+}
+
+func DefaultAssumeRoleTrustPolicy() Document {
+	return Document{
+		Version: "2012-10-17",
+		Statement: []Statement{{
+			Sid:       "AllowAssumeRole",
+			Effect:    "Allow",
+			Principal: map[string]string{"AWS": "*"},
+			Action:    []string{"sts:AssumeRole"},
+		}},
+	}
+}
+
+func EscalatedWriteTrustPolicy() Document {
+	return Document{
+		Version: "2012-10-17",
+		Statement: []Statement{
+			{
+				Sid:       "AllowTemporaryWriteEscalation",
+				Effect:    "Allow",
+				Principal: map[string]string{"AWS": "*"},
+				Action:    []string{"sts:AssumeRole", "sts:SetSourceIdentity"},
+				Condition: auditableAssumeRoleConditions(),
+			},
+			{
+				Sid:       "AllowAuditableEscalationTags",
+				Effect:    "Allow",
+				Principal: map[string]string{"AWS": "*"},
+				Action:    []string{"sts:TagSession"},
+				Condition: auditableSessionTagConditions(),
+			},
+		},
+	}
+}
+
+func auditableAssumeRoleConditions() map[string]map[string]string {
+	return map[string]map[string]string{
+		"Null": {
+			"aws:RequestTag/skiff.dev/business-justification": "false",
+			"aws:RequestTag/skiff.dev/trace-id":               "false",
+			"sts:SourceIdentity":                              "false",
+		},
+		"StringLike": {
+			"aws:RequestTag/skiff.dev/business-justification": "?*",
+			"aws:RequestTag/skiff.dev/trace-id":               "tr_*",
+			"sts:SourceIdentity":                              "?*",
+		},
+	}
+}
+
+func auditableSessionTagConditions() map[string]map[string]string {
+	return map[string]map[string]string{
+		"Null": {
+			"aws:RequestTag/skiff.dev/business-justification": "false",
+			"aws:RequestTag/skiff.dev/trace-id":               "false",
+		},
+		"StringLike": {
+			"aws:RequestTag/skiff.dev/business-justification": "?*",
+			"aws:RequestTag/skiff.dev/trace-id":               "tr_*",
+		},
 	}
 }
 

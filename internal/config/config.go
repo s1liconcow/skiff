@@ -5,6 +5,8 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+
+	"github.com/s1liconcow/skiff/internal/state/schema"
 )
 
 type Mode string
@@ -18,6 +20,7 @@ const (
 
 const (
 	FieldEnv                             = "env"
+	FieldEnvironmentClass                = "environment_class"
 	FieldProvider                        = "provider"
 	FieldRegion                          = "region"
 	FieldStateBucket                     = "state_bucket"
@@ -39,6 +42,9 @@ const (
 	FieldRuntimeManifestKey              = "runtime_manifest_key"
 	FieldReleaseSigningKeyID             = "release_signing_key_id"
 	FieldReleaseSigningKeyRef            = "release_signing_key_ref"
+	FieldRequireSignedReleases           = "require_signed_releases"
+	FieldAllowUnsignedCode               = "allow_unsigned_code"
+	FieldWriteRoleARN                    = "write_role_arn"
 	FieldAWSLiveApply                    = "aws_live_apply"
 	FieldAWSVPCID                        = "aws_vpc_id"
 	FieldAWSSubnetIDs                    = "aws_subnet_ids"
@@ -49,35 +55,43 @@ const (
 )
 
 type Config struct {
-	Env                             string   `json:"env,omitempty"`
-	Provider                        string   `json:"provider,omitempty"`
-	Region                          string   `json:"region,omitempty"`
-	StateBucket                     string   `json:"state_bucket,omitempty"`
-	KMSKey                          string   `json:"kms_key,omitempty"`
-	AuthMode                        string   `json:"auth_mode,omitempty"`
-	LogLevel                        string   `json:"log_level,omitempty"`
-	Mode                            Mode     `json:"mode,omitempty"`
-	APIURL                          string   `json:"api_url,omitempty"`
-	Service                         string   `json:"service,omitempty"`
-	ControlKey                      string   `json:"control_key,omitempty"`
-	ReleaseID                       string   `json:"release_id,omitempty"`
-	StatefulGroup                   string   `json:"stateful_group,omitempty"`
-	StatefulMember                  int      `json:"stateful_member,omitempty"`
-	StatefulGeneration              int64    `json:"stateful_generation,omitempty"`
-	StatefulVolumeMountPath         string   `json:"stateful_volume_mount_path,omitempty"`
-	StatefulStableHostname          string   `json:"stateful_stable_hostname,omitempty"`
-	StatefulRecipe                  string   `json:"stateful_recipe,omitempty"`
-	ReleaseManifestKey              string   `json:"release_manifest_key,omitempty"`
-	RuntimeManifestKey              string   `json:"runtime_manifest_key,omitempty"`
-	ReleaseSigningKeyID             string   `json:"release_signing_key_id,omitempty"`
-	ReleaseSigningKeyRef            string   `json:"release_signing_key_ref,omitempty"`
-	AWSLiveApply                    bool     `json:"aws_live_apply,omitempty"`
-	AWSVPCID                        string   `json:"aws_vpc_id,omitempty"`
-	AWSSubnetIDs                    []string `json:"aws_subnet_ids,omitempty"`
-	AWSAMIID                        string   `json:"aws_ami_id,omitempty"`
-	AWSALBListenerARN               string   `json:"aws_alb_listener_arn,omitempty"`
-	AWSLoadBalancerSecurityGroupRef string   `json:"aws_load_balancer_security_group_ref,omitempty"`
-	Logs                            *Logs    `json:"logs,omitempty"`
+	Env                             string         `json:"env,omitempty"`
+	EnvironmentClass                string         `json:"environment_class,omitempty"`
+	Provider                        string         `json:"provider,omitempty"`
+	Region                          string         `json:"region,omitempty"`
+	StateBucket                     string         `json:"state_bucket,omitempty"`
+	KMSKey                          string         `json:"kms_key,omitempty"`
+	AuthMode                        string         `json:"auth_mode,omitempty"`
+	LogLevel                        string         `json:"log_level,omitempty"`
+	Mode                            Mode           `json:"mode,omitempty"`
+	APIURL                          string         `json:"api_url,omitempty"`
+	Service                         string         `json:"service,omitempty"`
+	ControlKey                      string         `json:"control_key,omitempty"`
+	ReleaseID                       string         `json:"release_id,omitempty"`
+	StatefulGroup                   string         `json:"stateful_group,omitempty"`
+	StatefulMember                  int            `json:"stateful_member,omitempty"`
+	StatefulGeneration              int64          `json:"stateful_generation,omitempty"`
+	StatefulVolumeMountPath         string         `json:"stateful_volume_mount_path,omitempty"`
+	StatefulStableHostname          string         `json:"stateful_stable_hostname,omitempty"`
+	StatefulRecipe                  string         `json:"stateful_recipe,omitempty"`
+	ReleaseManifestKey              string         `json:"release_manifest_key,omitempty"`
+	RuntimeManifestKey              string         `json:"runtime_manifest_key,omitempty"`
+	ReleaseSigningKeyID             string         `json:"release_signing_key_id,omitempty"`
+	ReleaseSigningKeyRef            string         `json:"release_signing_key_ref,omitempty"`
+	ReleasePolicy                   *ReleasePolicy `json:"release_policy,omitempty"`
+	WriteRoleARN                    string         `json:"write_role_arn,omitempty"`
+	AWSLiveApply                    bool           `json:"aws_live_apply,omitempty"`
+	AWSVPCID                        string         `json:"aws_vpc_id,omitempty"`
+	AWSSubnetIDs                    []string       `json:"aws_subnet_ids,omitempty"`
+	AWSAMIID                        string         `json:"aws_ami_id,omitempty"`
+	AWSALBListenerARN               string         `json:"aws_alb_listener_arn,omitempty"`
+	AWSLoadBalancerSecurityGroupRef string         `json:"aws_load_balancer_security_group_ref,omitempty"`
+	Logs                            *Logs          `json:"logs,omitempty"`
+}
+
+type ReleasePolicy struct {
+	RequireSignedReleases bool `json:"require_signed_releases"`
+	AllowUnsignedCode     bool `json:"allow_unsigned_code"`
 }
 
 type Logs struct {
@@ -93,6 +107,28 @@ type Loaded struct {
 	Sources    map[string]string `json:"sources,omitempty"`
 	ConfigPath string            `json:"config_path,omitempty"`
 	Context    string            `json:"context,omitempty"`
+}
+
+func EffectiveReleasePolicy(cfg Config) (schema.EnvironmentReleasePolicy, error) {
+	if cfg.EnvironmentClass == "" && cfg.ReleasePolicy == nil {
+		return schema.EnvironmentReleasePolicy{}, nil
+	}
+	var policy schema.EnvironmentReleasePolicy
+	var err error
+	if cfg.EnvironmentClass != "" {
+		policy, err = schema.DefaultEnvironmentReleasePolicy(cfg.EnvironmentClass)
+		if err != nil {
+			return schema.EnvironmentReleasePolicy{}, err
+		}
+	}
+	if cfg.ReleasePolicy != nil {
+		policy.RequireSignedReleases = cfg.ReleasePolicy.RequireSignedReleases
+		policy.AllowUnsignedCode = cfg.ReleasePolicy.AllowUnsignedCode
+	}
+	if policy.RequireSignedReleases && policy.AllowUnsignedCode {
+		return schema.EnvironmentReleasePolicy{}, fmt.Errorf("allow_unsigned_code cannot be true when require_signed_releases is true")
+	}
+	return policy, nil
 }
 
 func Defaults(mode Mode) Loaded {
@@ -124,6 +160,10 @@ func (l Loaded) Redacted() Loaded {
 		logs := *l.Config.Logs
 		logs.Labels = cloneStringMap(logs.Labels)
 		out.Config.Logs = &logs
+	}
+	if l.Config.ReleasePolicy != nil {
+		policy := *l.Config.ReleasePolicy
+		out.Config.ReleasePolicy = &policy
 	}
 	out.Config.AWSSubnetIDs = append([]string(nil), l.Config.AWSSubnetIDs...)
 	for field, source := range l.Sources {
@@ -199,6 +239,25 @@ func Validate(loaded Loaded) error {
 	}
 	if cfg.Env != "" {
 		validateName(&fields, loaded.Sources, FieldEnv, cfg.Env)
+	}
+	if cfg.EnvironmentClass != "" {
+		normalized, err := schema.NormalizeEnvironmentClass(cfg.EnvironmentClass)
+		if err != nil || normalized != cfg.EnvironmentClass {
+			fields = append(fields, FieldError{
+				Field:   FieldEnvironmentClass,
+				Source:  sourceFor(loaded.Sources, FieldEnvironmentClass),
+				Code:    "INVALID_VALUE",
+				Message: "environment class must be one of production, staging, development, or sandbox",
+			})
+		}
+	}
+	if cfg.ReleasePolicy != nil && cfg.ReleasePolicy.RequireSignedReleases && cfg.ReleasePolicy.AllowUnsignedCode {
+		fields = append(fields, FieldError{
+			Field:   FieldAllowUnsignedCode,
+			Source:  sourceFor(loaded.Sources, FieldAllowUnsignedCode),
+			Code:    "INVALID_VALUE",
+			Message: "allow_unsigned_code cannot be true when require_signed_releases is true",
+		})
 	}
 	if cfg.Service != "" {
 		validateName(&fields, loaded.Sources, FieldService, cfg.Service)
@@ -335,6 +394,7 @@ func sourceFor(sources map[string]string, field string) string {
 func FieldNames() []string {
 	names := []string{
 		FieldEnv,
+		FieldEnvironmentClass,
 		FieldProvider,
 		FieldRegion,
 		FieldStateBucket,
@@ -345,6 +405,9 @@ func FieldNames() []string {
 		FieldAPIURL,
 		FieldService,
 		FieldControlKey,
+		FieldRequireSignedReleases,
+		FieldAllowUnsignedCode,
+		FieldWriteRoleARN,
 		FieldAWSLiveApply,
 		FieldAWSVPCID,
 		FieldAWSSubnetIDs,

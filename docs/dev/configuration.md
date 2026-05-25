@@ -43,16 +43,25 @@ contexts:
     context:
       mode: direct
       env: prod
+      environmentClass: production
       provider: aws
       region: us-west-2
       state: s3://skiff-state-prod
+      writeRoleARN: arn:aws:iam::123456789012:role/skiff-prod-deployer
+      releasePolicy:
+        requireSignedReleases: true
+        allowUnsignedCode: false
   - name: local
     context:
       mode: direct
-      env: prod
+      env: local
+      environmentClass: development
       provider: fake
       region: local
       state: file:///tmp/skiff-state
+      releasePolicy:
+        requireSignedReleases: false
+        allowUnsignedCode: true
 ```
 
 Context commands:
@@ -76,6 +85,7 @@ Environment variable equivalents:
 SKIFF_CONFIG
 SKIFF_CONTEXT
 SKIFF_ENV
+SKIFF_ENVIRONMENT_CLASS
 SKIFF_PROVIDER
 SKIFF_REGION
 SKIFF_STATE_BUCKET
@@ -86,6 +96,9 @@ SKIFF_MODE
 SKIFF_API_URL
 SKIFF_SERVICE
 SKIFF_CONTROL_KEY
+SKIFF_REQUIRE_SIGNED_RELEASES
+SKIFF_ALLOW_UNSIGNED_CODE
+SKIFF_WRITE_ROLE_ARN
 SKIFF_AWS_LIVE_APPLY
 SKIFF_AWS_VPC_ID
 SKIFF_AWS_SUBNET_IDS
@@ -139,6 +152,30 @@ to KMS-held private signing material; object state stores only public release
 trust metadata in the environment root so runners can verify release manifests
 without access to the signing key. Use `skiff bootstrap aws --signing-backend
 keychain` for a local OS-keychain fallback.
+
+Environment class is explicit policy, not an environment-name convention.
+Bootstrap defaults to `development`; production-like controls require
+`--class production` or `--class staging`. `production` and `staging` default to
+signed releases and no unsigned code. `development` and `sandbox` default to
+allowing unsigned local/dev code and do not require release signatures.
+Bootstrap writes the resolved `releasePolicy` into both the environment root
+and the local context so later commands enforce the saved policy instead of
+guessing from names like `prod`. To catch accidental bootstrap defaults, an
+environment named `prod` or `production` requires `--class production` or
+`--yes` confirmation that the non-production class is intentional.
+
+AWS bootstrap also creates a read-only `developer` role for day-to-day Skiff
+state inspection. The write role remains `deployer`, but its trust policy is
+issued for short STS sessions and requires source identity plus session tags
+for `skiff.dev/trace-id` and `skiff.dev/business-justification` so write
+escalations are visible in AWS audit logs.
+
+Use `skiff sudo <business-justification>` to enter a temporary write session:
+
+```bash
+eval "$(skiff sudo JIRA-1234)"
+skiff deploy payments-api
+```
 
 Runner user-data is strict JSON under a top-level `skiff` object:
 

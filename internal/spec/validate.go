@@ -32,6 +32,10 @@ type Result struct {
 	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
 }
 
+type ValidationOptions struct {
+	RequireDigestPinnedArtifacts bool
+}
+
 type ValidationError struct {
 	Diagnostics []Diagnostic `json:"diagnostics"`
 }
@@ -48,6 +52,10 @@ func (e ValidationError) Error() string {
 }
 
 func Validate(doc Document) Result {
+	return ValidateWithOptions(doc, ValidationOptions{})
+}
+
+func ValidateWithOptions(doc Document, opts ValidationOptions) Result {
 	var diagnostics []Diagnostic
 	add := func(path, code, message string) {
 		diagnostics = append(diagnostics, Diagnostic{
@@ -71,7 +79,7 @@ func Validate(doc Document) Result {
 
 	switch doc.Kind {
 	case KindService, KindWorker, KindJob:
-		validateArtifactAt(&diagnostics, doc.Artifact, doc.Metadata.Env, "$.artifact")
+		validateArtifactAt(&diagnostics, doc.Artifact, opts, "$.artifact")
 		validateRuntimeAt(&diagnostics, doc.Kind, doc.Runtime, "$.runtime")
 		validateScaleAt(&diagnostics, doc.Kind, doc.Scale, "$.scale")
 	case KindManagedDatabase:
@@ -90,13 +98,13 @@ func Validate(doc Document) Result {
 		if doc.Stack == nil {
 			add("$.stack", "REQUIRED", "stack specs must include stack settings")
 		} else {
-			validateStack(&diagnostics, doc)
+			validateStack(&diagnostics, doc, opts)
 		}
 	case KindMultiRegionStack:
 		if doc.MultiRegion == nil {
 			add("$.multiRegion", "REQUIRED", "multi-region stack specs must include multiRegion settings")
 		} else {
-			validateMultiRegionStack(&diagnostics, doc)
+			validateMultiRegionStack(&diagnostics, doc, opts)
 		}
 	}
 	validateNetworkAt(&diagnostics, doc.Network, "$.network")
@@ -113,7 +121,7 @@ func Validate(doc Document) Result {
 	}
 }
 
-func validateMultiRegionStack(diagnostics *[]Diagnostic, doc Document) {
+func validateMultiRegionStack(diagnostics *[]Diagnostic, doc Document, opts ValidationOptions) {
 	stack := doc.MultiRegion
 	validateName(diagnostics, "$.multiRegion.primaryRegion", stack.PrimaryRegion, "primaryRegion is required and must be a DNS-style region name")
 	if len(stack.SecondaryRegions) == 0 {
@@ -132,7 +140,7 @@ func validateMultiRegionStack(diagnostics *[]Diagnostic, doc Document) {
 		regions[region] = struct{}{}
 	}
 	validateName(diagnostics, "$.multiRegion.service.name", stack.Service.Name, "multi-region service name must be a DNS-style Skiff name")
-	validateArtifactAt(diagnostics, stack.Service.Artifact, doc.Metadata.Env, "$.multiRegion.service.artifact")
+	validateArtifactAt(diagnostics, stack.Service.Artifact, opts, "$.multiRegion.service.artifact")
 	validateRuntimeAt(diagnostics, KindService, stack.Service.Runtime, "$.multiRegion.service.runtime")
 	validateScaleAt(diagnostics, KindService, stack.Service.Scale, "$.multiRegion.service.scale")
 	validateNetworkAt(diagnostics, stack.Service.Network, "$.multiRegion.service.network")
@@ -204,7 +212,7 @@ func validateName(diagnostics *[]Diagnostic, path, value, message string) {
 	}
 }
 
-func validateArtifactAt(diagnostics *[]Diagnostic, artifact *Artifact, env, path string) {
+func validateArtifactAt(diagnostics *[]Diagnostic, artifact *Artifact, opts ValidationOptions, path string) {
 	if artifact == nil {
 		*diagnostics = append(*diagnostics, Diagnostic{Path: path, Code: "REQUIRED", Severity: SeverityError, Message: "workload specs must include an artifact"})
 		return
@@ -217,15 +225,15 @@ func validateArtifactAt(diagnostics *[]Diagnostic, artifact *Artifact, env, path
 	if strings.TrimSpace(artifact.Ref) == "" {
 		*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".ref", Code: "REQUIRED", Severity: SeverityError, Message: "artifact.ref is required"})
 	}
-	if isProductionEnv(env) {
+	if opts.RequireDigestPinnedArtifacts {
 		switch artifact.Type {
 		case "oci":
 			if !strings.Contains(artifact.Ref, "@sha256:") {
-				*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".ref", Code: "MUTABLE_ARTIFACT_REF", Severity: SeverityError, Message: "production OCI artifacts must be digest-pinned with @sha256:"})
+				*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".ref", Code: "MUTABLE_ARTIFACT_REF", Severity: SeverityError, Message: "production-like OCI artifacts must be digest-pinned with @sha256:"})
 			}
 		case "tarball", "binary":
 			if !strings.HasPrefix(artifact.Digest, "sha256:") {
-				*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".digest", Code: "ARTIFACT_DIGEST_REQUIRED", Severity: SeverityError, Message: "production tarball and binary artifacts require a sha256 digest"})
+				*diagnostics = append(*diagnostics, Diagnostic{Path: path + ".digest", Code: "ARTIFACT_DIGEST_REQUIRED", Severity: SeverityError, Message: "production-like tarball and binary artifacts require a sha256 digest"})
 			}
 		}
 	}
@@ -384,7 +392,7 @@ func validateStatefulGroup(diagnostics *[]Diagnostic, group StatefulGroup, path 
 	}
 }
 
-func validateStack(diagnostics *[]Diagnostic, doc Document) {
+func validateStack(diagnostics *[]Diagnostic, doc Document, opts ValidationOptions) {
 	stack := doc.Stack
 	if len(stack.Services) == 0 {
 		*diagnostics = append(*diagnostics, Diagnostic{Path: "$.stack.services", Code: "REQUIRED", Severity: SeverityError, Message: "stack specs must include at least one service"})
@@ -406,7 +414,7 @@ func validateStack(diagnostics *[]Diagnostic, doc Document) {
 		base := fmt.Sprintf("$.stack.services[%d]", i)
 		validateName(diagnostics, base+".name", service.Name, "stack service name must be a DNS-style Skiff name")
 		serviceNames[service.Name] = struct{}{}
-		validateArtifactAt(diagnostics, service.Artifact, doc.Metadata.Env, base+".artifact")
+		validateArtifactAt(diagnostics, service.Artifact, opts, base+".artifact")
 		validateRuntimeAt(diagnostics, KindService, service.Runtime, base+".runtime")
 		validateScaleAt(diagnostics, KindService, service.Scale, base+".scale")
 		validateNetworkAt(diagnostics, service.Network, base+".network")

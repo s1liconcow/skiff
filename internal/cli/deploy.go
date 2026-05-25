@@ -91,7 +91,7 @@ func runDeploy(binary string, args []string, root rootOptions, stdout, stderr io
 	if err != nil {
 		return writeSpecError(binary, "SPEC_DECODE_FAILED", *flags.format, *flags.traceID, err, nil, stdout, stderr)
 	}
-	compileOpts, err := compilerOptionsForDocument(*doc, packageFlags, true)
+	compileOpts, err := compilerOptionsForDocumentWithConfig(*doc, packageFlags, true, loaded.Config)
 	if err != nil {
 		var validation spec.ValidationError
 		if errors.As(err, &validation) {
@@ -312,6 +312,7 @@ func splitDeployArgs(args []string) ([]string, []string, error) {
 		"config":                               true,
 		"context":                              true,
 		"env":                                  true,
+		"environment-class":                    true,
 		"file":                                 true,
 		"format":                               true,
 		"key-id":                               true,

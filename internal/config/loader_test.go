@@ -101,6 +101,48 @@ contexts:
 	}
 }
 
+func TestLoadSkiffConfigEnvironmentClassAndReleasePolicy(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".skiffconfig")
+	if err := os.WriteFile(path, []byte(`
+apiVersion: skiff.dev/v1alpha1
+kind: SkiffConfig
+currentContext: dev
+contexts:
+  - name: dev
+    context:
+      mode: direct
+      env: david-dev
+      environmentClass: development
+      provider: aws
+      region: us-west-2
+      state: s3://skiff-state-dev
+      releasePolicy:
+        requireSignedReleases: false
+        allowUnsignedCode: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Load(LoadOptions{ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(loaded); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := EffectiveReleasePolicy(loaded.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Config.EnvironmentClass != "development" || policy.RequireSignedReleases || !policy.AllowUnsignedCode {
+		t.Fatalf("unexpected security posture: config=%+v policy=%+v", loaded.Config, policy)
+	}
+	if loaded.Sources[FieldEnvironmentClass] == "" || loaded.Sources[FieldAllowUnsignedCode] == "" {
+		t.Fatalf("missing field sources: %+v", loaded.Sources)
+	}
+}
+
 func TestLoadSkiffConfigContextFromConfigPathFragment(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".skiffconfig")

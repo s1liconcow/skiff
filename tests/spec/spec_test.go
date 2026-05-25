@@ -49,7 +49,7 @@ func TestDecodeYAMLAppliesDefaultsAndValidates(t *testing.T) {
 		t.Fatalf("unexpected health defaults: %+v", doc.Runtime.Health)
 	}
 
-	result := spec.Validate(*doc)
+	result := spec.ValidateWithOptions(*doc, spec.ValidationOptions{RequireDigestPinnedArtifacts: true})
 	if !result.OK {
 		t.Fatalf("Validate diagnostics = %+v, want OK", result.Diagnostics)
 	}
@@ -71,12 +71,27 @@ func TestValidationDiagnosticsArePathSpecific(t *testing.T) {
 		t.Fatalf("Decode returned error: %v", err)
 	}
 	doc.Network.Ingress.Host = "localhost"
-	result := spec.Validate(*doc)
+	result := spec.ValidateWithOptions(*doc, spec.ValidationOptions{RequireDigestPinnedArtifacts: true})
 	if result.OK {
 		t.Fatal("Validate returned OK, want diagnostics")
 	}
 	assertDiagnostic(t, result.Diagnostics, "$.artifact.ref", "MUTABLE_ARTIFACT_REF")
 	assertDiagnostic(t, result.Diagnostics, "$.network.ingress.host", "INVALID_HOST")
+}
+
+func TestProdEnvNameDoesNotImplyDigestPinnedArtifactPolicy(t *testing.T) {
+	doc, err := spec.Decode([]byte(strings.Replace(validServiceYAML, "@sha256:abc123", ":latest", 1)), spec.DecodeOptions{})
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	result := spec.Validate(*doc)
+	if !result.OK {
+		for _, diag := range result.Diagnostics {
+			if diag.Code == "MUTABLE_ARTIFACT_REF" {
+				t.Fatalf("metadata.env=prod should not imply production artifact policy: %+v", result.Diagnostics)
+			}
+		}
+	}
 }
 
 func TestSecretRefsRejectPlaintextValues(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/s1liconcow/skiff/internal/bootstrap"
 	"github.com/s1liconcow/skiff/internal/config"
@@ -141,6 +142,7 @@ func TestCommandsSupportHelpFlags(t *testing.T) {
 		{"stateful", "cancel"},
 		{"stateful", "compensate"},
 		{"status"},
+		{"sudo"},
 		{"terraform"},
 		{"terraform", "generate"},
 		{"tui"},
@@ -525,6 +527,7 @@ func TestBootstrapAWSDryRunJSON(t *testing.T) {
 	code := Run("skiff", []string{
 		"bootstrap", "aws",
 		"--env", "prod",
+		"--yes",
 		"--region", "us-west-2",
 		"--bucket", "skiff-state-prod",
 		"--dry-run",
@@ -548,7 +551,14 @@ func TestBootstrapAWSDryRunJSON(t *testing.T) {
 			KMSAlias       string `json:"kms_alias"`
 			SigningKeyRef  string `json:"release_signing_key_ref"`
 			RootObjectKey  string `json:"root_object_key"`
-			Resources      []struct {
+			RootConfig     struct {
+				EnvironmentClass string `json:"environment_class"`
+				ReleasePolicy    *struct {
+					RequireSignedReleases bool `json:"require_signed_releases"`
+					AllowUnsignedCode     bool `json:"allow_unsigned_code"`
+				} `json:"release_policy"`
+			} `json:"root_config"`
+			Resources []struct {
 				Kind   string `json:"kind"`
 				Action string `json:"action"`
 			} `json:"resources"`
@@ -574,11 +584,46 @@ func TestBootstrapAWSDryRunJSON(t *testing.T) {
 	if got.Plan.RootObjectKey != "envs/prod/root.json" {
 		t.Fatalf("root object key = %q", got.Plan.RootObjectKey)
 	}
-	if len(got.Plan.Resources) != 8 {
-		t.Fatalf("resource count = %d, want 8", len(got.Plan.Resources))
+	if got.Plan.RootConfig.EnvironmentClass != "development" || got.Plan.RootConfig.ReleasePolicy == nil || got.Plan.RootConfig.ReleasePolicy.RequireSignedReleases || !got.Plan.RootConfig.ReleasePolicy.AllowUnsignedCode {
+		t.Fatalf("bootstrap default should be non-production: %+v", got.Plan.RootConfig)
+	}
+	if len(got.Plan.Resources) != 9 {
+		t.Fatalf("resource count = %d, want 9", len(got.Plan.Resources))
 	}
 	if len(got.Plan.BucketPolicy.Statement) != 5 {
 		t.Fatalf("bucket policy statements = %d, want 5", len(got.Plan.BucketPolicy.Statement))
+	}
+}
+
+func TestBootstrapAWSProdEnvDefaultClassRequiresConfirmation(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"bootstrap", "aws",
+		"--env", "prod",
+		"--region", "us-west-2",
+		"--bucket", "skiff-state-prod",
+		"--dry-run",
+		"--format", "json",
+		"--trace-id", "tr_bootstrap_confirm_class",
+	}, &stdout, &stderr)
+	if code != ExitUserError {
+		t.Fatalf("exit code = %d, want %d; stderr = %s, stdout = %s", code, ExitUserError, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty JSON-mode stderr", stderr.String())
+	}
+
+	var got commandErrorOutput
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("bootstrap error output is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if got.OK || got.Code != "VALIDATION_FAILED" || got.TraceID != "tr_bootstrap_confirm_class" {
+		t.Fatalf("unexpected error envelope: %+v", got)
+	}
+	if !strings.Contains(got.Summary, `environment "prod" looks like production`) ||
+		!strings.Contains(got.Summary, "--class production") ||
+		!strings.Contains(got.Summary, "--yes") {
+		t.Fatalf("unexpected confirmation summary: %q", got.Summary)
 	}
 }
 
@@ -587,6 +632,7 @@ func TestBootstrapAWSManagedNetworkDryRunJSON(t *testing.T) {
 	code := Run("skiff", []string{
 		"bootstrap", "aws",
 		"--env", "dev",
+		"--class", "development",
 		"--region", "us-west-2",
 		"--network", "managed",
 		"--ingress", "private",
@@ -606,6 +652,11 @@ func TestBootstrapAWSManagedNetworkDryRunJSON(t *testing.T) {
 		Plan struct {
 			StateBucketURI string `json:"state_bucket_uri"`
 			RootConfig     struct {
+				EnvironmentClass string `json:"environment_class"`
+				ReleasePolicy    *struct {
+					RequireSignedReleases bool `json:"require_signed_releases"`
+					AllowUnsignedCode     bool `json:"allow_unsigned_code"`
+				} `json:"release_policy"`
 				Network *struct {
 					Mode string `json:"mode"`
 				} `json:"network"`
@@ -630,6 +681,9 @@ func TestBootstrapAWSManagedNetworkDryRunJSON(t *testing.T) {
 	}
 	if got.Plan.RootConfig.Network == nil || got.Plan.RootConfig.Network.Mode != "managed" {
 		t.Fatalf("managed network missing from root config: %+v", got.Plan.RootConfig)
+	}
+	if got.Plan.RootConfig.EnvironmentClass != "development" || got.Plan.RootConfig.ReleasePolicy == nil || got.Plan.RootConfig.ReleasePolicy.RequireSignedReleases || !got.Plan.RootConfig.ReleasePolicy.AllowUnsignedCode {
+		t.Fatalf("development security posture missing from root config: %+v", got.Plan.RootConfig)
 	}
 	if got.Plan.RootConfig.Ingress == nil || got.Plan.RootConfig.Ingress.Type != "private" {
 		t.Fatalf("private ingress missing from root config: %+v", got.Plan.RootConfig)
@@ -788,6 +842,7 @@ func TestBootstrapAWSEmitTerraform(t *testing.T) {
 	code := Run("skiff", []string{
 		"bootstrap", "aws",
 		"--env", "prod",
+		"--class", "production",
 		"--region", "us-west-2",
 		"--state-bucket", "s3://skiff-state-prod",
 		"--emit", "terraform",
@@ -804,13 +859,129 @@ func TestBootstrapAWSEmitTerraform(t *testing.T) {
 		`resource "aws_kms_key" "skiff_release_signing"`,
 		`data "aws_kms_public_key" "skiff_release_signing"`,
 		`release_trust = {`,
+		`environment_class = "production"`,
+		`require_signed_releases = true`,
+		`allow_unsigned_code     = false`,
 		`DenyUnconditionalStateWrites`,
 		`UseReleaseSigningKMSKey`,
+		`skiff-prod-developer`,
 		`skiff-prod-runner`,
+		`skiff.dev/business-justification`,
+		`max_session_duration = 3600`,
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("terraform output missing %q:\n%s", want, stdout.String())
 		}
+	}
+}
+
+func TestSudoAssumesWriteRoleAndPrintsExports(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".skiffconfig")
+	if err := os.WriteFile(configPath, []byte(`apiVersion: skiff.dev/v1alpha1
+kind: SkiffConfig
+currentContext: prod
+contexts:
+  - name: prod
+    context:
+      mode: direct
+      env: prod
+      provider: aws
+      region: us-west-2
+      state: s3://skiff-state-prod
+      writeRoleARN: arn:aws:iam::123456789012:role/skiff-prod-deployer
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	previous := assumeSudoRole
+	assumeSudoRole = func(ctx context.Context, req sudoAssumeRequest) (*sudoCredentials, error) {
+		if req.RoleARN != "arn:aws:iam::123456789012:role/skiff-prod-deployer" ||
+			req.SourceIdentity != "alice@example.com" ||
+			req.BusinessJustification != "JIRA-1234" ||
+			req.TraceID != "tr_sudo" ||
+			req.Region != "us-west-2" ||
+			req.DurationSeconds != 3600 {
+			t.Fatalf("unexpected sudo request: %+v", req)
+		}
+		return &sudoCredentials{
+			AccessKeyID:     "AKIA_TEST",
+			SecretAccessKey: "secret",
+			SessionToken:    "token",
+			Expiration:      time.Date(2026, 5, 21, 20, 0, 0, 0, time.UTC),
+			AssumedRoleARN:  "arn:aws:sts::123456789012:assumed-role/skiff-prod-deployer/skiff-alice",
+			SourceIdentity:  "alice@example.com",
+		}, nil
+	}
+	t.Cleanup(func() { assumeSudoRole = previous })
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"sudo", "JIRA-1234",
+		"--config", configPath,
+		"--source-identity", "alice@example.com",
+		"--trace-id", "tr_sudo",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{
+		"export AWS_ACCESS_KEY_ID='AKIA_TEST'",
+		"export AWS_SECRET_ACCESS_KEY='secret'",
+		"export AWS_SESSION_TOKEN='token'",
+		"export SKIFF_TRACE_ID='tr_sudo'",
+		"export SKIFF_BUSINESS_JUSTIFICATION='JIRA-1234'",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("sudo output missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestSudoJSONIncludesTraceAndExports(t *testing.T) {
+	previous := assumeSudoRole
+	assumeSudoRole = func(ctx context.Context, req sudoAssumeRequest) (*sudoCredentials, error) {
+		return &sudoCredentials{
+			AccessKeyID:     "AKIA_JSON",
+			SecretAccessKey: "json-secret",
+			SessionToken:    "json-token",
+			Expiration:      time.Date(2026, 5, 21, 20, 0, 0, 0, time.UTC),
+		}, nil
+	}
+	t.Cleanup(func() { assumeSudoRole = previous })
+
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{
+		"sudo", "INC-42",
+		"--role-arn", "arn:aws:iam::123456789012:role/skiff-prod-deployer",
+		"--source-identity", "alice",
+		"--trace-id", "tr_json",
+		"--format", "json",
+	}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	var got sudoOutput
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("sudo output is not JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.TraceID != "tr_json" || got.Exports["AWS_ACCESS_KEY_ID"] != "AKIA_JSON" {
+		t.Fatalf("unexpected sudo JSON: %+v", got)
+	}
+}
+
+func TestRootTraceIDDefaultsFromEnvironment(t *testing.T) {
+	t.Setenv("SKIFF_TRACE_ID", "tr_from_env")
+	var stdout, stderr bytes.Buffer
+	code := Run("skiff", []string{"version", "--format", "json"}, &stdout, &stderr)
+	if code != ExitSuccess {
+		t.Fatalf("exit code = %d, stderr = %s, stdout = %s", code, stderr.String(), stdout.String())
+	}
+	var got versionOutput
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("version output is not JSON: %v\n%s", err, stdout.String())
+	}
+	if got.TraceID != "tr_from_env" {
+		t.Fatalf("trace id = %q", got.TraceID)
 	}
 }
 
@@ -1000,6 +1171,9 @@ func TestBootstrapAWSDirectApplyUsesBootstrapClientAndWritesContext(t *testing.T
 	if got.Plan.RootConfig.ReleaseTrust.Keys[0].Backend != "aws-kms" {
 		t.Fatalf("bootstrap plan should default to AWS KMS signing trust: %+v", got.Plan.RootConfig.ReleaseTrust.Keys[0])
 	}
+	if got.Plan.RootConfig.EnvironmentClass != "development" || got.Plan.RootConfig.ReleasePolicy == nil || got.Plan.RootConfig.ReleasePolicy.RequireSignedReleases || !got.Plan.RootConfig.ReleasePolicy.AllowUnsignedCode {
+		t.Fatalf("bootstrap plan missing default development security posture: class=%q policy=%+v", got.Plan.RootConfig.EnvironmentClass, got.Plan.RootConfig.ReleasePolicy)
+	}
 	lb := got.Apply.RootConfig.Ingress.LoadBalancer
 	if lb == nil || lb.ProviderDNSName != "skiff-cli-public.elb.amazonaws.com" || lb.CertificateARN != "arn:aws:acm:us-west-2:123456789012:certificate/quickstart.example.com" {
 		t.Fatalf("direct apply did not return materialized public ingress root: %+v", got.Apply.RootConfig.Ingress)
@@ -1029,6 +1203,9 @@ func TestBootstrapAWSDirectApplyUsesBootstrapClientAndWritesContext(t *testing.T
 	}
 	if values[config.FieldReleaseSigningKeyRef] == "" || values[config.FieldReleaseSigningKeyID] == "" {
 		t.Fatalf("written context missing signing key ref: %+v", values)
+	}
+	if values[config.FieldEnvironmentClass] != "development" || values[config.FieldRequireSignedReleases] != "false" || values[config.FieldAllowUnsignedCode] != "true" {
+		t.Fatalf("written context missing explicit security posture: %+v", values)
 	}
 }
 
@@ -1421,7 +1598,7 @@ network:
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run("skiff", []string{"validate", path, "--format", "json", "--trace-id", "tr_bad_spec"}, &stdout, &stderr)
+	code := Run("skiff", []string{"validate", path, "--environment-class", "production", "--format", "json", "--trace-id", "tr_bad_spec"}, &stdout, &stderr)
 	if code != ExitUserError {
 		t.Fatalf("exit code = %d, want %d", code, ExitUserError)
 	}

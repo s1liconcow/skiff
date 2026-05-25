@@ -12,6 +12,7 @@ func TestGeneratedPoliciesLintClean(t *testing.T) {
 		doc  policy.Document
 	}{
 		{role: policy.RoleStateBucket, doc: policy.StateBucketPolicy("skiff-state-prod")},
+		{role: policy.RoleDeveloper, doc: policy.DeveloperPolicy("skiff-state-prod", "alias/skiff-prod-state")},
 		{role: policy.RoleRunner, doc: policy.RunnerPolicy("skiff-state-prod", "alias/skiff-prod-state")},
 		{role: policy.RoleDeployer, doc: policy.DeployerPolicy("skiff-state-prod", "alias/skiff-prod-state")},
 		{role: policy.RoleSkiffd, doc: policy.SkiffdPolicy("skiff-state-prod", "alias/skiff-prod-state")},
@@ -25,6 +26,21 @@ func TestGeneratedPoliciesLintClean(t *testing.T) {
 	}
 }
 
+func TestDeveloperPolicyCannotWriteStateObjects(t *testing.T) {
+	doc := policy.DeveloperPolicy("skiff-state-prod", "alias/skiff-prod-state")
+	for _, statement := range doc.Statement {
+		if hasAction(statement.Action, "s3:PutObject") {
+			t.Fatalf("developer policy grants PutObject in %s: %+v", statement.Sid, statement)
+		}
+		if hasAction(statement.Action, "kms:Encrypt") || hasAction(statement.Action, "kms:GenerateDataKey") {
+			t.Fatalf("developer policy grants KMS write action in %s: %+v", statement.Sid, statement)
+		}
+	}
+	if !statementHasResource(doc, "ReadOperationalState", "arn:aws:s3:::skiff-state-prod/audit/*/*") {
+		t.Fatalf("developer policy must allow audit inspection: %+v", doc.Statement)
+	}
+}
+
 func TestRunnerPolicyCannotWriteStateObjects(t *testing.T) {
 	doc := policy.RunnerPolicy("skiff-state-prod", "alias/skiff-prod-state")
 	for _, statement := range doc.Statement {
@@ -34,6 +50,33 @@ func TestRunnerPolicyCannotWriteStateObjects(t *testing.T) {
 		if hasAction(statement.Action, "kms:Encrypt") || hasAction(statement.Action, "kms:GenerateDataKey") {
 			t.Fatalf("runner policy grants KMS write action in %s: %+v", statement.Sid, statement)
 		}
+	}
+}
+
+func TestEscalatedWriteTrustRequiresAuditableContext(t *testing.T) {
+	doc := policy.EscalatedWriteTrustPolicy()
+	assume := statementBySid(doc, "AllowTemporaryWriteEscalation")
+	if assume == nil {
+		t.Fatalf("missing temporary escalation trust statement: %+v", doc.Statement)
+	}
+	for _, action := range []string{"sts:AssumeRole", "sts:SetSourceIdentity"} {
+		if !hasAction(assume.Action, action) {
+			t.Fatalf("trust statement missing %s: %+v", action, assume)
+		}
+	}
+	for _, key := range []string{
+		"sts:SourceIdentity",
+		"aws:RequestTag/skiff.dev/business-justification",
+		"aws:RequestTag/skiff.dev/trace-id",
+	} {
+		if assume.Condition["Null"][key] != "false" || assume.Condition["StringLike"][key] == "" {
+			t.Fatalf("trust statement does not require %s: %+v", key, assume.Condition)
+		}
+	}
+
+	tags := statementBySid(doc, "AllowAuditableEscalationTags")
+	if tags == nil || !hasAction(tags.Action, "sts:TagSession") {
+		t.Fatalf("missing auditable session-tag trust statement: %+v", doc.Statement)
 	}
 }
 
@@ -156,4 +199,13 @@ func statementHasResource(doc policy.Document, sid, want string) bool {
 		}
 	}
 	return false
+}
+
+func statementBySid(doc policy.Document, sid string) *policy.Statement {
+	for i := range doc.Statement {
+		if doc.Statement[i].Sid == sid {
+			return &doc.Statement[i]
+		}
+	}
+	return nil
 }

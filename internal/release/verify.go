@@ -32,6 +32,7 @@ type VerifyOptions struct {
 	Verifier              signing.Verifier
 	Now                   time.Time
 	RequireArtifactDigest bool
+	AllowUnsignedRelease  bool
 	RunnerVersion         string
 }
 
@@ -150,14 +151,13 @@ func VerifyManifest(ctx context.Context, manifest schema.ReleaseManifest, opts V
 		)
 	}
 
-	requireArtifactDigest := opts.RequireArtifactDigest || manifest.Env == "prod"
-	if requireArtifactDigest {
+	if opts.RequireArtifactDigest {
 		addCheck(
 			"artifact_digest",
 			security.IsSHA256Digest(manifest.Artifact.Digest),
-			"production artifact is digest-pinned",
+			"artifact is digest-pinned",
 			"ARTIFACT_DIGEST_REQUIRED",
-			"production releases require a sha256 artifact digest",
+			"this environment class requires a sha256 artifact digest",
 		)
 	}
 
@@ -167,7 +167,7 @@ func VerifyManifest(ctx context.Context, manifest schema.ReleaseManifest, opts V
 
 	verifyExpiry(manifest, now, &result, addCheck)
 	verifyRunnerVersion(manifest, opts.RunnerVersion, &result, addCheck)
-	verifySignature(ctx, manifest, expectedDigest, opts.Verifier, &result, addCheck)
+	verifySignature(ctx, manifest, expectedDigest, opts.Verifier, opts.AllowUnsignedRelease, &result, addCheck)
 
 	result.OK = len(result.Findings) == 0
 	return result
@@ -242,9 +242,13 @@ func verifyExpiry(manifest schema.ReleaseManifest, now time.Time, result *Verifi
 	)
 }
 
-func verifySignature(ctx context.Context, manifest schema.ReleaseManifest, digest string, verifier signing.Verifier, result *VerificationResult, addCheck func(string, bool, string, string, string)) {
+func verifySignature(ctx context.Context, manifest schema.ReleaseManifest, digest string, verifier signing.Verifier, allowUnsigned bool, result *VerificationResult, addCheck func(string, bool, string, string, string)) {
 	if digest == "" {
 		addCheck("signature", false, "", "SIGNATURE_SKIPPED", "signature verification requires a valid digest")
+		return
+	}
+	if allowUnsigned && len(manifest.Signatures) == 0 {
+		addCheck("signature", true, "unsigned release is allowed by environment policy", "", "")
 		return
 	}
 	signature, err := signing.VerifyAny(ctx, verifier, digest, manifest.Signatures)

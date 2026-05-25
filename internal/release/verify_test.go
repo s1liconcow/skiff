@@ -102,13 +102,33 @@ func TestVerifyManifestRejectsWrongTargetExpiredTamperedAndMissingSignature(t *t
 	weakArtifactDigest.Artifact.Digest = "sha256:abc"
 	weakArtifactDigest = signManifest(t, weakArtifactDigest)
 	weakArtifactResult := release.VerifyManifest(context.Background(), weakArtifactDigest, release.VerifyOptions{
-		Service:  "payments-api",
-		Env:      "prod",
-		Verifier: verifier,
-		Now:      time.Date(2026, 5, 16, 18, 0, 0, 0, time.UTC),
+		Service:               "payments-api",
+		Env:                   "prod",
+		Verifier:              verifier,
+		Now:                   time.Date(2026, 5, 16, 18, 0, 0, 0, time.UTC),
+		RequireArtifactDigest: true,
 	})
 	if !hasFinding(weakArtifactResult.Findings, "ARTIFACT_DIGEST_REQUIRED") {
 		t.Fatalf("weak artifact digest findings = %+v", weakArtifactResult.Findings)
+	}
+}
+
+func TestVerifyManifestAllowsUnsignedReleaseWhenPolicyPermits(t *testing.T) {
+	manifest := unsignedReleaseFixture(t, "2026-06-16T17:00:00Z")
+	digest, err := release.ManifestDigest(manifest)
+	if err != nil {
+		t.Fatalf("ManifestDigest returned error: %v", err)
+	}
+	manifest.Digest = digest
+
+	result := release.VerifyManifest(context.Background(), manifest, release.VerifyOptions{
+		Service:              "payments-api",
+		Env:                  "prod",
+		AllowUnsignedRelease: true,
+		Now:                  time.Date(2026, 5, 16, 18, 0, 0, 0, time.UTC),
+	})
+	if !result.OK {
+		t.Fatalf("VerifyManifest failed: %+v", result.Findings)
 	}
 }
 

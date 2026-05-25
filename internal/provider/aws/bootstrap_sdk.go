@@ -2,7 +2,6 @@ package aws
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -152,7 +151,29 @@ func (c *SDKBootstrapClient) EnsureStateBucket(ctx context.Context, spec bootstr
 }
 
 func (c *SDKBootstrapClient) EnsureIAMRole(ctx context.Context, spec bootstrap.IAMRoleSpec) (bootstrap.ApplyAction, error) {
+	trustPolicy := spec.TrustPolicy
+	if len(trustPolicy.Statement) == 0 {
+		trustPolicy = bootstrap.DefaultAssumeRoleTrustPolicy()
+	}
+	trustBody, err := bootstrap.PolicyJSON(trustPolicy)
+	if err != nil {
+		return bootstrap.ApplyAction{}, err
+	}
 	if out, err := c.iam.GetRole(ctx, &iam.GetRoleInput{RoleName: sdka.String(spec.Name)}); err == nil {
+		if _, err := c.iam.UpdateAssumeRolePolicy(ctx, &iam.UpdateAssumeRolePolicyInput{
+			RoleName:       sdka.String(spec.Name),
+			PolicyDocument: sdka.String(trustBody),
+		}); err != nil {
+			return bootstrap.ApplyAction{}, err
+		}
+		if spec.MaxSessionDurationSeconds > 0 {
+			if _, err := c.iam.UpdateRole(ctx, &iam.UpdateRoleInput{
+				RoleName:           sdka.String(spec.Name),
+				MaxSessionDuration: sdka.Int32(spec.MaxSessionDurationSeconds),
+			}); err != nil {
+				return bootstrap.ApplyAction{}, err
+			}
+		}
 		if err := c.putRolePolicy(ctx, spec); err != nil {
 			return bootstrap.ApplyAction{}, err
 		}
@@ -161,11 +182,15 @@ func (c *SDKBootstrapClient) EnsureIAMRole(ctx context.Context, spec bootstrap.I
 	} else if !sdkNotFound(err) {
 		return bootstrap.ApplyAction{}, err
 	}
-	out, err := c.iam.CreateRole(ctx, &iam.CreateRoleInput{
+	input := &iam.CreateRoleInput{
 		RoleName:                 sdka.String(spec.Name),
-		AssumeRolePolicyDocument: sdka.String(bootstrapTrustPolicy()),
+		AssumeRolePolicyDocument: sdka.String(trustBody),
 		Tags:                     iamTags(spec.Tags),
-	})
+	}
+	if spec.MaxSessionDurationSeconds > 0 {
+		input.MaxSessionDuration = sdka.Int32(spec.MaxSessionDurationSeconds)
+	}
+	out, err := c.iam.CreateRole(ctx, input)
 	if err != nil && !sdkAlreadyExists(err) {
 		return bootstrap.ApplyAction{}, err
 	}
@@ -993,18 +1018,6 @@ func bootstrapSortedKeys(values map[string]string) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-func bootstrapTrustPolicy() string {
-	body, _ := json.Marshal(map[string]any{
-		"Version": "2012-10-17",
-		"Statement": []map[string]any{{
-			"Effect":    "Allow",
-			"Principal": map[string]string{"AWS": "*"},
-			"Action":    "sts:AssumeRole",
-		}},
-	})
-	return string(body)
 }
 
 func trailingDot(value string) string {

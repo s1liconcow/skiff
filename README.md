@@ -236,7 +236,7 @@ export SKIFF_CONFIG="$PWD/.skiffconfig"
 skiff config show
 ```
 
-Bootstrap creates or records the environment object-state root, encrypted and versioned state bucket, KMS release signer, IAM roles, managed network substrate, runner defaults, and optional ingress resources. For public ingress with DNS:
+Bootstrap creates or records the environment object-state root, encrypted and versioned state bucket, KMS release signer, IAM roles, managed network substrate, runner defaults, explicit environment class/release policy, and optional ingress resources. Bootstrap defaults to `development`, so unsigned local/dev code is allowed intentionally; use `--class production` or `--class staging` for production-like controls. If you use `--env prod` or `--env production` without `--class production`, bootstrap asks for confirmation; pass `--yes` only when the non-production class is intentional. For public ingress with DNS:
 
 ```bash
 export SKIFF_COMPANY_NAME="Acme"
@@ -285,7 +285,7 @@ skiff --api --api-url http://127.0.0.1:8585 ops events payments-api --format jso
 | `skiff validate` | Parse, default, and validate a spec | `skiff validate examples/service/http-hello/skiff.yaml --show-defaulted` |
 | `skiff plan` | Preview provider changes | `skiff plan skiff.yaml --provider aws --region us-west-2` |
 | `skiff explain` | Show the cloud primitives Skiff will use | `skiff explain skiff.yaml --provider aws --format json` |
-| `skiff bootstrap aws` | Create or emit the AWS state substrate | `skiff bootstrap aws --env prod --region us-west-2 --network managed --ingress private --yes` |
+| `skiff bootstrap aws` | Create or emit the AWS state substrate | `skiff bootstrap aws --env prod --class production --region us-west-2 --network managed --ingress private --yes` |
 | `skiff deploy` | Publish signed release state and deploy it | `skiff deploy skiff.yaml --canary --canary-stages 5,25,100` |
 | `skiff release candidate create` | Record immutable CI evidence | `skiff release candidate create --service payments-api --candidate-id cand_01J... --release-id rel_01J... --artifact-uri registry.example.com/payments-api@sha256:... --artifact-digest sha256:... --check tests=passed --format json` |
 | `skiff release promote` | Validate and record promotion intent | `skiff release promote payments-api --from staging --to prod --candidate cand_01J... --approval-id approval_01J... --format json` |

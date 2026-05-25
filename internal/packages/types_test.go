@@ -12,6 +12,7 @@ import (
 	"github.com/s1liconcow/skiff/internal/compiler"
 	internalpackages "github.com/s1liconcow/skiff/internal/packages"
 	"github.com/s1liconcow/skiff/internal/spec"
+	"github.com/s1liconcow/skiff/internal/state/schema"
 )
 
 const digestA = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -61,22 +62,30 @@ func TestLockfileCanonicalJSONAndValidation(t *testing.T) {
 
 func TestProductionStackRequiresDigestLockedSignedPackage(t *testing.T) {
 	doc := productionPackageStack(t)
-	diagnostics := internalpackages.ValidateStackLock(doc, nil, internalpackages.ValidationOptions{})
+	productionPolicy := internalpackages.ValidationOptions{RequirePackageLock: true, RequireSignedLockEntries: true}
+	diagnostics := internalpackages.ValidateStackLock(doc, nil, productionPolicy)
 	assertPackageDiagnostic(t, diagnostics, "$.stack.dependencies", "PACKAGE_LOCK_REQUIRED")
 
 	lock := validLock()
 	lock.Packages[0].SignatureRef = ""
-	diagnostics = internalpackages.ValidateStackLock(doc, &lock, internalpackages.ValidationOptions{})
+	diagnostics = internalpackages.ValidateStackLock(doc, &lock, productionPolicy)
 	assertPackageDiagnostic(t, diagnostics, "$.packages[0].signature_ref", "PACKAGE_SIGNATURE_REQUIRED")
 
 	lock = validLock()
 	lock.Packages[0].Digest = "sha256:mutable"
-	diagnostics = internalpackages.ValidateStackLock(doc, &lock, internalpackages.ValidationOptions{})
+	diagnostics = internalpackages.ValidateStackLock(doc, &lock, productionPolicy)
 	assertPackageDiagnostic(t, diagnostics, "$.packages[0].digest", "INVALID_DIGEST")
 
 	lock = validLock()
-	if diagnostics = internalpackages.ValidateStackLock(doc, &lock, internalpackages.ValidationOptions{}); len(diagnostics) > 0 {
+	if diagnostics = internalpackages.ValidateStackLock(doc, &lock, productionPolicy); len(diagnostics) > 0 {
 		t.Fatalf("ValidateStackLock diagnostics = %+v, want none", diagnostics)
+	}
+}
+
+func TestProdEnvNameDoesNotImplyProductionPackagePolicy(t *testing.T) {
+	doc := productionPackageStack(t)
+	if diagnostics := internalpackages.ValidateStackLock(doc, nil, internalpackages.ValidationOptions{}); len(diagnostics) > 0 {
+		t.Fatalf("ValidateStackLock diagnostics = %+v, want none without explicit production policy", diagnostics)
 	}
 }
 
@@ -99,7 +108,7 @@ func TestDevUnsignedLocalPackageRequiresExplicitAllowance(t *testing.T) {
 
 func TestProductionCompilerRejectsMissingPackageLock(t *testing.T) {
 	doc := productionPackageStack(t)
-	_, err := compiler.Compile(context.Background(), doc, compiler.Options{})
+	_, err := compiler.Compile(context.Background(), doc, compiler.Options{ReleasePolicy: schema.EnvironmentReleasePolicy{RequireSignedReleases: true}})
 	if err == nil {
 		t.Fatal("Compile returned nil error, want missing package lock")
 	}

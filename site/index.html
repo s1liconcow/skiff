@@ -786,7 +786,7 @@
 
     .security-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 10px;
       min-height: 320px;
     }
@@ -858,7 +858,7 @@
       border: 1px solid rgba(255,255,255,0.10);
       border-radius: var(--radius);
       background: rgba(6,16,26,0.66);
-      opacity: 0.62;
+      opacity: 0.88;
     }
 
     .runbook-item.active {
@@ -1081,9 +1081,11 @@
       position: relative;
       min-height: 348px;
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-rows: repeat(2, auto);
       gap: 14px;
-      align-items: center;
+      align-content: center;
+      align-items: stretch;
     }
 
     .agent-node {
@@ -1119,133 +1121,6 @@
       font-weight: 800;
     }
 
-    .agent-link {
-      position: absolute;
-      top: 50%;
-      width: 13%;
-      height: 2px;
-      background: linear-gradient(90deg, rgba(114,223,255,0.12), rgba(114,223,255,0.74));
-      transform: translateY(-50%);
-      overflow: hidden;
-    }
-
-    .agent-link.one { left: 30.5%; }
-    .agent-link.two { left: 65.1%; }
-    .agent-link::after {
-      content: "";
-      position: absolute;
-      inset: 0 auto 0 -35%;
-      width: 35%;
-      background: var(--green);
-      animation: linkTravel 1.8s ease-in-out infinite;
-    }
-
-    .adoption-map {
-      min-height: 346px;
-      display: grid;
-      grid-template-columns: 0.9fr 1.2fr 0.9fr;
-      gap: 14px;
-      align-items: center;
-    }
-
-    .source-stack,
-    .bridge,
-    .target-stack {
-      min-height: 286px;
-      padding: 14px;
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: var(--radius);
-      background: rgba(255,255,255,0.045);
-    }
-
-    .source-stack,
-    .target-stack {
-      display: grid;
-      gap: 10px;
-      align-content: center;
-    }
-
-    .import-card,
-    .outcome-card {
-      min-height: 52px;
-      padding: 10px;
-      border: 1px solid rgba(255,255,255,0.10);
-      border-radius: var(--radius);
-      background: rgba(6,16,26,0.68);
-      opacity: 0.66;
-    }
-
-    .import-card.active,
-    .outcome-card.active {
-      opacity: 1;
-      border-color: rgba(125,242,177,0.34);
-      background: rgba(125,242,177,0.08);
-    }
-
-    .import-card b,
-    .outcome-card b { display: block; font-size: 0.88rem; }
-    .import-card span,
-    .outcome-card span { color: var(--muted); font-size: 0.76rem; }
-
-    .bridge {
-      position: relative;
-      display: grid;
-      place-items: center;
-      overflow: hidden;
-    }
-
-    .bridge-track {
-      width: min(300px, 90%);
-      height: 132px;
-      position: relative;
-    }
-
-    .bridge-track::before {
-      content: "";
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: 50%;
-      height: 4px;
-      border-radius: 999px;
-      background: rgba(114,223,255,0.16);
-      transform: translateY(-50%);
-    }
-
-    .bridge-track::after {
-      content: "";
-      position: absolute;
-      left: 0;
-      top: calc(50% - 2px);
-      width: 42%;
-      height: 4px;
-      border-radius: 999px;
-      background: linear-gradient(90deg, var(--cyan), var(--green));
-      animation: bridgeCross 2.9s cubic-bezier(.2,.8,.2,1) infinite;
-    }
-
-    .bridge-gate {
-      position: absolute;
-      top: 50%;
-      width: 72px;
-      min-height: 64px;
-      display: grid;
-      place-items: center;
-      padding: 8px;
-      border: 1px solid rgba(114,223,255,0.25);
-      border-radius: var(--radius);
-      background: #0b1b2a;
-      color: var(--cyan);
-      font-size: 0.76rem;
-      font-weight: 800;
-      text-align: center;
-      transform: translate(-50%, -50%);
-    }
-
-    .bridge-gate.one { left: 18%; }
-    .bridge-gate.two { left: 50%; }
-    .bridge-gate.three { left: 82%; }
-
     .recipe-grid {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -1255,7 +1130,7 @@
 
     .recipe-card {
       display: grid;
-      align-content: space-between;
+      align-content: start;
       min-height: 260px;
       padding: 14px;
       border: 1px solid rgba(255,255,255,0.12);
@@ -1272,25 +1147,6 @@
 
     .recipe-card h3 { margin-bottom: 9px; }
     .recipe-card p { font-size: 0.86rem; }
-
-    .recipe-meter {
-      height: 9px;
-      margin-top: 18px;
-      overflow: hidden;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.09);
-    }
-
-    .recipe-meter span {
-      display: block;
-      height: 100%;
-      width: 0;
-      border-radius: inherit;
-      background: linear-gradient(90deg, var(--cyan), var(--green));
-      transition: width .65s cubic-bezier(.2,.8,.2,1);
-    }
-
-    .recipe-card.active .recipe-meter span { width: var(--meter, 74%); }
 
     .practice-grid {
       display: grid;
@@ -1500,18 +1356,6 @@
       to { stroke-dashoffset: 0; }
     }
 
-    @keyframes linkTravel {
-      0% { transform: translateX(0); opacity: 0; }
-      20%, 70% { opacity: 1; }
-      100% { transform: translateX(390%); opacity: 0; }
-    }
-
-    @keyframes bridgeCross {
-      0% { transform: translateX(0); opacity: .2; }
-      18%, 68% { opacity: 1; }
-      100% { transform: translateX(145%); opacity: .2; }
-    }
-
     @media (max-width: 1120px) {
       .links { display: none; }
       .floating-cuj { position: relative; right: auto; bottom: auto; width: auto; margin: 18px 22px 36px; }
@@ -1541,14 +1385,10 @@
       .canary-stage,
       .observability-shell,
       .agent-loop,
-      .adoption-map,
       .recipe-grid,
       .practice-grid {
         grid-template-columns: 1fr;
       }
-      .agent-link { display: none; }
-      .source-stack, .bridge, .target-stack { min-height: auto; }
-      .bridge-track { height: 110px; }
       .recipe-card { min-height: 190px; }
       .command-box { grid-template-columns: 1fr; }
       .footer-box { grid-template-columns: 1fr; }
@@ -1806,7 +1646,7 @@
           <div class="copy-column">
             <div class="copy-card"><b>Stateful work gets first-class treatment.</b><span>Backup, restore, failover, maintenance, migration, and repair are part of the product model.</span></div>
             <div class="copy-card"><b>Operators keep the cloud model.</b><span>Skiff packages the safe sequence as a runbook without pretending AWS is a cluster.</span></div>
-            <div class="copy-card"><b>One VM runs one workload replica by default.</b><span>The isolation boundary stays simple enough for SREs and agents to reason about during incidents.</span></div>
+            <div class="copy-card"><b>Cloud VMs are the primary primitive</b><span>The isolation boundary stays secure and simple enough for SREs and agents to reason about during incidents.</span></div>
           </div>
         </div>
       </div>
@@ -1843,11 +1683,9 @@
               </div>
               <div class="security-grid">
                 <div class="gate" data-phase="0"><span class="gate-icon">1</span><b>Least privilege IAM</b><span>Scoped roles for deployer, runner, and operator actions.</span></div>
-                <div class="gate" data-phase="1"><span class="gate-icon">2</span><b>Signed releases</b><span>Manifest, digest, service, environment, and expiry are verified.</span></div>
-                <div class="gate" data-phase="1 2"><span class="gate-icon">3</span><b>Digest-pinned artifacts</b><span>Production workloads run what was approved, not a mutable tag.</span></div>
-                <div class="gate" data-phase="2"><span class="gate-icon">4</span><b>No SSH-first debug</b><span>Diagnostics start with scoped logs, status, and reviewable sessions.</span></div>
-                <div class="gate" data-phase="2 3"><span class="gate-icon">5</span><b>Secret references</b><span>Object state points to the secure store and redacts output.</span></div>
-                <div class="gate" data-phase="3"><span class="gate-icon">6</span><b>Audit by default</b><span>Actor, trace ID, target, risk, and summary on every mutation.</span></div>
+                <div class="gate" data-phase="1"><span class="gate-icon">2</span><b>Signed and pinned releases</b><span>Manifest, digest, service, environment, and expiry are verified.</span></div>
+                <div class="gate" data-phase="2"><span class="gate-icon">3</span><b>Runtime guardrails</b><span>No SSH-first debug, secret references, and redacted operational output.</span></div>
+                <div class="gate" data-phase="3"><span class="gate-icon">4</span><b>Audit by default</b><span>Actor, trace ID, target, risk, and summary on every mutation.</span></div>
               </div>
               <div class="viz-note">
                 <p class="story-note" data-phase="0"><b>Access starts from the operation.</b><span>The service gets only what it needs, and high-risk actions require explicit approval.</span></p>
@@ -1886,18 +1724,17 @@
               </div>
               <div class="runbook-shell">
                 <div class="runbook-menu">
-                  <div class="runbook-item" data-phase="0"><span class="step-index">C</span><span><b>Canary deploy</b><span>advance only on health</span></span></div>
-                  <div class="runbook-item" data-phase="1"><span class="step-index">R</span><span><b>Database restore</b><span>prove backup before cutover</span></span></div>
-                  <div class="runbook-item" data-phase="2"><span class="step-index">S</span><span><b>Secret rotation</b><span>stage, verify, revoke old</span></span></div>
-                  <div class="runbook-item" data-phase="3"><span class="step-index">F</span><span><b>Regional failover</b><span>approve, route, validate</span></span></div>
+                  <div class="runbook-item"><span class="step-index">C</span><span><b>Canary deploy</b><span>advance only on health</span></span></div>
+                  <div class="runbook-item"><span class="step-index">R</span><span><b>Database restore</b><span>prove backup before cutover</span></span></div>
+                  <div class="runbook-item"><span class="step-index">S</span><span><b>Secret rotation</b><span>stage, verify, revoke old</span></span></div>
+                  <div class="runbook-item"><span class="step-index">F</span><span><b>Regional failover</b><span>approve, route, validate</span></span></div>
                 </div>
                 <div class="runbook-steps">
                   <div class="runbook-flow">
-                    <div class="flow-row" data-phase="0 1 2 3"><span class="flow-num">01</span><span><b>Plan</b><span>Strict inputs, policy checks, expected provider actions.</span></span><span class="risk-tag">low</span></div>
-                    <div class="flow-row" data-phase="0 1 2 3"><span class="flow-num">02</span><span><b>Write intent</b><span>Durable operation or saga intent before any side effect.</span></span><span class="risk-tag">audited</span></div>
-                    <div class="flow-row" data-phase="0 2"><span class="flow-num">03</span><span><b>Stage safely</b><span>Canary traffic or staged credentials with live verification.</span></span><span class="risk-tag">reversible</span></div>
-                    <div class="flow-row" data-phase="1 3"><span class="flow-num">03</span><span><b>Gate impact</b><span>Backup freshness, maintenance window, and operator approval.</span></span><span class="risk-tag">approval</span></div>
-                    <div class="flow-row" data-phase="0 1 2 3"><span class="flow-num">04</span><span><b>Record result</b><span>Store step results before waiting, so work can resume.</span></span><span class="risk-tag">resumable</span></div>
+                    <div class="flow-row" data-phase="0"><span class="flow-num">01</span><span><b>Canary gate</b><span>Shift a small slice of traffic and promote only after live health checks.</span></span><span class="risk-tag">reversible</span></div>
+                    <div class="flow-row" data-phase="1"><span class="flow-num">02</span><span><b>Restore gate</b><span>Verify backup freshness, isolate the target, and record the cutover plan.</span></span><span class="risk-tag">approval</span></div>
+                    <div class="flow-row" data-phase="2"><span class="flow-num">03</span><span><b>Rotation gate</b><span>Stage the new secret reference, verify consumers, then revoke old access.</span></span><span class="risk-tag">audited</span></div>
+                    <div class="flow-row" data-phase="3"><span class="flow-num">04</span><span><b>Failover gate</b><span>Approve route changes, validate health, and store resumable step results.</span></span><span class="risk-tag">resumable</span></div>
                   </div>
                 </div>
               </div>
@@ -1956,11 +1793,9 @@
               <div class="evidence-panel">
                 <h3>Promotion checks</h3>
                 <div class="evidence-list">
-                  <div class="evidence" data-phase="0 1 2 3"><span>Signed release verified</span><span>pass</span></div>
-                  <div class="evidence" data-phase="0 1 2 3"><span>Runtime manifest verified</span><span>pass</span></div>
-                  <div class="evidence" data-phase="1 2 3"><span>New targets healthy</span><span>pass</span></div>
-                  <div class="evidence" data-phase="2 3"><span>SLO burn within budget</span><span>pass</span></div>
-                  <div class="evidence" data-phase="2 3"><span>Error budget unchanged</span><span>pass</span></div>
+                  <div class="evidence" data-phase="0"><span>Signed release verified</span><span>pass</span></div>
+                  <div class="evidence" data-phase="1"><span>New targets healthy</span><span>pass</span></div>
+                  <div class="evidence" data-phase="2"><span>SLO burn within budget</span><span>pass</span></div>
                   <div class="evidence" data-phase="3"><span>Audit event appended</span><span>done</span></div>
                 </div>
               </div>
@@ -1981,7 +1816,7 @@
         <div class="section-head">
           <div>
             <div class="kicker">Built-in observability</div>
-            <h2>Status, logs, health, and next actions stay in one operational frame.</h2>
+            <h2>Status, logs, health, and next actions stay in one operational view.</h2>
           </div>
           <p class="section-lede">
             Skiff keeps operators from assembling context from scratch. Service status is tied to the
@@ -2065,22 +1900,25 @@
                 <button type="button" data-step>Escalate</button>
               </div>
               <div class="agent-loop">
-                <span class="agent-link one" aria-hidden="true"></span>
-                <span class="agent-link two" aria-hidden="true"></span>
-                <div class="agent-node" data-phase="0 1">
+                <div class="agent-node" data-phase="0">
                   <b>Machine-readable output</b>
                   <span>Every command can return JSON with facts, findings, command suggestions, trace ID, and operation ID.</span>
                   <div class="action-chip">--format=json</div>
                 </div>
-                <div class="agent-node" data-phase="1 2">
+                <div class="agent-node" data-phase="1">
                   <b>Problem context</b>
                   <span>Skiff collects service state, target health, recent events, release data, and cloud resource IDs in one answer.</span>
                   <div class="action-chip">context</div>
                 </div>
-                <div class="agent-node" data-phase="2 3">
+                <div class="agent-node" data-phase="2">
                   <b>Risk and approval</b>
                   <span>Actions are labeled no, low, medium, or high risk. High-risk work can require two-party authorization.</span>
                   <div class="action-chip">human gate</div>
+                </div>
+                <div class="agent-node" data-phase="3">
+                  <b>Human escalation</b>
+                  <span>Escalation packages the trace, proposed command, mutating flag, and approval requirement for review.</span>
+                  <div class="action-chip">escalate</div>
                 </div>
               </div>
               <div class="viz-note">
@@ -2101,65 +1939,6 @@
       </div>
     </section>
 
-    <section id="adoption" class="section" data-story data-interval="2300">
-      <div class="wrap">
-        <div class="section-head">
-          <div>
-            <div class="kicker">Adoption</div>
-            <h2>Adopt the operating model without rewriting your whole cloud estate.</h2>
-          </div>
-          <p class="section-lede">
-            Skiff is AWS-first and works against existing cloud accounts. Import known cloud shape,
-            keep native cloud resources in the model, and add paved operational journeys one service at a time.
-          </p>
-        </div>
-
-        <div class="split">
-          <div class="copy-column">
-            <div class="copy-card"><b>Start with one service.</b><span>Bring one API, worker, or stateful member under signed release and operational runbooks.</span></div>
-            <div class="copy-card"><b>Keep Terraform where it helps.</b><span>Terraform can express infrastructure shape while Skiff owns the operational journey.</span></div>
-            <div class="copy-card"><b>Billable resources stay explicit.</b><span>State buckets, NAT gateways, load balancers, certificates, autoscaling groups, and log groups remain named in output.</span></div>
-          </div>
-
-          <div class="viz" aria-label="Animated Skiff adoption bridge">
-            <div class="viz-inner">
-              <div class="story-tabs" role="tablist" aria-label="Adoption phases">
-                <button type="button" data-step>Discover</button>
-                <button type="button" data-step>Bootstrap</button>
-                <button type="button" data-step>First service</button>
-                <button type="button" data-step>Expand</button>
-              </div>
-              <div class="adoption-map">
-                <div class="source-stack">
-                  <div class="import-card" data-phase="0"><b>Existing AWS</b><span>VPCs, ALBs, ASGs, IAM, logs</span></div>
-                  <div class="import-card" data-phase="0 1"><b>Current IaC</b><span>Terraform stays useful for shape</span></div>
-                  <div class="import-card" data-phase="0 1 2"><b>Current services</b><span>APIs, workers, stateful members</span></div>
-                </div>
-                <div class="bridge" aria-hidden="true">
-                  <div class="bridge-track">
-                    <div class="bridge-gate one">inspect</div>
-                    <div class="bridge-gate two">secure</div>
-                    <div class="bridge-gate three">operate</div>
-                  </div>
-                </div>
-                <div class="target-stack">
-                  <div class="outcome-card" data-phase="1"><b>Skiff context</b><span>state root, signer, region, env</span></div>
-                  <div class="outcome-card" data-phase="2"><b>Signed release path</b><span>canary, logs, health, audit</span></div>
-                  <div class="outcome-card" data-phase="3"><b>Operational portfolio</b><span>runbooks, agents, break-glass CLI</span></div>
-                </div>
-              </div>
-              <div class="viz-note">
-                <p class="story-note" data-phase="0"><b>Discovery makes the cloud shape legible.</b><span>Skiff does not hide existing primitives or require teams to pretend the cloud is a cluster.</span></p>
-                <p class="story-note" data-phase="1"><b>Bootstrap installs secure defaults.</b><span>The environment gets state, signing, IAM, logs, and context without exposing low-level IDs on the happy path.</span></p>
-                <p class="story-note" data-phase="2"><b>The first service proves the path.</b><span>Operators get canary deploys, release verification, status, logs, doctor output, and a CLI fallback.</span></p>
-                <p class="story-note" data-phase="3"><b>Expansion is additive.</b><span>Each new service adds typed operations instead of another pile of bespoke YAML.</span></p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <section id="recipes" class="section" data-story data-interval="2200">
       <div class="wrap">
         <div class="section-head">
@@ -2169,8 +1948,8 @@
           </div>
           <p class="section-lede">
             Skiff is designed around operational jobs: ship safely, respond to degraded service,
-            recover data, rotate credentials, and hand work to an agent or another human with JSON context,
-            risk labels, and enough history to continue.
+            recover data, rotate credentials, control cloud spend, audit security posture, investigate incidents,
+            and hand work to an agent or another human with JSON context, risk labels, and enough history to continue.
           </p>
         </div>
 
@@ -2181,23 +1960,31 @@
               <button type="button" data-step>Repair</button>
               <button type="button" data-step>Restore</button>
               <button type="button" data-step>Rotate</button>
+              <button type="button" data-step>Cost</button>
+              <button type="button" data-step>Audit</button>
+              <button type="button" data-step>RCA</button>
             </div>
             <div class="recipe-grid">
-              <article class="recipe-card" data-phase="0" style="--meter: 92%">
+              <article class="recipe-card" data-phase="0">
                 <div><h3>Ship a release</h3><p>Compile spec, sign release, canary traffic, watch health, promote or pause.</p></div>
-                <div class="recipe-meter"><span></span></div>
               </article>
-              <article class="recipe-card" data-phase="1" style="--meter: 76%">
+              <article class="recipe-card" data-phase="1">
                 <div><h3>Repair degraded service</h3><p>Pull JSON context, inspect logs, classify risk, escalate or run bounded repair.</p></div>
-                <div class="recipe-meter"><span></span></div>
               </article>
-              <article class="recipe-card" data-phase="2" style="--meter: 68%">
+              <article class="recipe-card" data-phase="2">
                 <div><h3>Restore state</h3><p>Verify backup, isolate target, approve cutover, validate health, record the result.</p></div>
-                <div class="recipe-meter"><span></span></div>
               </article>
-              <article class="recipe-card" data-phase="3" style="--meter: 84%">
+              <article class="recipe-card" data-phase="3">
                 <div><h3>Rotate credentials</h3><p>Stage new reference, roll workloads, confirm consumers, revoke old access.</p></div>
-                <div class="recipe-meter"><span></span></div>
+              </article>
+              <article class="recipe-card" data-phase="4">
+                <div><h3>Control cloud cost</h3><p>Inspect billable resources, explain idle capacity, right-size safely, and record savings actions.</p></div>
+              </article>
+              <article class="recipe-card" data-phase="5">
+                <div><h3>Audit security posture</h3><p>Review IAM scope, release trust, secret references, debug sessions, and audit coverage.</p></div>
+              </article>
+              <article class="recipe-card" data-phase="6">
+                <div><h3>Investigate incident root cause</h3><p>Correlate deploys, health, events, provider IDs, and operator actions into a traceable timeline.</p></div>
               </article>
             </div>
             <div class="viz-note">
@@ -2205,6 +1992,9 @@
               <p class="story-note" data-phase="1"><b>Repair begins with observed facts.</b><span>Doctor output recommends commands, labels risk, and asks for human approval when an agent should not act alone.</span></p>
               <p class="story-note" data-phase="2"><b>State recovery gets first-class treatment.</b><span>Restore work includes backup freshness, risk classification, cutover, validation, and traceable results.</span></p>
               <p class="story-note" data-phase="3"><b>Credential rotation is deliberate.</b><span>Skiff stages the change, verifies workloads, revokes old access, and records what changed.</span></p>
+              <p class="story-note" data-phase="4"><b>Cost control starts from named resources.</b><span>Skiff keeps NAT gateways, ALBs, ASGs, target groups, log groups, and state buckets visible enough to manage spend.</span></p>
+              <p class="story-note" data-phase="5"><b>Security audits use the same evidence trail.</b><span>Operators can review trust roots, least-privilege policy, debug posture, secret references, and mutation history together.</span></p>
+              <p class="story-note" data-phase="6"><b>Root cause work gets a durable timeline.</b><span>Events, releases, provider IDs, health checks, and human actions stay tied to operation and trace IDs.</span></p>
             </div>
           </div>
         </div>

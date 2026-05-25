@@ -12,10 +12,11 @@ import (
 
 func TestPlanAWSComplete(t *testing.T) {
 	plan, err := PlanAWS(AWSOptions{
-		Env:         "prod",
-		Region:      "us-west-2",
-		StateBucket: "skiff-state-prod",
-		Now:         time.Date(2026, 5, 16, 21, 0, 0, 0, time.UTC),
+		Env:              "prod",
+		EnvironmentClass: "production",
+		Region:           "us-west-2",
+		StateBucket:      "skiff-state-prod",
+		Now:              time.Date(2026, 5, 16, 21, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -32,12 +33,25 @@ func TestPlanAWSComplete(t *testing.T) {
 	if plan.RootObjectKey != "envs/prod/root.json" {
 		t.Fatalf("root object key = %q", plan.RootObjectKey)
 	}
-	if len(plan.Resources) != 7 {
-		t.Fatalf("resource count = %d, want 7", len(plan.Resources))
+	if plan.RootConfig.EnvironmentClass != "production" {
+		t.Fatalf("environment class = %q", plan.RootConfig.EnvironmentClass)
 	}
-	wantPolicies := []string{"deployer", "runner", "skiffd"}
+	if plan.RootConfig.ReleasePolicy == nil || !plan.RootConfig.ReleasePolicy.RequireSignedReleases || plan.RootConfig.ReleasePolicy.AllowUnsignedCode {
+		t.Fatalf("production release policy = %+v", plan.RootConfig.ReleasePolicy)
+	}
+	if len(plan.Resources) != 8 {
+		t.Fatalf("resource count = %d, want 8", len(plan.Resources))
+	}
+	wantPolicies := []string{"deployer", "developer", "runner", "skiffd"}
 	if got := sortedPolicyNames(plan.IAMPolicies); !reflect.DeepEqual(got, wantPolicies) {
 		t.Fatalf("policy names = %#v, want %#v", got, wantPolicies)
+	}
+	if plan.RootConfig.Roles["developer"] != "skiff-prod-developer" {
+		t.Fatalf("developer role = %q", plan.RootConfig.Roles["developer"])
+	}
+	deployerSpec := roleSpec("deployer", plan.RootConfig.Roles["deployer"], plan.IAMPolicies["deployer"], plan.Env)
+	if deployerSpec.MaxSessionDurationSeconds != 3600 || len(deployerSpec.TrustPolicy.Statement) != 2 {
+		t.Fatalf("deployer role must require temporary auditable escalation: %+v", deployerSpec)
 	}
 	if len(plan.BucketPolicy.Statement) == 0 {
 		t.Fatal("missing bucket policy statements")
@@ -47,6 +61,42 @@ func TestPlanAWSComplete(t *testing.T) {
 	}
 	if plan.RootConfig.Runner.InstallVersion != "" {
 		t.Fatalf("official runner AMI should not need first-boot install: %+v", plan.RootConfig.Runner)
+	}
+}
+
+func TestPlanAWSDefaultsToDevelopmentClass(t *testing.T) {
+	plan, err := PlanAWS(AWSOptions{
+		Env:         "prod",
+		Region:      "us-west-2",
+		StateBucket: "skiff-state-prod",
+		Now:         time.Date(2026, 5, 16, 21, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.RootConfig.EnvironmentClass != "development" {
+		t.Fatalf("environment class = %q", plan.RootConfig.EnvironmentClass)
+	}
+	if plan.RootConfig.ReleasePolicy == nil || plan.RootConfig.ReleasePolicy.RequireSignedReleases || !plan.RootConfig.ReleasePolicy.AllowUnsignedCode {
+		t.Fatalf("default release policy = %+v", plan.RootConfig.ReleasePolicy)
+	}
+}
+
+func TestPlanAWSDevelopmentClassAllowsUnsignedCode(t *testing.T) {
+	plan, err := PlanAWS(AWSOptions{
+		Env:              "david-dev",
+		EnvironmentClass: "development",
+		Region:           "us-west-2",
+		Now:              time.Date(2026, 5, 16, 21, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.RootConfig.EnvironmentClass != "development" {
+		t.Fatalf("environment class = %q", plan.RootConfig.EnvironmentClass)
+	}
+	if plan.RootConfig.ReleasePolicy == nil || plan.RootConfig.ReleasePolicy.RequireSignedReleases || !plan.RootConfig.ReleasePolicy.AllowUnsignedCode {
+		t.Fatalf("development release policy = %+v", plan.RootConfig.ReleasePolicy)
 	}
 }
 
@@ -73,8 +123,8 @@ func TestPlanAWSManagedPrivateNetwork(t *testing.T) {
 	if plan.RootConfig.Runner == nil || plan.RootConfig.Runner.AMISSMParameter != DefaultRunnerAMISSMParameter {
 		t.Fatalf("missing runner SSM default: %+v", plan.RootConfig.Runner)
 	}
-	if len(plan.Resources) != 13 {
-		t.Fatalf("resource count = %d, want 13", len(plan.Resources))
+	if len(plan.Resources) != 14 {
+		t.Fatalf("resource count = %d, want 14", len(plan.Resources))
 	}
 	if !hasBootstrapResourceKind(plan.Resources, "vpc") || !hasBootstrapResourceKind(plan.Resources, "nat-gateway") {
 		t.Fatalf("managed network resources missing: %+v", plan.Resources)
@@ -102,8 +152,8 @@ func TestPlanAWSManagedPublicIngress(t *testing.T) {
 	if lb.ARN != "${aws_lb.skiff_public.arn}" || lb.SecurityGroupID != "${aws_security_group.skiff_public_lb.id}" || lb.HTTPListenerARN != "${aws_lb_listener.skiff_public_http.arn}" {
 		t.Fatalf("unexpected public load balancer defaults: %+v", lb)
 	}
-	if len(plan.Resources) != 16 {
-		t.Fatalf("resource count = %d, want 16", len(plan.Resources))
+	if len(plan.Resources) != 17 {
+		t.Fatalf("resource count = %d, want 17", len(plan.Resources))
 	}
 	for _, kind := range []string{"vpc", "load-balancer", "listener"} {
 		if !hasBootstrapResourceKind(plan.Resources, kind) {
@@ -264,8 +314,8 @@ func TestApplyAWSIdempotentWithFakeClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first ApplyAWS() error = %v", err)
 	}
-	if len(first.Actions) != 7 {
-		t.Fatalf("first action count = %d, want 7", len(first.Actions))
+	if len(first.Actions) != 8 {
+		t.Fatalf("first action count = %d, want 8", len(first.Actions))
 	}
 	for _, action := range first.Actions {
 		if action.Action != "created" && action.Action != "put" {

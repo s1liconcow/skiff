@@ -1,9 +1,10 @@
 env: prod
+environmentClass: production
 provider: aws
 region: us-west-2
 stateBucket: s3://skiff-state-prod
 kmsKey: alias/skiff-prod-state
 
 commands:
-  dryRun: skiff bootstrap aws --env prod --region us-west-2 --bucket skiff-state-prod --dry-run
-  terraform: skiff bootstrap aws --env prod --region us-west-2 --bucket skiff-state-prod --emit terraform
+  dryRun: skiff bootstrap aws --env prod --class production --region us-west-2 --bucket skiff-state-prod --dry-run
+  terraform: skiff bootstrap aws --env prod --class production --region us-west-2 --bucket skiff-state-prod --emit terraform

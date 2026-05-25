@@ -44,9 +44,11 @@ type ReleaseTrustKey = schema.ReleaseTrustKey
 
 type AWSOptions struct {
 	Env                     string
+	EnvironmentClass        string
 	Region                  string
 	StateBucket             string
 	KMSAlias                string
+	DeveloperRole           string
 	DeployerRole            string
 	RunnerRole              string
 	SkiffdRole              string
@@ -138,12 +140,14 @@ type KMSKeySpec struct {
 }
 
 type IAMRoleSpec struct {
-	Name       string            `json:"name"`
-	Purpose    string            `json:"purpose"`
-	Trust      string            `json:"trust"`
-	PolicyName string            `json:"policy_name"`
-	Policy     PolicyDocument    `json:"policy"`
-	Tags       map[string]string `json:"tags,omitempty"`
+	Name                      string            `json:"name"`
+	Purpose                   string            `json:"purpose"`
+	Trust                     string            `json:"trust"`
+	TrustPolicy               PolicyDocument    `json:"trust_policy"`
+	MaxSessionDurationSeconds int32             `json:"max_session_duration_seconds,omitempty"`
+	PolicyName                string            `json:"policy_name"`
+	Policy                    PolicyDocument    `json:"policy"`
+	Tags                      map[string]string `json:"tags,omitempty"`
 }
 
 type BucketPolicySpec struct {
@@ -277,6 +281,10 @@ func PlanAWS(opts AWSOptions) (*AWSPlan, error) {
 	if err := validateAWSOptions(opts); err != nil {
 		return nil, err
 	}
+	releasePolicy, err := schema.DefaultEnvironmentReleasePolicy(opts.EnvironmentClass)
+	if err != nil {
+		return nil, err
+	}
 	companySlug := companySlugForNames(opts.CompanyName)
 	namePrefix := environmentNamePrefix(opts.Env, companySlug)
 	publicBaseDomain := publicBaseDomainForOptions(opts)
@@ -298,29 +306,33 @@ func PlanAWS(opts AWSOptions) (*AWSPlan, error) {
 	}
 	createdAt := canonical.Time(opts.Now)
 	tags := map[string]string{
-		"skiff.dev/env":     opts.Env,
-		"skiff.dev/managed": "true",
-		"skiff.dev/graph":   "environment/" + opts.Env,
+		"skiff.dev/env":               opts.Env,
+		"skiff.dev/environment-class": opts.EnvironmentClass,
+		"skiff.dev/managed":           "true",
+		"skiff.dev/graph":             "environment/" + opts.Env,
 	}
 	if companySlug != "" {
 		tags["skiff.dev/company"] = companySlug
 	}
 	roles := map[string]string{
-		"deployer": opts.DeployerRole,
-		"runner":   opts.RunnerRole,
-		"skiffd":   opts.SkiffdRole,
+		"developer": opts.DeveloperRole,
+		"deployer":  opts.DeployerRole,
+		"runner":    opts.RunnerRole,
+		"skiffd":    opts.SkiffdRole,
 	}
 	stateBucketURI := "s3://" + opts.StateBucket
 	root := EnvironmentRoot{
-		SchemaVersion: EnvironmentRootSchemaVersion,
-		Env:           opts.Env,
-		Provider:      ProviderAWS,
-		Region:        opts.Region,
-		StateBucket:   stateBucketURI,
-		KMSAlias:      opts.KMSAlias,
-		Roles:         roles,
-		CreatedAt:     createdAt,
-		UpdatedAt:     createdAt,
+		SchemaVersion:    EnvironmentRootSchemaVersion,
+		Env:              opts.Env,
+		EnvironmentClass: opts.EnvironmentClass,
+		Provider:         ProviderAWS,
+		Region:           opts.Region,
+		StateBucket:      stateBucketURI,
+		KMSAlias:         opts.KMSAlias,
+		Roles:            roles,
+		ReleasePolicy:    &releasePolicy,
+		CreatedAt:        createdAt,
+		UpdatedAt:        createdAt,
 	}
 	if opts.ReleaseSigningKeyID != "" && opts.ReleaseSigningPublicKey != "" {
 		root.ReleaseTrust = &ReleaseTrust{
@@ -389,9 +401,10 @@ func PlanAWS(opts AWSOptions) (*AWSPlan, error) {
 
 	bucketPolicy := StateBucketPolicy(opts.StateBucket)
 	iamPolicies := map[string]PolicyDocument{
-		"deployer": DeployerPolicy(opts.StateBucket, opts.KMSAlias),
-		"runner":   RunnerPolicy(opts.StateBucket, opts.KMSAlias),
-		"skiffd":   SkiffdPolicy(opts.StateBucket, opts.KMSAlias),
+		"developer": DeveloperPolicy(opts.StateBucket, opts.KMSAlias),
+		"deployer":  DeployerPolicy(opts.StateBucket, opts.KMSAlias),
+		"runner":    RunnerPolicy(opts.StateBucket, opts.KMSAlias),
+		"skiffd":    SkiffdPolicy(opts.StateBucket, opts.KMSAlias),
 	}
 	if releaseSigningAlias := releaseSigningKMSAlias(opts.ReleaseSigningKeyRef); releaseSigningAlias != "" {
 		iamPolicies["deployer"] = withReleaseSigningKMSAccess(iamPolicies["deployer"], releaseSigningAlias)
@@ -424,6 +437,7 @@ func PlanAWS(opts AWSOptions) (*AWSPlan, error) {
 				"tags":                tags,
 			},
 		},
+		iamResource("iam-role", opts.DeveloperRole, "developer", tags),
 		iamResource("iam-role", opts.DeployerRole, "deployer", tags),
 		iamResource("iam-role", opts.RunnerRole, "runner", tags),
 		iamResource("iam-role", opts.SkiffdRole, "skiffd", tags),
@@ -542,6 +556,7 @@ func ApplyAWS(ctx context.Context, client AWSBootstrapClient, plan *AWSPlan) (*A
 		return nil, err
 	}
 	roleSpecs := []IAMRoleSpec{
+		roleSpec("developer", plan.RootConfig.Roles["developer"], plan.IAMPolicies["developer"], plan.Env),
 		roleSpec("deployer", plan.RootConfig.Roles["deployer"], plan.IAMPolicies["deployer"], plan.Env),
 		roleSpec("runner", plan.RootConfig.Roles["runner"], plan.IAMPolicies["runner"], plan.Env),
 		roleSpec("skiffd", plan.RootConfig.Roles["skiffd"], plan.IAMPolicies["skiffd"], plan.Env),
@@ -609,6 +624,7 @@ func ApplyAWS(ctx context.Context, client AWSBootstrapClient, plan *AWSPlan) (*A
 
 func (opts AWSOptions) withDefaults() AWSOptions {
 	opts.Env = strings.TrimSpace(opts.Env)
+	opts.EnvironmentClass = strings.TrimSpace(opts.EnvironmentClass)
 	opts.Region = strings.TrimSpace(opts.Region)
 	opts.StateBucket = strings.TrimSpace(opts.StateBucket)
 	opts.Network = strings.TrimSpace(opts.Network)
@@ -643,6 +659,9 @@ func (opts AWSOptions) withDefaults() AWSOptions {
 	if opts.Ingress == "" {
 		opts.Ingress = IngressPrivate
 	}
+	if opts.EnvironmentClass == "" {
+		opts.EnvironmentClass = schema.EnvironmentClassDevelopment
+	}
 	defaultedRunnerAMISSMParameter := false
 	if opts.RunnerAMIID == "" && opts.RunnerAMISSMParameter == "" {
 		opts.RunnerAMISSMParameter = DefaultRunnerAMISSMParameter
@@ -659,6 +678,9 @@ func (opts AWSOptions) withDefaults() AWSOptions {
 	}
 	if opts.KMSAlias == "" && opts.Env != "" {
 		opts.KMSAlias = "alias/skiff-" + opts.Env + "-state"
+	}
+	if opts.DeveloperRole == "" && opts.Env != "" {
+		opts.DeveloperRole = "skiff-" + opts.Env + "-developer"
 	}
 	if opts.DeployerRole == "" && opts.Env != "" {
 		opts.DeployerRole = "skiff-" + opts.Env + "-deployer"
@@ -678,6 +700,11 @@ func validateAWSOptions(opts AWSOptions) error {
 	}
 	if opts.Region == "" {
 		return errors.New("region is required")
+	}
+	if normalized, err := schema.NormalizeEnvironmentClass(opts.EnvironmentClass); err != nil {
+		return err
+	} else if normalized != opts.EnvironmentClass {
+		return errors.New("environment class must be one of production, staging, development, or sandbox")
 	}
 	if err := validateBucketName(opts.StateBucket); err != nil {
 		return err
@@ -743,9 +770,10 @@ func validateAWSOptions(opts AWSOptions) error {
 		}
 	}
 	for field, value := range map[string]string{
-		"deployer_role": opts.DeployerRole,
-		"runner_role":   opts.RunnerRole,
-		"skiffd_role":   opts.SkiffdRole,
+		"developer_role": opts.DeveloperRole,
+		"deployer_role":  opts.DeployerRole,
+		"runner_role":    opts.RunnerRole,
+		"skiffd_role":    opts.SkiffdRole,
 	} {
 		if err := validateIAMName(field, value); err != nil {
 			return err
@@ -1048,11 +1076,18 @@ func validateIAMName(field, value string) error {
 }
 
 func iamResource(kind, name, purpose string, tags map[string]string) AWSResourcePlan {
+	summary := "least-privilege " + purpose + " role and inline policy template"
+	if purpose == "developer" {
+		summary = "read-only developer role for Skiff state and resource inspection"
+	}
+	if purpose == "deployer" {
+		summary = "write role requiring temporary auditable STS escalation"
+	}
 	return AWSResourcePlan{
 		Kind:    kind,
 		Name:    name,
 		Action:  "create_or_update",
-		Summary: "least-privilege " + purpose + " role and inline policy template",
+		Summary: summary,
 		Settings: map[string]any{
 			"purpose": purpose,
 			"tags":    cloneStringMap(tags),
@@ -1198,13 +1233,23 @@ func managedNetworkResources(opts AWSOptions, tags map[string]string) []AWSResou
 }
 
 func roleSpec(purpose, name string, policy PolicyDocument, env string) IAMRoleSpec {
+	tags := tagsForEnv(env)
+	tags["skiff.dev/access"] = purpose
+	trustPolicy := DefaultAssumeRoleTrustPolicy()
+	var maxSession int32
+	if purpose == "deployer" {
+		trustPolicy = EscalatedWriteTrustPolicy()
+		maxSession = 3600
+	}
 	return IAMRoleSpec{
-		Name:       name,
-		Purpose:    purpose,
-		Trust:      purpose,
-		PolicyName: "skiff-" + env + "-" + purpose,
-		Policy:     policy,
-		Tags:       tagsForEnv(env),
+		Name:                      name,
+		Purpose:                   purpose,
+		Trust:                     purpose,
+		TrustPolicy:               trustPolicy,
+		MaxSessionDurationSeconds: maxSession,
+		PolicyName:                "skiff-" + env + "-" + purpose,
+		Policy:                    policy,
+		Tags:                      tags,
 	}
 }
 
@@ -1445,6 +1490,9 @@ func tagsForPlan(plan *AWSPlan) map[string]string {
 		return nil
 	}
 	tags := tagsForEnv(plan.Env)
+	if plan.RootConfig.EnvironmentClass != "" {
+		tags["skiff.dev/environment-class"] = plan.RootConfig.EnvironmentClass
+	}
 	if plan.CompanySlug != "" {
 		tags["skiff.dev/company"] = plan.CompanySlug
 	}
@@ -1466,6 +1514,30 @@ func sortedPolicyNames(policies map[string]PolicyDocument) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func roleSpecsForPlan(plan *AWSPlan) []IAMRoleSpec {
+	if plan == nil {
+		return nil
+	}
+	specs := make([]IAMRoleSpec, 0, len(plan.IAMPolicies))
+	for _, purpose := range sortedPolicyNames(plan.IAMPolicies) {
+		specs = append(specs, roleSpec(purpose, plan.RootConfig.Roles[purpose], plan.IAMPolicies[purpose], plan.Env))
+	}
+	return specs
+}
+
+func terraformTags(tags map[string]string) []terraformTag {
+	keys := make([]string, 0, len(tags))
+	for key := range tags {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]terraformTag, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, terraformTag{Key: key, Value: tags[key]})
+	}
+	return out
 }
 
 func cloneStringMap(values map[string]string) map[string]string {
@@ -1499,6 +1571,10 @@ func cloneEnvironmentRoot(root EnvironmentRoot) EnvironmentRoot {
 	if root.Runner != nil {
 		runner := *root.Runner
 		out.Runner = &runner
+	}
+	if root.ReleasePolicy != nil {
+		policy := *root.ReleasePolicy
+		out.ReleasePolicy = &policy
 	}
 	return out
 }

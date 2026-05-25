@@ -23,6 +23,10 @@ func DeployerPolicy(bucket, kmsAlias string) PolicyDocument {
 	return securitypolicy.DeployerPolicy(bucket, kmsAlias)
 }
 
+func DeveloperPolicy(bucket, kmsAlias string) PolicyDocument {
+	return securitypolicy.DeveloperPolicy(bucket, kmsAlias)
+}
+
 func RunnerPolicy(bucket, kmsAlias string) PolicyDocument {
 	return securitypolicy.RunnerPolicy(bucket, kmsAlias)
 }
@@ -33,6 +37,14 @@ func SkiffdPolicy(bucket, kmsAlias string) PolicyDocument {
 
 func BreakGlassPolicy(bucket, kmsAlias string) PolicyDocument {
 	return securitypolicy.BreakGlassPolicy(bucket, kmsAlias)
+}
+
+func DefaultAssumeRoleTrustPolicy() PolicyDocument {
+	return securitypolicy.DefaultAssumeRoleTrustPolicy()
+}
+
+func EscalatedWriteTrustPolicy() PolicyDocument {
+	return securitypolicy.EscalatedWriteTrustPolicy()
 }
 
 func PolicyJSON(policy PolicyDocument) (string, error) {
@@ -56,12 +68,23 @@ func TerraformAWS(plan *AWSPlan) (string, error) {
 		return "", err
 	}
 	var policyVars []terraformPolicy
-	for _, name := range sortedPolicyNames(plan.IAMPolicies) {
-		body, err := PolicyJSON(plan.IAMPolicies[name])
+	for _, spec := range roleSpecsForPlan(plan) {
+		body, err := PolicyJSON(spec.Policy)
 		if err != nil {
 			return "", err
 		}
-		policyVars = append(policyVars, terraformPolicy{Name: name, JSON: body})
+		trust, err := PolicyJSON(spec.TrustPolicy)
+		if err != nil {
+			return "", err
+		}
+		policyVars = append(policyVars, terraformPolicy{
+			Name:                      spec.Purpose,
+			RoleName:                  spec.Name,
+			JSON:                      body,
+			TrustJSON:                 trust,
+			MaxSessionDurationSeconds: spec.MaxSessionDurationSeconds,
+			Tags:                      terraformTags(spec.Tags),
+		})
 	}
 	data := struct {
 		Plan                           *AWSPlan
@@ -125,8 +148,17 @@ func AWSTeardownScript(plan *AWSPlan) (string, error) {
 }
 
 type terraformPolicy struct {
-	Name string
-	JSON string
+	Name                      string
+	RoleName                  string
+	JSON                      string
+	TrustJSON                 string
+	MaxSessionDurationSeconds int32
+	Tags                      []terraformTag
+}
+
+type terraformTag struct {
+	Key   string
+	Value string
 }
 
 //go:embed templates/aws-bootstrap.tf.tmpl

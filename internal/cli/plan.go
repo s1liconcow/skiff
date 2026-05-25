@@ -87,7 +87,7 @@ func runPlan(binary string, args []string, root rootOptions, stdout, stderr io.W
 	if err != nil {
 		return writeSpecError(binary, "SPEC_DECODE_FAILED", *format, *traceID, err, nil, stdout, stderr)
 	}
-	compileOpts, err := compilerOptionsForDocument(*doc, packageFlags, true)
+	compileOpts, err := compilerOptionsForDocumentWithConfig(*doc, packageFlags, true, loaded.Config)
 	if err != nil {
 		var validation spec.ValidationError
 		if errors.As(err, &validation) {
@@ -156,16 +156,17 @@ func runPlan(binary string, args []string, root rootOptions, stdout, stderr io.W
 
 func splitPlanArgs(args []string) ([]string, []string, error) {
 	valueFlags := map[string]bool{
-		"cache":    true,
-		"file":     true,
-		"format":   true,
-		"config":   true,
-		"context":  true,
-		"lockfile": true,
-		"provider": true,
-		"region":   true,
-		"state":    true,
-		"trace-id": true,
+		"cache":             true,
+		"environment-class": true,
+		"file":              true,
+		"format":            true,
+		"config":            true,
+		"context":           true,
+		"lockfile":          true,
+		"provider":          true,
+		"region":            true,
+		"state":             true,
+		"trace-id":          true,
 	}
 	return splitArgs(args, valueFlags)
 }

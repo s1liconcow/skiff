@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 
@@ -46,7 +47,7 @@ type rootOptions struct {
 }
 
 func parseRootArgs(args []string) (rootOptions, error) {
-	root := rootOptions{Format: "human"}
+	root := rootOptions{Format: "human", TraceID: strings.TrimSpace(os.Getenv("SKIFF_TRACE_ID"))}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {

@@ -15,6 +15,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/kms v1.51.1
 	github.com/aws/aws-sdk-go-v2/service/route53 v1.62.7
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.101.0
+	github.com/aws/aws-sdk-go-v2/service/sts v1.42.1
 	github.com/aws/smithy-go v1.25.1
 	github.com/charmbracelet/bubbles v0.20.0
 	github.com/charmbracelet/bubbletea v1.1.0
@@ -38,7 +39,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/signin v1.0.11 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.30.17 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.21 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sts v1.42.1 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/x/ansi v0.3.2 // indirect

@@ -426,14 +426,15 @@ resource "aws_route53_record" "skiff_public_wildcard_alias" {
 {{ range .Policies }}
 resource "aws_iam_role" "skiff_{{ .Name }}" {
   name = "{{ index $.Plan.RootConfig.Roles .Name }}"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = { AWS = "*" }
-      Action = "sts:AssumeRole"
-    }]
-  })
+  assume_role_policy = <<TRUST
+{{ .TrustJSON }}
+TRUST
+{{ if .MaxSessionDurationSeconds }}
+  max_session_duration = {{ .MaxSessionDurationSeconds }}
+{{ end }}
+  tags = {
+{{ range .Tags }}    "{{ .Key }}" = "{{ .Value }}"
+{{ end }}  }
 }
 
 resource "aws_iam_role_policy" "skiff_{{ .Name }}" {
@@ -452,15 +453,23 @@ resource "aws_s3_object" "skiff_env_root" {
   content = jsonencode({
     schema_version = "{{ .Plan.RootConfig.SchemaVersion }}"
     env            = "{{ .Plan.Env }}"
+    environment_class = "{{ .Plan.RootConfig.EnvironmentClass }}"
     provider       = "{{ .Plan.Provider }}"
     region         = "{{ .Plan.Region }}"
     state_bucket   = "{{ .Plan.StateBucketURI }}"
     kms_alias      = "{{ .Plan.KMSAlias }}"
     roles = {
+      developer = aws_iam_role.skiff_developer.arn
       deployer = aws_iam_role.skiff_deployer.arn
       runner   = aws_iam_role.skiff_runner.arn
       skiffd   = aws_iam_role.skiff_skiffd.arn
     }
+{{ if .Plan.RootConfig.ReleasePolicy }}
+    release_policy = {
+      require_signed_releases = {{ .Plan.RootConfig.ReleasePolicy.RequireSignedReleases }}
+      allow_unsigned_code     = {{ .Plan.RootConfig.ReleasePolicy.AllowUnsignedCode }}
+    }
+{{ end }}
 {{ if .ManagedNetwork }}
     network = {
       mode               = "managed"

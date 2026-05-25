@@ -63,6 +63,7 @@ func Load(opts LoadOptions) (Loaded, error) {
 func applyConfig(loaded *Loaded, cfg Config, source string) {
 	values := map[string]string{
 		FieldEnv:                             cfg.Env,
+		FieldEnvironmentClass:                cfg.EnvironmentClass,
 		FieldProvider:                        cfg.Provider,
 		FieldRegion:                          cfg.Region,
 		FieldStateBucket:                     cfg.StateBucket,
@@ -78,12 +79,17 @@ func applyConfig(loaded *Loaded, cfg Config, source string) {
 		FieldRuntimeManifestKey:              cfg.RuntimeManifestKey,
 		FieldReleaseSigningKeyID:             cfg.ReleaseSigningKeyID,
 		FieldReleaseSigningKeyRef:            cfg.ReleaseSigningKeyRef,
+		FieldWriteRoleARN:                    cfg.WriteRoleARN,
 		FieldAWSLiveApply:                    boolConfigValue(cfg.AWSLiveApply),
 		FieldAWSVPCID:                        cfg.AWSVPCID,
 		FieldAWSSubnetIDs:                    strings.Join(cfg.AWSSubnetIDs, ","),
 		FieldAWSAMIID:                        cfg.AWSAMIID,
 		FieldAWSALBListenerARN:               cfg.AWSALBListenerARN,
 		FieldAWSLoadBalancerSecurityGroupRef: cfg.AWSLoadBalancerSecurityGroupRef,
+	}
+	if cfg.ReleasePolicy != nil {
+		values[FieldRequireSignedReleases] = strconv.FormatBool(cfg.ReleasePolicy.RequireSignedReleases)
+		values[FieldAllowUnsignedCode] = strconv.FormatBool(cfg.ReleasePolicy.AllowUnsignedCode)
 	}
 	if cfg.StatefulGroup != "" {
 		values[FieldStatefulGroup] = cfg.StatefulGroup
@@ -113,6 +119,8 @@ func applyValues(loaded *Loaded, values map[string]string, source string) {
 		switch field {
 		case FieldEnv:
 			loaded.Config.Env = value
+		case FieldEnvironmentClass:
+			loaded.Config.EnvironmentClass = strings.TrimSpace(value)
 		case FieldProvider:
 			loaded.Config.Provider = value
 		case FieldRegion:
@@ -161,6 +169,24 @@ func applyValues(loaded *Loaded, values map[string]string, source string) {
 			loaded.Config.ReleaseSigningKeyID = strings.TrimSpace(value)
 		case FieldReleaseSigningKeyRef:
 			loaded.Config.ReleaseSigningKeyRef = strings.TrimSpace(value)
+		case FieldRequireSignedReleases:
+			parsed, err := strconv.ParseBool(value)
+			if err == nil {
+				if loaded.Config.ReleasePolicy == nil {
+					loaded.Config.ReleasePolicy = &ReleasePolicy{}
+				}
+				loaded.Config.ReleasePolicy.RequireSignedReleases = parsed
+			}
+		case FieldAllowUnsignedCode:
+			parsed, err := strconv.ParseBool(value)
+			if err == nil {
+				if loaded.Config.ReleasePolicy == nil {
+					loaded.Config.ReleasePolicy = &ReleasePolicy{}
+				}
+				loaded.Config.ReleasePolicy.AllowUnsignedCode = parsed
+			}
+		case FieldWriteRoleARN:
+			loaded.Config.WriteRoleARN = strings.TrimSpace(value)
 		case FieldAWSLiveApply:
 			parsed, err := strconv.ParseBool(value)
 			if err == nil {
@@ -279,6 +305,8 @@ func normalizeFileField(key string) (string, error) {
 	switch key {
 	case "env":
 		return FieldEnv, nil
+	case "environment_class", "environmentClass":
+		return FieldEnvironmentClass, nil
 	case "provider":
 		return FieldProvider, nil
 	case "region":
@@ -309,6 +337,12 @@ func normalizeFileField(key string) (string, error) {
 		return FieldReleaseSigningKeyID, nil
 	case "release_signing_key_ref", "releaseSigningKeyRef":
 		return FieldReleaseSigningKeyRef, nil
+	case "require_signed_releases", "requireSignedReleases":
+		return FieldRequireSignedReleases, nil
+	case "allow_unsigned_code", "allowUnsignedCode":
+		return FieldAllowUnsignedCode, nil
+	case "write_role_arn", "writeRoleARN", "writeRoleArn":
+		return FieldWriteRoleARN, nil
 	case "stateful_group", "statefulGroup":
 		return FieldStatefulGroup, nil
 	case "stateful_member", "statefulMember":
@@ -341,6 +375,7 @@ func normalizeFileField(key string) (string, error) {
 func valuesFromEnv(env map[string]string) map[string]string {
 	return map[string]string{
 		FieldEnv:                             env["SKIFF_ENV"],
+		FieldEnvironmentClass:                env["SKIFF_ENVIRONMENT_CLASS"],
 		FieldProvider:                        env["SKIFF_PROVIDER"],
 		FieldRegion:                          env["SKIFF_REGION"],
 		FieldStateBucket:                     env["SKIFF_STATE_BUCKET"],
@@ -356,6 +391,9 @@ func valuesFromEnv(env map[string]string) map[string]string {
 		FieldRuntimeManifestKey:              env["SKIFF_RUNTIME_MANIFEST_KEY"],
 		FieldReleaseSigningKeyID:             env["SKIFF_RELEASE_SIGNING_KEY_ID"],
 		FieldReleaseSigningKeyRef:            env["SKIFF_RELEASE_SIGNING_KEY_REF"],
+		FieldRequireSignedReleases:           env["SKIFF_REQUIRE_SIGNED_RELEASES"],
+		FieldAllowUnsignedCode:               env["SKIFF_ALLOW_UNSIGNED_CODE"],
+		FieldWriteRoleARN:                    firstNonEmptyEnv(env, "SKIFF_WRITE_ROLE_ARN", "SKIFF_DEPLOYER_ROLE_ARN"),
 		FieldStatefulGroup:                   env["SKIFF_STATEFUL_GROUP"],
 		FieldStatefulMember:                  env["SKIFF_STATEFUL_MEMBER"],
 		FieldStatefulGeneration:              env["SKIFF_STATEFUL_GENERATION"],
@@ -388,6 +426,15 @@ func splitCommaValues(value string) []string {
 		}
 	}
 	return out
+}
+
+func firstNonEmptyEnv(env map[string]string, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(env[key]); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func environ() map[string]string {
