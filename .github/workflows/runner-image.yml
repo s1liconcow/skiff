@@ -52,7 +52,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Check out release ref
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
@@ -81,7 +81,7 @@ jobs:
         uses: hashicorp/setup-packer@v3
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ inputs.aws_role_arn }}
           aws-region: ${{ inputs.region }}
