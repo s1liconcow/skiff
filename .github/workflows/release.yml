@@ -38,7 +38,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: Check out release ref
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 0
@@ -81,7 +81,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
